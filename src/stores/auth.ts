@@ -3,12 +3,39 @@ import { ref, computed } from 'vue'
 import { fetchViewerAndRequestedPRs } from '@/services/github'
 import { getGhAuthToken, isTauriRuntime } from '@/services/native'
 import { loadGitHubPat, saveGitHubPat } from '@/services/storage'
-import type { GitHubUser, PRSummary } from '@/types/pr'
+import type { GitHubUser, PRFilterMode, PRSummary } from '@/types/pr'
+
+export const PR_FILTER_OPTIONS: ReadonlyArray<{
+  value: PRFilterMode
+  label: string
+  heading: string
+  emptyMessage: string
+}> = [
+  {
+    value: 'review-requested',
+    label: 'Review Requested',
+    heading: 'Pending Your Review',
+    emptyMessage: 'Inbox zero — no PRs awaiting your review.',
+  },
+  {
+    value: 'authored',
+    label: 'My PRs',
+    heading: 'Your Open Pull Requests',
+    emptyMessage: 'No open pull requests authored by you.',
+  },
+  {
+    value: 'involves',
+    label: 'All Involved',
+    heading: 'All Involved Pull Requests',
+    emptyMessage: 'No open pull requests involving you.',
+  },
+]
 
 export const useAuthStore = defineStore('auth', () => {
   const pat = ref<string>('')
   const viewer = ref<GitHubUser | null>(null)
   const requestedPRs = ref<PRSummary[]>([])
+  const prFilter = ref<PRFilterMode>('review-requested')
   const isLoading = ref(false)
   const error = ref<string | null>(null)
 
@@ -45,7 +72,10 @@ export const useAuthStore = defineStore('auth', () => {
     isLoading.value = true
     error.value = null
     try {
-      const { viewer: user, requestedPRs: prs } = await fetchViewerAndRequestedPRs(token)
+      const { viewer: user, requestedPRs: prs } = await fetchViewerAndRequestedPRs(
+        token,
+        prFilter.value,
+      )
       pat.value = token
       viewer.value = user
       requestedPRs.value = prs
@@ -66,6 +96,14 @@ export const useAuthStore = defineStore('auth', () => {
     await verifyAndLoadProfile(pat.value)
   }
 
+  async function setPrFilter(mode: PRFilterMode): Promise<void> {
+    if (prFilter.value === mode) return
+    prFilter.value = mode
+    if (pat.value) {
+      await refreshRequestedPRs()
+    }
+  }
+
   async function clearPat(): Promise<void> {
     pat.value = ''
     viewer.value = null
@@ -78,6 +116,7 @@ export const useAuthStore = defineStore('auth', () => {
     pat,
     viewer,
     requestedPRs,
+    prFilter,
     isLoading,
     error,
     isAuthenticated,
@@ -85,6 +124,7 @@ export const useAuthStore = defineStore('auth', () => {
     verifyAndLoadProfile,
     signInWithGh,
     refreshRequestedPRs,
+    setPrFilter,
     clearPat,
   }
 })

@@ -12,13 +12,17 @@ import {
   Sparkles,
 } from '@lucide/vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useAuthStore } from '@/stores/auth'
+import { PR_FILTER_OPTIONS, useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore } from '@/stores/settings'
 
 const auth = useAuthStore()
 const review = useReviewStore()
 const settings = useSettingsStore()
+
+const activeFilterOption = computed(
+  () => PR_FILTER_OPTIONS.find((opt) => opt.value === auth.prFilter) ?? PR_FILTER_OPTIONS[0],
+)
 
 const urlInput = ref('')
 const lastRefreshedAt = ref<Date | null>(auth.isAuthenticated ? new Date() : null)
@@ -181,12 +185,12 @@ onBeforeUnmount(() => {
           <p v-if="review.prError" class="mt-2 text-xs text-rose-400">{{ review.prError }}</p>
         </section>
 
-        <!-- Pending Your Review -->
+        <!-- Pull Request List -->
         <section class="space-y-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="flex items-center gap-2">
               <GitPullRequest class="h-4 w-4 text-blue-400" />
-              <h2 class="text-sm font-semibold text-slate-100">Pending Your Review</h2>
+              <h2 class="text-sm font-semibold text-slate-100">{{ activeFilterOption.heading }}</h2>
               <span
                 v-if="auth.isAuthenticated"
                 class="rounded-full bg-canvas-elevated px-2 py-0.5 font-mono text-[11px] text-slate-300"
@@ -195,17 +199,44 @@ onBeforeUnmount(() => {
               </span>
             </div>
 
-            <div
-              v-if="auth.isAuthenticated"
-              class="flex items-center gap-2 text-[11px] text-slate-500"
-            >
-              <Clock class="h-3 w-3" />
-              <span>
-                {{ autoRefreshLabel }}
-                <template v-if="lastRefreshedAt && settings.inboxAutoRefreshSeconds > 0">
-                  · Updated {{ lastRefreshedAt.toLocaleTimeString() }}
-                </template>
-              </span>
+            <div class="flex flex-wrap items-center gap-3">
+              <div
+                v-if="auth.isAuthenticated"
+                class="inline-flex rounded-lg border border-border bg-canvas-inset p-0.5"
+                role="tablist"
+                aria-label="Filter pull requests"
+              >
+                <button
+                  v-for="opt in PR_FILTER_OPTIONS"
+                  :key="opt.value"
+                  type="button"
+                  role="tab"
+                  :aria-selected="auth.prFilter === opt.value"
+                  :disabled="auth.isLoading"
+                  class="rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-60"
+                  :class="
+                    auth.prFilter === opt.value
+                      ? 'bg-canvas-elevated text-slate-100 shadow-xs'
+                      : 'text-slate-400 hover:text-slate-200'
+                  "
+                  @click="auth.setPrFilter(opt.value)"
+                >
+                  {{ opt.label }}
+                </button>
+              </div>
+
+              <div
+                v-if="auth.isAuthenticated"
+                class="flex items-center gap-2 text-[11px] text-slate-500"
+              >
+                <Clock class="h-3 w-3" />
+                <span>
+                  {{ autoRefreshLabel }}
+                  <template v-if="lastRefreshedAt && settings.inboxAutoRefreshSeconds > 0">
+                    · Updated {{ lastRefreshedAt.toLocaleTimeString() }}
+                  </template>
+                </span>
+              </div>
             </div>
           </div>
 
@@ -245,7 +276,7 @@ onBeforeUnmount(() => {
             v-else-if="auth.requestedPRs.length === 0"
             class="rounded-xl border border-border bg-canvas-subtle/60 p-8 text-center"
           >
-            <p class="text-sm font-medium text-slate-300">Inbox zero — no PRs awaiting your review.</p>
+            <p class="text-sm font-medium text-slate-300">{{ activeFilterOption.emptyMessage }}</p>
             <p class="mt-1 text-xs text-slate-500">
               Paste any PR URL above or try the offline demo tour.
             </p>

@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import { FolderGit2, Loader2, RefreshCw, Sparkles, X } from '@lucide/vue'
-import { ref } from 'vue'
-import { useAuthStore } from '@/stores/auth'
+import { computed, ref } from 'vue'
+import { PR_FILTER_OPTIONS, useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore } from '@/stores/settings'
 
 const auth = useAuthStore()
 const review = useReviewStore()
 const settings = useSettingsStore()
+
+const activeFilterOption = computed(
+  () => PR_FILTER_OPTIONS.find((opt) => opt.value === auth.prFilter) ?? PR_FILTER_OPTIONS[0],
+)
 
 const urlInput = ref('')
 
@@ -67,10 +71,34 @@ async function handleLoadDemo() {
           <p v-if="review.prError" class="text-xs text-rose-400">{{ review.prError }}</p>
         </div>
 
-        <!-- Requested Reviews -->
+        <!-- Pull Requests -->
         <div class="space-y-2">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-medium text-slate-300">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div
+              v-if="auth.isAuthenticated"
+              class="inline-flex rounded-lg border border-border bg-canvas-inset p-0.5"
+              role="tablist"
+              aria-label="Filter pull requests"
+            >
+              <button
+                v-for="opt in PR_FILTER_OPTIONS"
+                :key="opt.value"
+                type="button"
+                role="tab"
+                :aria-selected="auth.prFilter === opt.value"
+                :disabled="auth.isLoading"
+                class="rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors disabled:opacity-60"
+                :class="
+                  auth.prFilter === opt.value
+                    ? 'bg-canvas-elevated text-slate-100 shadow-xs'
+                    : 'text-slate-400 hover:text-slate-200'
+                "
+                @click="auth.setPrFilter(opt.value)"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
+            <span v-else class="text-xs font-medium text-slate-300">
               Requested for your review
             </span>
             <button
@@ -105,7 +133,7 @@ async function handleLoadDemo() {
             v-else-if="auth.requestedPRs.length === 0"
             class="rounded-lg border border-border-muted bg-canvas-inset p-4 text-center text-xs text-slate-500"
           >
-            No open PRs currently requesting your review.
+            {{ activeFilterOption.emptyMessage }}
           </div>
 
           <div v-else class="max-h-56 space-y-1.5 overflow-y-auto pr-1">

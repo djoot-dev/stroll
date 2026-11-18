@@ -8,6 +8,8 @@ export type ReviewEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'
 
 export type DiffSide = 'LEFT' | 'RIGHT'
 
+export type PRFilterMode = 'review-requested' | 'authored' | 'involves'
+
 export interface GitHubUser {
   login: string
   name?: string | null

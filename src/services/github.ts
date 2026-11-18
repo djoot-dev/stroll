@@ -6,6 +6,7 @@ import type {
   GitHubUser,
   PRCommit,
   PRFile,
+  PRFilterMode,
   PRSummary,
   PullRequestData,
   ReviewComment,
@@ -92,10 +93,20 @@ export function detectLanguage(path: string): string {
   return map[ext] ?? 'text'
 }
 
-export async function fetchViewerAndRequestedPRs(pat: string): Promise<{
+const PR_SEARCH_QUERIES: Record<PRFilterMode, string> = {
+  'review-requested': 'is:pr is:open review-requested:@me sort:updated-desc',
+  authored: 'is:pr is:open author:@me sort:updated-desc',
+  involves: 'is:pr is:open involves:@me sort:updated-desc',
+}
+
+export async function fetchViewerAndRequestedPRs(
+  pat: string,
+  filter: PRFilterMode = 'review-requested',
+): Promise<{
   viewer: GitHubUser
   requestedPRs: PRSummary[]
 }> {
+  const searchQuery = PR_SEARCH_QUERIES[filter]
   const query = `
     query ViewerAndRequestedPRs {
       viewer {
@@ -103,7 +114,7 @@ export async function fetchViewerAndRequestedPRs(pat: string): Promise<{
         name
         avatarUrl
       }
-      search(query: "is:pr is:open review-requested:@me sort:updated-desc", type: ISSUE, first: 20) {
+      search(query: "${searchQuery}", type: ISSUE, first: 20) {
         nodes {
           ... on PullRequest {
             id
