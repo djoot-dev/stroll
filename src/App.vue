@@ -17,11 +17,63 @@ import { useReviewStore } from '@/stores/review'
 const auth = useAuthStore()
 const review = useReviewStore()
 
+const SCROLL_STEP_PX = 80
+const SCROLL_SMOOTHING = 18
 const stepTransitionName = ref<'step-next' | 'step-prev'>('step-next')
+const previewScrollRef = ref<HTMLElement | null>(null)
+
+let targetScrollTop: number | null = null
+let scrollRafId: number | null = null
+let lastScrollFrameTime = 0
+
+function cancelSmoothScroll() {
+  if (scrollRafId !== null) {
+    cancelAnimationFrame(scrollRafId)
+    scrollRafId = null
+  }
+  targetScrollTop = null
+}
+
+function stepSmoothScroll(now: number) {
+  const el = previewScrollRef.value
+  if (!el || targetScrollTop === null) {
+    cancelSmoothScroll()
+    return
+  }
+
+  const dt = Math.min(0.05, Math.max(0.001, (now - lastScrollFrameTime) / 1000))
+  lastScrollFrameTime = now
+
+  const diff = targetScrollTop - el.scrollTop
+  if (Math.abs(diff) < 0.5) {
+    el.scrollTop = targetScrollTop
+    cancelSmoothScroll()
+    return
+  }
+
+  const factor = 1 - Math.exp(-SCROLL_SMOOTHING * dt)
+  el.scrollTop += diff * factor
+  scrollRafId = requestAnimationFrame(stepSmoothScroll)
+}
+
+function scrollPreviewBy(delta: number) {
+  const el = previewScrollRef.value
+  if (!el) return
+
+  const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight)
+  const base = targetScrollTop ?? el.scrollTop
+  targetScrollTop = Math.max(0, Math.min(maxScroll, base + delta))
+
+  if (scrollRafId === null) {
+    lastScrollFrameTime = performance.now()
+    scrollRafId = requestAnimationFrame(stepSmoothScroll)
+  }
+}
 
 watch(
   () => review.currentStepIndex,
   (nextIdx, prevIdx) => {
+    cancelSmoothScroll()
     stepTransitionName.value = nextIdx >= prevIdx ? 'step-next' : 'step-prev'
   },
 )
@@ -37,10 +89,16 @@ function handleKeydown(e: KeyboardEvent) {
   if (isEditableElement(e.target)) return
   if (e.metaKey || e.ctrlKey || e.altKey) return
 
-  if (e.key === 'j' || e.key === 'J' || e.key === 'ArrowRight') {
+  if (e.key === 'j' || e.key === 'J' || e.key === 'ArrowDown') {
+    e.preventDefault()
+    scrollPreviewBy(SCROLL_STEP_PX)
+  } else if (e.key === 'k' || e.key === 'K' || e.key === 'ArrowUp') {
+    e.preventDefault()
+    scrollPreviewBy(-SCROLL_STEP_PX)
+  } else if (e.key === 'l' || e.key === 'L' || e.key === 'ArrowRight') {
     e.preventDefault()
     review.nextStep()
-  } else if (e.key === 'k' || e.key === 'K' || e.key === 'ArrowLeft') {
+  } else if (e.key === 'h' || e.key === 'H' || e.key === 'ArrowLeft') {
     e.preventDefault()
     review.prevStep()
   } else if (e.key === 'm' || e.key === 'M') {
@@ -63,6 +121,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  cancelSmoothScroll()
   window.removeEventListener('keydown', handleKeydown)
 })
 </script>
@@ -85,7 +144,12 @@ onBeforeUnmount(() => {
       <div class="flex min-h-0 flex-1 overflow-hidden">
         <TourSidebar />
 
-        <main class="relative flex-1 overflow-y-auto overflow-x-hidden bg-canvas">
+        <main
+          ref="previewScrollRef"
+          class="relative flex-1 overflow-y-auto overflow-x-hidden bg-canvas"
+          @wheel="cancelSmoothScroll"
+          @pointerdown="cancelSmoothScroll"
+        >
           <template v-if="review.currentStep">
             <Transition :name="stepTransitionName" mode="out-in">
               <DiffViewer :key="review.currentStep.file.path" :step="review.currentStep" />

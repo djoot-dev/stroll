@@ -2,17 +2,33 @@
 import {
   CheckCircle2,
   ChevronsUpDown,
+  ChevronRight,
   MessageSquarePlus,
+  Sparkles,
   Trash2,
 } from '@lucide/vue'
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  buildPRSymbolIndex,
+  getEnclosingScope,
+  getReplacedLinesForAddedLine,
+  resolveHoverSymbol,
+  type HoverSymbolInfo,
+} from '@/services/codeContext'
 import { buildDiffSegments, type DiffLine } from '@/services/diffParser'
 import { highlightLinesWithCodeMirror, type HighlightSpan } from '@/services/highlighter'
 import { LAYER_META } from '@/services/readingOrder'
 import { useReviewStore } from '@/stores/review'
 import type { DiffSide, DraftComment, ReviewThread, TourStep } from '@/types/pr'
+import CodeHoverPopover from './CodeHoverPopover.vue'
 import CommentComposer from './CommentComposer.vue'
 import ReferencedContextCard from './ReferencedContextCard.vue'
+
+interface TokenPart {
+  text: string
+  className: string
+  ident: string | null
+}
 
 const props = defineProps<{
   step: TourStep
@@ -23,36 +39,105 @@ const review = useReviewStore()
 const expandedGaps = ref<Set<string>>(new Set())
 const activeComposer = ref<{ key: string; line: number; side: DiffSide } | null>(null)
 
+// Hover context & UX guardrails state
+const requireAltForHover = ref(false)
+const activeScopes = ref<string[]>([])
+const activeReplacedCount = ref(0)
+const hoverState = ref<{
+  info: HoverSymbolInfo
+  replacedLines: string[]
+  x: number
+  y: number
+} | null>(null)
+
+let hoverOpenTimer: number | null = null
+let hoverCloseTimer: number | null = null
+
+function clearHoverTimers() {
+  if (hoverOpenTimer !== null) {
+    window.clearTimeout(hoverOpenTimer)
+    hoverOpenTimer = null
+  }
+  if (hoverCloseTimer !== null) {
+    window.clearTimeout(hoverCloseTimer)
+    hoverCloseTimer = null
+  }
+}
+
+function closePopoverImmediately() {
+  clearHoverTimers()
+  hoverState.value = null
+}
+
 watch(
   () => props.step.file.path,
   () => {
     expandedGaps.value = new Set()
     activeComposer.value = null
+    activeScopes.value = []
+    activeReplacedCount.value = 0
+    closePopoverImmediately()
   },
 )
+
+function handleEsc(e: KeyboardEvent) {
+  if (e.key === 'Escape' && hoverState.value) {
+    closePopoverImmediately()
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleEsc)
+})
+
+onBeforeUnmount(() => {
+  clearHoverTimers()
+  window.removeEventListener('keydown', handleEsc)
+})
+
+const symbolIndex = computed(() => buildPRSymbolIndex(review.pr?.files ?? []))
 
 const segments = computed(() => buildDiffSegments(props.step.file))
 
 /**
- * Pre-computes CodeMirror 6 highlight spans for every DiffLine key in the current file.
+ * Pre-computes CodeMirror 6 highlight spans + resolvable PR identifier parts
+ * for every DiffLine key in the current file.
  */
-const highlightedByKey = computed(() => {
+const tokenizedByKey = computed(() => {
   const allLines: DiffLine[] = []
   for (const seg of segments.value) {
     allLines.push(...seg.lines)
   }
 
-  const spanMap = new Map<string, HighlightSpan[]>()
+  const partMap = new Map<string, TokenPart[]>()
   const tokenized = highlightLinesWithCodeMirror(
     allLines.map((l) => l.content),
     props.step.file.language,
   )
 
+  const index = symbolIndex.value
+
   allLines.forEach((line, idx) => {
-    spanMap.set(line.key, tokenized[idx] ?? [{ text: line.content || ' ', className: '' }])
+    const spans: HighlightSpan[] = tokenized[idx] ?? [{ text: line.content || ' ', className: '' }]
+    const parts: TokenPart[] = []
+
+    for (const sp of spans) {
+      const pieces = sp.text.split(/([A-Za-z_$][\w$]*)/g)
+      for (const piece of pieces) {
+        if (!piece) continue
+        const isIdent = piece.length >= 2 && /^[A-Za-z_$][\w$]*$/.test(piece) && index.has(piece)
+        parts.push({
+          text: piece,
+          className: sp.className,
+          ident: isIdent ? piece : null,
+        })
+      }
+    }
+
+    partMap.set(line.key, parts)
   })
 
-  return spanMap
+  return partMap
 })
 
 const fileThreads = computed<ReviewThread[]>(() =>
@@ -86,11 +171,78 @@ function toggleGap(gapId: string) {
 }
 
 function openComposer(line: DiffLine) {
+  closePopoverImmediately()
   activeComposer.value = {
     key: line.key,
     line: line.commentLine,
     side: line.commentSide,
   }
+}
+
+function handleLineMouseEnter(line: DiffLine, hunkLines: DiffLine[], lineIdx: number) {
+  const targetLine = line.newLineNumber ?? line.oldLineNumber ?? line.commentLine
+  activeScopes.value = getEnclosingScope(props.step.file, targetLine)
+  activeReplacedCount.value =
+    line.type === 'add' ? getReplacedLinesForAddedLine(hunkLines, lineIdx).length : 0
+}
+
+function handleIdentMouseEnter(
+  event: MouseEvent,
+  ident: string,
+  hunkLines: DiffLine[],
+  lineIdx: number,
+) {
+  if (requireAltForHover.value && !event.altKey) return
+
+  clearHoverTimers()
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  const replacedLines = getReplacedLinesForAddedLine(hunkLines, lineIdx)
+
+  hoverOpenTimer = window.setTimeout(() => {
+    const info = resolveHoverSymbol(
+      ident,
+      props.step.file,
+      review.pr?.files ?? [],
+      symbolIndex.value,
+    )
+    if (!info) return
+    hoverState.value = {
+      info,
+      replacedLines,
+      x: rect.left,
+      y: rect.bottom,
+    }
+  }, 250)
+}
+
+function handleIdentMouseLeave() {
+  if (hoverOpenTimer !== null) {
+    window.clearTimeout(hoverOpenTimer)
+    hoverOpenTimer = null
+  }
+  if (hoverState.value) {
+    hoverCloseTimer = window.setTimeout(() => {
+      hoverState.value = null
+    }, 150)
+  }
+}
+
+function handlePopoverMouseEnter() {
+  if (hoverCloseTimer !== null) {
+    window.clearTimeout(hoverCloseTimer)
+    hoverCloseTimer = null
+  }
+}
+
+function handlePopoverMouseLeave() {
+  hoverCloseTimer = window.setTimeout(() => {
+    hoverState.value = null
+  }, 140)
+}
+
+function handleJumpFromPopover(path: string) {
+  closePopoverImmediately()
+  review.goToFile(path)
 }
 
 async function handleCreateDraft(body: string) {
@@ -182,8 +334,38 @@ function statusBadgeClass(status: string): string {
 
     <!-- Isolated Diff Surface -->
     <div class="overflow-hidden rounded-lg border border-border bg-canvas-inset">
-      <div class="border-b border-border bg-canvas-subtle px-3 py-1.5 text-[11px] text-slate-400">
-        Click any line to add an inline review comment
+      <!-- Sticky Diff Context Toolbar (Enclosing Scope Breadcrumb + Hover Guardrail Toggle) -->
+      <div
+        class="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b border-border bg-canvas-subtle/95 px-3 py-1.5 text-[11px] text-slate-400 backdrop-blur-sm"
+      >
+        <div class="flex min-w-0 items-center gap-2">
+          <span class="shrink-0 text-slate-500">Click line to comment</span>
+          <template v-if="activeScopes.length > 0">
+            <span class="text-slate-600">·</span>
+            <div class="flex min-w-0 items-center gap-1 font-mono text-[11px] text-blue-300">
+              <template v-for="(sc, idx) in activeScopes" :key="sc">
+                <ChevronRight v-if="idx > 0" class="h-3 w-3 shrink-0 text-slate-600" />
+                <span class="truncate">{{ sc }}</span>
+              </template>
+            </div>
+          </template>
+          <span
+            v-if="activeReplacedCount > 0"
+            class="shrink-0 rounded border border-rose-500/30 bg-rose-500/10 px-1.5 py-0.2 font-mono text-[10px] text-rose-300"
+          >
+            Replaces -{{ activeReplacedCount }}
+          </span>
+        </div>
+
+        <button
+          class="inline-flex shrink-0 items-center gap-1 rounded border border-border bg-canvas px-2 py-0.5 text-[10.5px] text-slate-300 hover:bg-canvas-elevated"
+          :class="{ 'border-blue-500/40 text-blue-300': !requireAltForHover }"
+          title="Toggle whether symbol hover popovers open automatically (250ms delay) or only when holding Option/Alt"
+          @click="requireAltForHover = !requireAltForHover"
+        >
+          <Sparkles class="h-3 w-3" />
+          <span>{{ requireAltForHover ? 'Hover: ⌥ + Hover' : 'Hover: Auto' }}</span>
+        </button>
       </div>
 
       <div v-if="segments.length === 0" class="p-8 text-center text-xs text-slate-500">
@@ -213,9 +395,10 @@ function statusBadgeClass(status: string): string {
                 <span>Expanded unchanged context ({{ seg.lineCount }} lines)</span>
                 <button class="hover:text-slate-300" @click="toggleGap(seg.id)">Collapse</button>
               </div>
-              <template v-for="line in seg.lines" :key="line.key">
+              <template v-for="(line, lIdx) in seg.lines" :key="line.key">
                 <div
                   class="group flex cursor-pointer items-stretch hover:bg-slate-800/40"
+                  @mouseenter="handleLineMouseEnter(line, seg.lines, lIdx)"
                   @click="openComposer(line)"
                 >
                   <span class="w-12 shrink-0 select-none px-2 text-right text-[11px] text-slate-600">
@@ -227,14 +410,18 @@ function statusBadgeClass(status: string): string {
                   <span class="w-6 shrink-0 select-none text-center text-slate-600">
                     <MessageSquarePlus class="mx-auto mt-1 hidden h-3 w-3 text-blue-400 group-hover:block" />
                   </span>
-                  <pre class="flex-1 whitespace-pre pr-4 text-slate-300"><span
-                    v-for="(sp, sIdx) in highlightedByKey.get(line.key)"
-                    :key="sIdx"
-                    :class="sp.className"
-                  >{{ sp.text }}</span></pre>
+                  <pre class="flex-1 whitespace-pre pr-4 text-slate-300"><template
+                    v-for="(pt, pIdx) in tokenizedByKey.get(line.key)"
+                    :key="pIdx"
+                  ><span
+                    v-if="pt.ident"
+                    :class="[pt.className, 'cursor-help hover:underline hover:decoration-blue-400/70 hover:decoration-dotted']"
+                    @mouseenter="handleIdentMouseEnter($event, pt.ident, seg.lines, lIdx)"
+                    @mouseleave="handleIdentMouseLeave"
+                  >{{ pt.text }}</span><span v-else :class="pt.className">{{ pt.text }}</span></template></pre>
                 </div>
 
-                <!-- Inline Composer / Threads / Drafts -->
+                <!-- Inline Composer -->
                 <CommentComposer
                   v-if="activeComposer?.key === line.key"
                   :line="line.commentLine"
@@ -254,7 +441,7 @@ function statusBadgeClass(status: string): string {
               {{ seg.header }}
             </div>
 
-            <template v-for="line in seg.lines" :key="line.key">
+            <template v-for="(line, lIdx) in seg.lines" :key="line.key">
               <div
                 class="group flex cursor-pointer items-stretch"
                 :class="{
@@ -262,6 +449,7 @@ function statusBadgeClass(status: string): string {
                   'bg-rose-500/10 hover:bg-rose-500/15': line.type === 'del',
                   'hover:bg-slate-800/40': line.type === 'context',
                 }"
+                @mouseenter="handleLineMouseEnter(line, seg.lines, lIdx)"
                 @click="openComposer(line)"
               >
                 <span class="w-12 shrink-0 select-none px-2 text-right text-[11px] text-slate-500">
@@ -283,11 +471,15 @@ function statusBadgeClass(status: string): string {
                   </span>
                   <MessageSquarePlus class="mx-auto mt-1 hidden h-3 w-3 text-blue-400 group-hover:block" />
                 </span>
-                <pre class="flex-1 whitespace-pre pr-4 text-slate-200"><span
-                  v-for="(sp, sIdx) in highlightedByKey.get(line.key)"
-                  :key="sIdx"
-                  :class="sp.className"
-                >{{ sp.text }}</span></pre>
+                <pre class="flex-1 whitespace-pre pr-4 text-slate-200"><template
+                  v-for="(pt, pIdx) in tokenizedByKey.get(line.key)"
+                  :key="pIdx"
+                ><span
+                  v-if="pt.ident"
+                  :class="[pt.className, 'cursor-help hover:underline hover:decoration-blue-400/70 hover:decoration-dotted']"
+                  @mouseenter="handleIdentMouseEnter($event, pt.ident, seg.lines, lIdx)"
+                  @mouseleave="handleIdentMouseLeave"
+                >{{ pt.text }}</span><span v-else :class="pt.className">{{ pt.text }}</span></template></pre>
               </div>
 
               <!-- Existing GitHub Review Threads -->
@@ -346,5 +538,18 @@ function statusBadgeClass(status: string): string {
         </template>
       </div>
     </div>
+
+    <!-- Hover Context Popover -->
+    <CodeHoverPopover
+      v-if="hoverState"
+      :info="hoverState.info"
+      :replaced-lines="hoverState.replacedLines"
+      :x="hoverState.x"
+      :y="hoverState.y"
+      @mouseenter="handlePopoverMouseEnter"
+      @mouseleave="handlePopoverMouseLeave"
+      @close="closePopoverImmediately"
+      @jump-to-file="handleJumpFromPopover"
+    />
   </div>
 </template>
