@@ -191,14 +191,18 @@ export const useReviewStore = defineStore('review', () => {
     line: number,
     side: DiffSide,
     body: string,
+    startLine?: number,
+    startSide?: DiffSide,
   ): Promise<void> {
     if (!pr.value || !body.trim()) return
+    const isMultiline = startLine !== undefined && startLine !== line
     const draft: DraftComment = {
       id: `draft_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       prKey: prKey.value,
       path,
       line,
       side,
+      ...(isMultiline ? { startLine, startSide: startSide ?? side } : {}),
       body: body.trim(),
       createdAt: new Date().toISOString(),
     }
@@ -228,6 +232,8 @@ export const useReviewStore = defineStore('review', () => {
           path: d.path,
           line: d.line,
           side: d.side,
+          startLine: d.startLine,
+          startSide: d.startSide,
           isResolved: false,
           isOutdated: false,
           comments: [
@@ -282,6 +288,8 @@ export const useReviewStore = defineStore('review', () => {
             draft.line,
             draft.side,
             draft.body,
+            draft.startLine,
+            draft.startSide,
           )
           draft.syncedThreadId = threadId
         }

@@ -325,6 +325,8 @@ export async function fetchPullRequest(
               path
               line
               diffSide
+              startLine
+              startDiffSide
               isResolved
               isOutdated
               comments(first: 30) {
@@ -380,6 +382,8 @@ export async function fetchPullRequest(
             path: string
             line: number | null
             diffSide: DiffSide | null
+            startLine: number | null
+            startDiffSide: DiffSide | null
             isResolved: boolean
             isOutdated: boolean
             comments: {
@@ -446,6 +450,8 @@ export async function fetchPullRequest(
       path: t.path,
       line: t.line ?? 1,
       side: t.diffSide ?? 'RIGHT',
+      startLine: t.startLine,
+      startSide: t.startDiffSide,
       isResolved: t.isResolved,
       isOutdated: t.isOutdated,
       comments: t.comments.nodes.map((c) => ({
@@ -505,7 +511,10 @@ export async function addReviewThread(
   line: number,
   side: DiffSide,
   body: string,
+  startLine?: number,
+  startSide?: DiffSide,
 ): Promise<string> {
+  const isMultiline = startLine !== undefined && startLine !== line
   const mutation = `
     mutation AddReviewThread(
       $pullRequestId: ID!
@@ -513,6 +522,7 @@ export async function addReviewThread(
       $path: String!
       $line: Int!
       $side: DiffSide!
+      ${isMultiline ? '$startLine: Int!\n      $startSide: DiffSide!' : ''}
       $body: String!
     ) {
       addPullRequestReviewThread(
@@ -522,6 +532,7 @@ export async function addReviewThread(
           path: $path
           line: $line
           side: $side
+          ${isMultiline ? 'startLine: $startLine\n          startSide: $startSide' : ''}
           body: $body
         }
       ) {
@@ -539,6 +550,7 @@ export async function addReviewThread(
     path,
     line,
     side,
+    ...(isMultiline ? { startLine, startSide: startSide ?? side } : {}),
     body,
   })
   return data.addPullRequestReviewThread.thread.id

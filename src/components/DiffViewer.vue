@@ -37,7 +37,19 @@ const props = defineProps<{
 const review = useReviewStore()
 
 const expandedGaps = ref<Set<string>>(new Set())
-const activeComposer = ref<{ key: string; line: number; side: DiffSide } | null>(null)
+const activeComposer = ref<{
+  key: string
+  line: number
+  side: DiffSide
+  startLine?: number
+  startSide?: DiffSide
+  selectedKeys: Set<string>
+} | null>(null)
+
+// Drag-to-select multiline comment state
+const isDraggingSelection = ref(false)
+const dragAnchorKey = ref<string | null>(null)
+const dragFocusKey = ref<string | null>(null)
 
 // Hover context & UX guardrails state
 const requireAltForHover = ref(false)
@@ -88,16 +100,41 @@ function handleEsc(e: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener('keydown', handleEsc)
+  window.addEventListener('mouseup', handleWindowMouseUp)
 })
 
 onBeforeUnmount(() => {
   clearHoverTimers()
   window.removeEventListener('keydown', handleEsc)
+  window.removeEventListener('mouseup', handleWindowMouseUp)
 })
 
 const symbolIndex = computed(() => buildPRSymbolIndex(review.pr?.files ?? []))
 
 const segments = computed(() => buildDiffSegments(props.step.file))
+
+const visibleLines = computed<DiffLine[]>(() => {
+  const list: DiffLine[] = []
+  for (const seg of segments.value) {
+    if (seg.kind === 'gap' && !expandedGaps.value.has(seg.id)) continue
+    list.push(...seg.lines)
+  }
+  return list
+})
+
+const selectedLineKeys = computed<Set<string>>(() => {
+  if (isDraggingSelection.value && dragAnchorKey.value && dragFocusKey.value) {
+    const lines = visibleLines.value
+    const idxA = lines.findIndex((l) => l.key === dragAnchorKey.value)
+    const idxB = lines.findIndex((l) => l.key === dragFocusKey.value)
+    if (idxA !== -1 && idxB !== -1) {
+      const lo = Math.min(idxA, idxB)
+      const hi = Math.max(idxA, idxB)
+      return new Set(lines.slice(lo, hi + 1).map((l) => l.key))
+    }
+  }
+  return activeComposer.value?.selectedKeys ?? new Set()
+})
 
 /**
  * Pre-computes CodeMirror 6 highlight spans + resolvable PR identifier parts
@@ -170,16 +207,47 @@ function toggleGap(gapId: string) {
   expandedGaps.value = next
 }
 
-function openComposer(line: DiffLine) {
+function startLineDrag(line: DiffLine) {
   closePopoverImmediately()
+  isDraggingSelection.value = true
+  dragAnchorKey.value = line.key
+  dragFocusKey.value = line.key
+}
+
+function handleWindowMouseUp() {
+  if (!isDraggingSelection.value) return
+  const anchorKey = dragAnchorKey.value
+  const focusKey = dragFocusKey.value
+  isDraggingSelection.value = false
+  dragAnchorKey.value = null
+  dragFocusKey.value = null
+
+  if (!anchorKey || !focusKey) return
+  const lines = visibleLines.value
+  const idxA = lines.findIndex((l) => l.key === anchorKey)
+  const idxB = lines.findIndex((l) => l.key === focusKey)
+  if (idxA === -1 || idxB === -1) return
+
+  const lo = Math.min(idxA, idxB)
+  const hi = Math.max(idxA, idxB)
+  const startLineObj = lines[lo]
+  const endLineObj = lines[hi]
+  const keys = new Set(lines.slice(lo, hi + 1).map((l) => l.key))
+
   activeComposer.value = {
-    key: line.key,
-    line: line.commentLine,
-    side: line.commentSide,
+    key: endLineObj.key,
+    line: endLineObj.commentLine,
+    side: endLineObj.commentSide,
+    startLine: startLineObj.commentLine,
+    startSide: startLineObj.commentSide,
+    selectedKeys: keys,
   }
 }
 
 function handleLineMouseEnter(line: DiffLine, hunkLines: DiffLine[], lineIdx: number) {
+  if (isDraggingSelection.value) {
+    dragFocusKey.value = line.key
+  }
   const targetLine = line.newLineNumber ?? line.oldLineNumber ?? line.commentLine
   activeScopes.value = getEnclosingScope(props.step.file, targetLine)
   activeReplacedCount.value =
@@ -252,6 +320,8 @@ async function handleCreateDraft(body: string) {
     activeComposer.value.line,
     activeComposer.value.side,
     body,
+    activeComposer.value.startLine,
+    activeComposer.value.startSide,
   )
   activeComposer.value = null
 }
@@ -339,7 +409,7 @@ function statusBadgeClass(status: string): string {
         class="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b border-border bg-canvas-subtle/95 px-3 py-1.5 text-[11px] text-slate-400 backdrop-blur-sm"
       >
         <div class="flex min-w-0 items-center gap-2">
-          <span class="shrink-0 text-slate-500">Click line to comment</span>
+          <span class="shrink-0 text-slate-500">Click or drag lines to comment</span>
           <template v-if="activeScopes.length > 0">
             <span class="text-slate-600">·</span>
             <div class="flex min-w-0 items-center gap-1 font-mono text-[11px] text-blue-300">
@@ -372,7 +442,11 @@ function statusBadgeClass(status: string): string {
         No textual diff available for this file (binary or empty change).
       </div>
 
-      <div v-else class="overflow-x-auto font-mono text-[12.5px] leading-[1.55]">
+      <div
+        v-else
+        class="overflow-x-auto font-mono text-[12.5px] leading-[1.55]"
+        :class="{ 'select-none': isDraggingSelection }"
+      >
         <template v-for="seg in segments" :key="seg.id">
           <!-- Collapsed Unchanged Gap -->
           <template v-if="seg.kind === 'gap'">
@@ -397,9 +471,14 @@ function statusBadgeClass(status: string): string {
               </div>
               <template v-for="(line, lIdx) in seg.lines" :key="line.key">
                 <div
-                  class="group flex cursor-pointer items-stretch hover:bg-slate-800/40"
+                  class="group flex cursor-pointer items-stretch"
+                  :class="
+                    selectedLineKeys.has(line.key)
+                      ? 'bg-blue-500/20 ring-1 ring-inset ring-blue-500/40'
+                      : 'hover:bg-slate-800/40'
+                  "
+                  @mousedown.left="startLineDrag(line)"
                   @mouseenter="handleLineMouseEnter(line, seg.lines, lIdx)"
-                  @click="openComposer(line)"
                 >
                   <span class="w-12 shrink-0 select-none px-2 text-right text-[11px] text-slate-600">
                     {{ line.oldLineNumber ?? '' }}
@@ -424,8 +503,10 @@ function statusBadgeClass(status: string): string {
                 <!-- Inline Composer -->
                 <CommentComposer
                   v-if="activeComposer?.key === line.key"
-                  :line="line.commentLine"
-                  :side="line.commentSide"
+                  :line="activeComposer.line"
+                  :side="activeComposer.side"
+                  :start-line="activeComposer.startLine"
+                  :start-side="activeComposer.startSide"
                   @submit="handleCreateDraft"
                   @cancel="activeComposer = null"
                 />
@@ -444,13 +525,17 @@ function statusBadgeClass(status: string): string {
             <template v-for="(line, lIdx) in seg.lines" :key="line.key">
               <div
                 class="group flex cursor-pointer items-stretch"
-                :class="{
-                  'bg-emerald-500/10 hover:bg-emerald-500/15': line.type === 'add',
-                  'bg-rose-500/10 hover:bg-rose-500/15': line.type === 'del',
-                  'hover:bg-slate-800/40': line.type === 'context',
-                }"
+                :class="
+                  selectedLineKeys.has(line.key)
+                    ? 'bg-blue-500/20 ring-1 ring-inset ring-blue-500/40'
+                    : {
+                        'bg-emerald-500/10 hover:bg-emerald-500/15': line.type === 'add',
+                        'bg-rose-500/10 hover:bg-rose-500/15': line.type === 'del',
+                        'hover:bg-slate-800/40': line.type === 'context',
+                      }
+                "
+                @mousedown.left="startLineDrag(line)"
                 @mouseenter="handleLineMouseEnter(line, seg.lines, lIdx)"
-                @click="openComposer(line)"
               >
                 <span class="w-12 shrink-0 select-none px-2 text-right text-[11px] text-slate-500">
                   {{ line.oldLineNumber ?? '' }}
@@ -511,7 +596,11 @@ function statusBadgeClass(status: string): string {
               >
                 <div class="flex items-center justify-between text-[11px]">
                   <span class="font-semibold text-amber-300">
-                    Pending Draft (Line {{ draft.line }})
+                    Pending Draft ({{
+                      draft.startLine && draft.startLine !== draft.line
+                        ? `Lines ${draft.startLine}–${draft.line}`
+                        : `Line ${draft.line}`
+                    }})
                   </span>
                   <button
                     class="inline-flex items-center gap-1 text-slate-400 hover:text-rose-400"
@@ -528,8 +617,10 @@ function statusBadgeClass(status: string): string {
               <!-- Inline Comment Composer -->
               <CommentComposer
                 v-if="activeComposer?.key === line.key"
-                :line="line.commentLine"
-                :side="line.commentSide"
+                :line="activeComposer.line"
+                :side="activeComposer.side"
+                :start-line="activeComposer.startLine"
+                :start-side="activeComposer.startSide"
                 @submit="handleCreateDraft"
                 @cancel="activeComposer = null"
               />

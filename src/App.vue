@@ -17,26 +17,39 @@ import { useReviewStore } from '@/stores/review'
 const auth = useAuthStore()
 const review = useReviewStore()
 
-const SCROLL_STEP_PX = 80
-const SCROLL_SMOOTHING = 18
+const SCROLL_TAP_PX = 100
+const SCROLL_HOLD_SPEED_PX = 950
+const SCROLL_HOLD_DELAY_MS = 160
+const SCROLL_SMOOTHING = 10
 const stepTransitionName = ref<'step-next' | 'step-prev'>('step-next')
 const previewScrollRef = ref<HTMLElement | null>(null)
 
+let currentScrollTop: number | null = null
 let targetScrollTop: number | null = null
 let scrollRafId: number | null = null
 let lastScrollFrameTime = 0
+let heldScrollDirection: -1 | 0 | 1 = 0
+let holdStartTime = 0
+
+function getScrollDirection(key: string): -1 | 0 | 1 {
+  if (key === 'j' || key === 'J' || key === 'ArrowDown') return 1
+  if (key === 'k' || key === 'K' || key === 'ArrowUp') return -1
+  return 0
+}
 
 function cancelSmoothScroll() {
   if (scrollRafId !== null) {
     cancelAnimationFrame(scrollRafId)
     scrollRafId = null
   }
+  currentScrollTop = null
   targetScrollTop = null
+  heldScrollDirection = 0
 }
 
 function stepSmoothScroll(now: number) {
   const el = previewScrollRef.value
-  if (!el || targetScrollTop === null) {
+  if (!el || targetScrollTop === null || currentScrollTop === null) {
     cancelSmoothScroll()
     return
   }
@@ -44,16 +57,32 @@ function stepSmoothScroll(now: number) {
   const dt = Math.min(0.05, Math.max(0.001, (now - lastScrollFrameTime) / 1000))
   lastScrollFrameTime = now
 
-  const diff = targetScrollTop - el.scrollTop
-  if (Math.abs(diff) < 0.5) {
+  const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight)
+  if (heldScrollDirection !== 0 && now - holdStartTime >= SCROLL_HOLD_DELAY_MS) {
+    targetScrollTop = Math.max(
+      0,
+      Math.min(maxScroll, targetScrollTop + heldScrollDirection * SCROLL_HOLD_SPEED_PX * dt),
+    )
+  }
+
+  const diff = targetScrollTop - currentScrollTop
+  if (Math.abs(diff) < 0.25 && heldScrollDirection === 0) {
     el.scrollTop = targetScrollTop
     cancelSmoothScroll()
     return
   }
 
   const factor = 1 - Math.exp(-SCROLL_SMOOTHING * dt)
-  el.scrollTop += diff * factor
+  currentScrollTop += diff * factor
+  el.scrollTop = currentScrollTop
   scrollRafId = requestAnimationFrame(stepSmoothScroll)
+}
+
+function startScrollAnimation() {
+  if (scrollRafId === null) {
+    lastScrollFrameTime = performance.now()
+    scrollRafId = requestAnimationFrame(stepSmoothScroll)
+  }
 }
 
 function scrollPreviewBy(delta: number) {
@@ -61,13 +90,13 @@ function scrollPreviewBy(delta: number) {
   if (!el) return
 
   const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight)
-  const base = targetScrollTop ?? el.scrollTop
+  if (currentScrollTop === null) {
+    currentScrollTop = el.scrollTop
+  }
+  const base = targetScrollTop ?? currentScrollTop
   targetScrollTop = Math.max(0, Math.min(maxScroll, base + delta))
 
-  if (scrollRafId === null) {
-    lastScrollFrameTime = performance.now()
-    scrollRafId = requestAnimationFrame(stepSmoothScroll)
-  }
+  startScrollAnimation()
 }
 
 watch(
@@ -89,13 +118,18 @@ function handleKeydown(e: KeyboardEvent) {
   if (isEditableElement(e.target)) return
   if (e.metaKey || e.ctrlKey || e.altKey) return
 
-  if (e.key === 'j' || e.key === 'J' || e.key === 'ArrowDown') {
+  const scrollDir = getScrollDirection(e.key)
+  if (scrollDir !== 0) {
     e.preventDefault()
-    scrollPreviewBy(SCROLL_STEP_PX)
-  } else if (e.key === 'k' || e.key === 'K' || e.key === 'ArrowUp') {
-    e.preventDefault()
-    scrollPreviewBy(-SCROLL_STEP_PX)
-  } else if (e.key === 'l' || e.key === 'L' || e.key === 'ArrowRight') {
+    if (!e.repeat) {
+      heldScrollDirection = scrollDir
+      holdStartTime = performance.now()
+      scrollPreviewBy(scrollDir * SCROLL_TAP_PX)
+    }
+    return
+  }
+
+  if (e.key === 'l' || e.key === 'L' || e.key === 'ArrowRight') {
     e.preventDefault()
     review.nextStep()
   } else if (e.key === 'h' || e.key === 'H' || e.key === 'ArrowLeft') {
@@ -113,8 +147,21 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
+function handleKeyup(e: KeyboardEvent) {
+  const scrollDir = getScrollDirection(e.key)
+  if (scrollDir !== 0 && scrollDir === heldScrollDirection) {
+    heldScrollDirection = 0
+  }
+}
+
+function handleWindowBlur() {
+  heldScrollDirection = 0
+}
+
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('keyup', handleKeyup)
+  window.addEventListener('blur', handleWindowBlur)
   const minSplashDelay = new Promise((resolve) => setTimeout(resolve, 750))
   await Promise.all([auth.init(), review.init(), minSplashDelay])
   review.screen = 'inbox'
@@ -123,6 +170,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   cancelSmoothScroll()
   window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('keyup', handleKeyup)
+  window.removeEventListener('blur', handleWindowBlur)
 })
 </script>
 

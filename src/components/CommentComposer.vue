@@ -4,6 +4,8 @@ import { ref, onMounted } from 'vue'
 const props = defineProps<{
   line: number
   side: 'LEFT' | 'RIGHT'
+  startLine?: number
+  startSide?: 'LEFT' | 'RIGHT'
 }>()
 
 const emit = defineEmits<{
@@ -29,10 +31,18 @@ function handleSubmit() {
   <div class="my-1.5 mx-3 rounded-lg border border-blue-500/40 bg-canvas-subtle p-3 shadow-lg">
     <div class="mb-2 flex items-center justify-between text-[11px] text-slate-400">
       <span>
-        Add pending comment on line
-        <span class="font-mono font-semibold text-blue-300">
-          {{ props.side === 'LEFT' ? 'old ' : '' }}{{ props.line }}
-        </span>
+        <template v-if="props.startLine !== undefined && props.startLine !== props.line">
+          Add pending comment on lines
+          <span class="font-mono font-semibold text-blue-300">
+            {{ props.startLine }}–{{ props.line }}
+          </span>
+        </template>
+        <template v-else>
+          Add pending comment on line
+          <span class="font-mono font-semibold text-blue-300">
+            {{ props.side === 'LEFT' ? 'old ' : '' }}{{ props.line }}
+          </span>
+        </template>
       </span>
       <span class="text-slate-500">Saved locally until Finish Review</span>
     </div>

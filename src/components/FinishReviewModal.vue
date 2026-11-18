@@ -77,7 +77,11 @@ async function handleSubmit() {
             >
               <div class="min-w-0">
                 <div class="font-mono text-[11px] text-amber-300">
-                  {{ draft.path }}:{{ draft.line }}
+                  {{ draft.path }}:{{
+                    draft.startLine && draft.startLine !== draft.line
+                      ? `${draft.startLine}-${draft.line}`
+                      : draft.line
+                  }}
                 </div>
                 <p class="mt-0.5 line-clamp-2 text-slate-200">{{ draft.body }}</p>
               </div>

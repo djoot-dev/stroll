@@ -48,9 +48,11 @@ export interface ReviewComment {
 export interface ReviewThread {
   id: string
   path: string
-  /** 1-based line number on the target side */
+  /** 1-based line number on the target side (end line for multiline threads) */
   line: number
   side: DiffSide
+  startLine?: number | null
+  startSide?: DiffSide | null
   isResolved: boolean
   isOutdated: boolean
   comments: ReviewComment[]
@@ -62,6 +64,8 @@ export interface DraftComment {
   path: string
   line: number
   side: DiffSide
+  startLine?: number
+  startSide?: DiffSide
   body: string
   createdAt: string
   /** Set once synced to GitHub as a pending review thread */
