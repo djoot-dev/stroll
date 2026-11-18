@@ -3,9 +3,11 @@ import { FolderGit2, Loader2, RefreshCw, Sparkles, X } from '@lucide/vue'
 import { ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
+import { useSettingsStore } from '@/stores/settings'
 
 const auth = useAuthStore()
 const review = useReviewStore()
+const settings = useSettingsStore()
 
 const urlInput = ref('')
 
@@ -90,7 +92,7 @@ async function handleLoadDemo() {
               @click="
                 () => {
                   review.showLoaderModal = false
-                  auth.showSettingsModal = true
+                  settings.openSettings('github')
                 }
               "
             >

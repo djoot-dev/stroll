@@ -10,12 +10,15 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Send,
+  Settings,
 } from '@lucide/vue'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
+import { useSettingsStore } from '@/stores/settings'
 
 const auth = useAuthStore()
 const review = useReviewStore()
+const settings = useSettingsStore()
 
 function toggleDirection() {
   const next = review.tourDirection === 'bottom-up' ? 'top-down' : 'bottom-up'
@@ -148,13 +151,21 @@ function toggleDirection() {
         <button
           class="inline-flex items-center gap-1.5 rounded border border-border bg-canvas px-2.5 py-1 text-xs hover:bg-canvas-elevated"
           :class="auth.isAuthenticated ? 'text-emerald-300' : 'text-slate-300'"
-          title="GitHub PAT Settings"
-          @click="auth.showSettingsModal = true"
+          title="GitHub Authentication Settings"
+          @click="settings.openSettings('github')"
         >
           <KeyRound class="h-3.5 w-3.5" />
           <span class="hidden lg:inline">
             {{ auth.viewer ? `@${auth.viewer.login}` : 'Connect GitHub' }}
           </span>
+        </button>
+
+        <button
+          class="rounded border border-border bg-canvas p-1.5 text-slate-400 hover:bg-canvas-elevated hover:text-slate-100"
+          title="Settings (⌘,)"
+          @click="settings.openSettings('general')"
+        >
+          <Settings class="h-3.5 w-3.5" />
         </button>
 
         <button

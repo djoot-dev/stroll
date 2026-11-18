@@ -19,6 +19,7 @@ import { buildDiffSegments, type DiffLine } from '@/services/diffParser'
 import { highlightLinesWithCodeMirror, type HighlightSpan } from '@/services/highlighter'
 import { LAYER_META } from '@/services/readingOrder'
 import { useReviewStore } from '@/stores/review'
+import { useSettingsStore } from '@/stores/settings'
 import type { DiffSide, DraftComment, ReviewThread, TourStep } from '@/types/pr'
 import CodeHoverPopover from './CodeHoverPopover.vue'
 import CommentComposer from './CommentComposer.vue'
@@ -36,6 +37,7 @@ const props = defineProps<{
 }>()
 
 const review = useReviewStore()
+const settings = useSettingsStore()
 
 const expandedGaps = ref<Set<string>>(new Set())
 const activeComposer = ref<{
@@ -53,7 +55,6 @@ const dragAnchorKey = ref<string | null>(null)
 const dragFocusKey = ref<string | null>(null)
 
 // Hover context & UX guardrails state
-const requireAltForHover = ref(false)
 const activeScopes = ref<string[]>([])
 const activeReplacedCount = ref(0)
 const hoverState = ref<{
@@ -285,7 +286,7 @@ function handleIdentMouseEnter(
   hunkLines: DiffLine[],
   lineIdx: number,
 ) {
-  if (requireAltForHover.value && !event.altKey) return
+  if (settings.requireAltForHover && !event.altKey) return
 
   clearHoverTimers()
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
@@ -454,12 +455,12 @@ function statusBadgeClass(status: string): string {
 
         <button
           class="inline-flex shrink-0 items-center gap-1 rounded border border-border bg-canvas px-2 py-0.5 text-[10.5px] text-slate-300 hover:bg-canvas-elevated"
-          :class="{ 'border-blue-500/40 text-blue-300': !requireAltForHover }"
+          :class="{ 'border-blue-500/40 text-blue-300': !settings.requireAltForHover }"
           title="Toggle whether symbol hover popovers open automatically (250ms delay) or only when holding Option/Alt"
-          @click="requireAltForHover = !requireAltForHover"
+          @click="settings.setRequireAltForHover(!settings.requireAltForHover)"
         >
           <Sparkles class="h-3 w-3" />
-          <span>{{ requireAltForHover ? 'Hover: ⌥ + Hover' : 'Hover: Auto' }}</span>
+          <span>{{ settings.requireAltForHover ? 'Hover: ⌥ + Hover' : 'Hover: Auto' }}</span>
         </button>
       </div>
 
@@ -469,8 +470,9 @@ function statusBadgeClass(status: string): string {
 
       <div
         v-else
-        class="overflow-x-auto font-mono text-[12.5px] leading-[1.55]"
+        class="overflow-x-auto font-mono leading-[1.55]"
         :class="{ 'select-none': isDraggingSelection }"
+        :style="{ fontSize: `${settings.codeFontSize}px` }"
       >
         <template v-for="seg in segments" :key="seg.id">
           <!-- Collapsed Unchanged Gap -->

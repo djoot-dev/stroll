@@ -11,12 +11,7 @@ import {
   submitReview,
 } from '@/services/github'
 import { buildReadingOrder } from '@/services/readingOrder'
-import {
-  loadDraftComments,
-  loadTourDirection,
-  saveDraftComments,
-  saveTourDirection,
-} from '@/services/storage'
+import { loadDraftComments, saveDraftComments } from '@/services/storage'
 import type {
   DiffSide,
   DraftComment,
@@ -26,6 +21,7 @@ import type {
   TourStep,
 } from '@/types/pr'
 import { useAuthStore } from './auth'
+import { useSettingsStore } from './settings'
 
 export type AppScreen = 'splash' | 'inbox' | 'review' | 'submitted'
 
@@ -83,13 +79,17 @@ export const useReviewStore = defineStore('review', () => {
   })
 
   async function init(): Promise<void> {
-    tourDirection.value = await loadTourDirection()
+    const settings = useSettingsStore()
+    await settings.init()
+    tourDirection.value = settings.defaultTourDirection
   }
 
   async function activatePR(data: PullRequestData): Promise<void> {
+    const settings = useSettingsStore()
     pr.value = data
     currentStepIndex.value = 0
     reviewedPaths.value = new Set()
+    sidebarOpen.value = settings.sidebarDefaultOpen
     submitError.value = null
     submitSuccessMessage.value = null
     const key = `${data.owner}/${data.repo}#${data.number}`
@@ -118,9 +118,10 @@ export const useReviewStore = defineStore('review', () => {
 
   async function loadPRByRepo(owner: string, repo: string, number: number): Promise<boolean> {
     const auth = useAuthStore()
+    const settings = useSettingsStore()
     if (!auth.pat) {
       prError.value = 'Please configure a GitHub Personal Access Token in Settings first.'
-      auth.showSettingsModal = true
+      settings.openSettings('github')
       return false
     }
 
@@ -140,9 +141,10 @@ export const useReviewStore = defineStore('review', () => {
   }
 
   async function setTourDirection(direction: TourDirection): Promise<void> {
+    const settings = useSettingsStore()
     const activePath = currentStep.value?.file.path
     tourDirection.value = direction
-    await saveTourDirection(direction)
+    await settings.setDefaultTourDirection(direction)
 
     if (activePath) {
       const newIdx = tourSteps.value.findIndex((s) => s.file.path === activePath)
@@ -176,12 +178,31 @@ export const useReviewStore = defineStore('review', () => {
     const target = path ?? currentStep.value?.file.path
     if (!target) return
     const next = new Set(reviewedPaths.value)
-    if (next.has(target)) {
-      next.delete(target)
-    } else {
+    const markingReviewed = !next.has(target)
+    if (markingReviewed) {
       next.add(target)
+    } else {
+      next.delete(target)
     }
     reviewedPaths.value = next
+
+    const settings = useSettingsStore()
+    if (markingReviewed && settings.autoAdvanceOnReview && target === currentStep.value?.file.path) {
+      const steps = tourSteps.value
+      const nextUnreviewed = steps.findIndex(
+        (s, idx) => idx > currentStepIndex.value && !next.has(s.file.path),
+      )
+      if (nextUnreviewed >= 0) {
+        currentStepIndex.value = nextUnreviewed
+      } else {
+        const firstUnreviewed = steps.findIndex((s) => !next.has(s.file.path))
+        if (firstUnreviewed >= 0) {
+          currentStepIndex.value = firstUnreviewed
+        } else if (currentStepIndex.value < steps.length - 1) {
+          currentStepIndex.value += 1
+        }
+      }
+    }
   }
 
   function isStepReviewed(path: string): boolean {

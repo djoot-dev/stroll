@@ -13,9 +13,11 @@ import TopBar from '@/components/TopBar.vue'
 import TourSidebar from '@/components/TourSidebar.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
+import { useSettingsStore } from '@/stores/settings'
 
 const auth = useAuthStore()
 const review = useReviewStore()
+const settings = useSettingsStore()
 
 const SCROLL_TAP_PX = 100
 const SCROLL_HOLD_SPEED_PX = 950
@@ -114,6 +116,23 @@ function isEditableElement(target: EventTarget | null): boolean {
 }
 
 function handleKeydown(e: KeyboardEvent) {
+  if ((e.metaKey || e.ctrlKey) && e.key === ',') {
+    e.preventDefault()
+    if (settings.isOpen) {
+      settings.closeSettings()
+    } else {
+      settings.openSettings('general')
+    }
+    return
+  }
+
+  if (e.key === 'Escape' && settings.isOpen) {
+    e.preventDefault()
+    settings.closeSettings()
+    return
+  }
+
+  if (settings.isOpen) return
   if (review.screen !== 'review') return
   if (isEditableElement(e.target)) return
   if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -253,7 +272,7 @@ onBeforeUnmount(() => {
         </main>
       </div>
 
-      <KeyboardShortcutsBar />
+      <KeyboardShortcutsBar v-if="settings.showShortcutsBar" />
     </div>
   </Transition>
 

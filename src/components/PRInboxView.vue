@@ -7,20 +7,43 @@ import {
   KeyRound,
   Loader2,
   RefreshCw,
+  Settings,
   Sparkles,
 } from '@lucide/vue'
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
+import { useSettingsStore } from '@/stores/settings'
 
 const auth = useAuthStore()
 const review = useReviewStore()
+const settings = useSettingsStore()
 
 const urlInput = ref('')
 const lastRefreshedAt = ref<Date | null>(auth.isAuthenticated ? new Date() : null)
 let pollTimer: number | null = null
 
-const AUTO_REFRESH_MS = 60_000
+const autoRefreshLabel = computed(() => {
+  const sec = settings.inboxAutoRefreshSeconds
+  if (sec <= 0) return 'Auto-refresh off'
+  if (sec >= 60 && sec % 60 === 0) return `Auto-refreshes every ${sec / 60}m`
+  return `Auto-refreshes every ${sec}s`
+})
+
+function resetPollTimer() {
+  if (pollTimer !== null) {
+    window.clearInterval(pollTimer)
+    pollTimer = null
+  }
+  const sec = settings.inboxAutoRefreshSeconds
+  if (sec > 0) {
+    pollTimer = window.setInterval(() => {
+      if (auth.isAuthenticated && !auth.isLoading) {
+        void handleRefresh()
+      }
+    }, sec * 1000)
+  }
+}
 
 async function handleRefresh() {
   if (!auth.isAuthenticated || auth.isLoading) return
@@ -46,12 +69,15 @@ onMounted(() => {
   if (auth.isAuthenticated && !lastRefreshedAt.value) {
     lastRefreshedAt.value = new Date()
   }
-  pollTimer = window.setInterval(() => {
-    if (auth.isAuthenticated && !auth.isLoading) {
-      void handleRefresh()
-    }
-  }, AUTO_REFRESH_MS)
+  resetPollTimer()
 })
+
+watch(
+  () => settings.inboxAutoRefreshSeconds,
+  () => {
+    resetPollTimer()
+  },
+)
 
 onBeforeUnmount(() => {
   if (pollTimer !== null) {
@@ -93,10 +119,18 @@ onBeforeUnmount(() => {
           <button
             class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-canvas px-3 py-1.5 text-xs hover:bg-canvas-elevated"
             :class="auth.isAuthenticated ? 'text-emerald-300' : 'text-slate-200'"
-            @click="auth.showSettingsModal = true"
+            @click="settings.openSettings('github')"
           >
             <KeyRound class="h-3.5 w-3.5" />
             <span>{{ auth.viewer ? `@${auth.viewer.login}` : 'Connect GitHub' }}</span>
+          </button>
+
+          <button
+            class="rounded-lg border border-border bg-canvas p-1.5 text-slate-400 hover:bg-canvas-elevated hover:text-slate-100"
+            title="Settings (⌘,)"
+            @click="settings.openSettings('general')"
+          >
+            <Settings class="h-4 w-4" />
           </button>
         </div>
       </div>
@@ -151,8 +185,8 @@ onBeforeUnmount(() => {
             >
               <Clock class="h-3 w-3" />
               <span>
-                Auto-refreshes every 60s
-                <template v-if="lastRefreshedAt">
+                {{ autoRefreshLabel }}
+                <template v-if="lastRefreshedAt && settings.inboxAutoRefreshSeconds > 0">
                   · Updated {{ lastRefreshedAt.toLocaleTimeString() }}
                 </template>
               </span>
@@ -175,7 +209,7 @@ onBeforeUnmount(() => {
             <div class="mt-5 flex flex-wrap items-center justify-center gap-3">
               <button
                 class="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-500"
-                @click="auth.showSettingsModal = true"
+                @click="settings.openSettings('github')"
               >
                 <KeyRound class="h-3.5 w-3.5" />
                 <span>Connect GitHub PAT</span>

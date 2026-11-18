@@ -71,3 +71,20 @@ export async function saveDraftComments(prKey: string, drafts: DraftComment[]): 
   all[prKey] = drafts
   await setItem('draft_comments', all)
 }
+
+export interface PersistedAppSettings {
+  autoAdvanceOnReview: boolean
+  sidebarDefaultOpen: boolean
+  codeFontSize: number
+  requireAltForHover: boolean
+  showShortcutsBar: boolean
+  inboxAutoRefreshSeconds: number
+}
+
+export async function loadAppSettings(): Promise<Partial<PersistedAppSettings>> {
+  return (await getItem<Partial<PersistedAppSettings>>('app_settings')) ?? {}
+}
+
+export async function saveAppSettings(settings: PersistedAppSettings): Promise<void> {
+  await setItem('app_settings', settings)
+}

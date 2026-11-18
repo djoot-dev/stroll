@@ -10,7 +10,6 @@ export const useAuthStore = defineStore('auth', () => {
   const requestedPRs = ref<PRSummary[]>([])
   const isLoading = ref(false)
   const error = ref<string | null>(null)
-  const showSettingsModal = ref(false)
 
   const isAuthenticated = computed(() => Boolean(pat.value && viewer.value))
 
@@ -61,7 +60,6 @@ export const useAuthStore = defineStore('auth', () => {
     requestedPRs,
     isLoading,
     error,
-    showSettingsModal,
     isAuthenticated,
     init,
     verifyAndLoadProfile,
