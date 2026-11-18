@@ -474,7 +474,7 @@ function statusBadgeClass(status: string): string {
                   class="group flex cursor-pointer items-stretch"
                   :class="
                     selectedLineKeys.has(line.key)
-                      ? 'bg-blue-500/20 ring-1 ring-inset ring-blue-500/40'
+                      ? 'bg-blue-500/18 shadow-[inset_2px_0_0_#60a5fa]'
                       : 'hover:bg-slate-800/40'
                   "
                   @mousedown.left="startLineDrag(line)"
@@ -527,7 +527,7 @@ function statusBadgeClass(status: string): string {
                 class="group flex cursor-pointer items-stretch"
                 :class="
                   selectedLineKeys.has(line.key)
-                    ? 'bg-blue-500/20 ring-1 ring-inset ring-blue-500/40'
+                    ? 'bg-blue-500/18 shadow-[inset_2px_0_0_#60a5fa]'
                     : {
                         'bg-emerald-500/10 hover:bg-emerald-500/15': line.type === 'add',
                         'bg-rose-500/10 hover:bg-rose-500/15': line.type === 'del',
