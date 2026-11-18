@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { getVersion } from '@tauri-apps/api/app'
 import {
   CheckCircle2,
   Code2,
+  Download,
   Eye,
   EyeOff,
   FolderGit2,
@@ -11,6 +13,7 @@ import {
   Loader2,
   LogOut,
   Plus,
+  RefreshCw,
   RotateCcw,
   Settings,
   SlidersHorizontal,
@@ -18,8 +21,9 @@ import {
   Trash2,
   X,
 } from '@lucide/vue'
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { isTauriRuntime } from '@/services/native'
+import { checkForAppUpdate, type AvailableUpdate } from '@/services/updater'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore, type SettingsSection } from '@/stores/settings'
@@ -34,11 +38,60 @@ const showToken = ref(false)
 const resetDone = ref(false)
 const repoInput = ref('')
 const pathInput = ref('')
+const appVersion = ref('0.1.0')
+const updateState = ref<'idle' | 'checking' | 'up-to-date' | 'available' | 'installing' | 'error'>('idle')
+const availableUpdate = ref<AvailableUpdate | null>(null)
+const updateMessage = ref('')
 
 const linkedRepos = computed(() => Object.entries(review.repoPaths))
 const activePRRepo = computed(() =>
   review.pr ? `${review.pr.owner}/${review.pr.repo}` : '',
 )
+
+onMounted(async () => {
+  if (isTauriRuntime()) {
+    try {
+      appVersion.value = await getVersion()
+    } catch {
+      // Fallback to default version
+    }
+  }
+})
+
+async function handleCheckForUpdates() {
+  updateState.value = 'checking'
+  updateMessage.value = ''
+  availableUpdate.value = null
+  try {
+    const result = await checkForAppUpdate()
+    if (result.available) {
+      availableUpdate.value = result
+      updateState.value = 'available'
+    } else {
+      updateState.value = 'up-to-date'
+    }
+  } catch (err) {
+    updateState.value = 'error'
+    updateMessage.value = err instanceof Error ? err.message : 'Unable to check for updates.'
+  }
+}
+
+async function handleInstallUpdate() {
+  if (!availableUpdate.value) return
+  updateState.value = 'installing'
+  updateMessage.value = 'Downloading update...'
+  try {
+    await availableUpdate.value.install((downloaded, total) => {
+      if (total && total > 0) {
+        const pct = Math.round((downloaded / total) * 100)
+        updateMessage.value = `Downloading update (${pct}%)...`
+      }
+    })
+  } catch (err) {
+    updateState.value = 'error'
+    updateMessage.value = err instanceof Error ? err.message : 'Failed to install update.'
+  }
+}
 
 watch(
   () => settings.isOpen,
@@ -194,7 +247,7 @@ async function handleResetDefaults() {
           </nav>
 
           <div class="hidden border-t border-border-muted px-4 py-2.5 text-[10px] text-slate-500 sm:block">
-            PR Tour v0.1.0
+            PR Tour v{{ appVersion }}
           </div>
         </aside>
 
@@ -217,6 +270,49 @@ async function handleResetDefaults() {
             <!-- GENERAL -->
             <template v-if="settings.activeSection === 'general'">
               <div class="space-y-4">
+                <div class="rounded-lg border border-border bg-canvas/60 p-4">
+                  <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p class="text-xs font-medium text-slate-200">Application Updates</p>
+                      <p v-if="updateState === 'up-to-date'" class="mt-0.5 text-[11px] text-emerald-400">
+                        PR Tour v{{ appVersion }} is up to date.
+                      </p>
+                      <p v-else-if="updateState === 'available' && availableUpdate" class="mt-0.5 text-[11px] text-blue-400">
+                        Version v{{ availableUpdate.version }} is available.
+                      </p>
+                      <p v-else-if="updateState === 'installing'" class="mt-0.5 text-[11px] text-slate-400">
+                        {{ updateMessage }}
+                      </p>
+                      <p v-else-if="updateState === 'error'" class="mt-0.5 text-[11px] text-amber-400">
+                        {{ updateMessage }}
+                      </p>
+                      <p v-else class="mt-0.5 text-[11px] text-slate-400">
+                        Installed version: v{{ appVersion }}
+                      </p>
+                    </div>
+                    <button
+                      v-if="updateState === 'available'"
+                      type="button"
+                      class="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/40 bg-blue-500/15 px-3 py-1.5 text-xs font-medium text-blue-300 hover:bg-blue-500/25"
+                      @click="handleInstallUpdate"
+                    >
+                      <Download class="h-3.5 w-3.5" />
+                      <span>Install &amp; Restart</span>
+                    </button>
+                    <button
+                      v-else
+                      type="button"
+                      class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-canvas px-3 py-1.5 text-xs text-slate-300 hover:bg-canvas-elevated disabled:opacity-50"
+                      :disabled="updateState === 'checking' || updateState === 'installing'"
+                      @click="handleCheckForUpdates"
+                    >
+                      <Loader2 v-if="updateState === 'checking' || updateState === 'installing'" class="h-3.5 w-3.5 animate-spin" />
+                      <RefreshCw v-else class="h-3.5 w-3.5" />
+                      <span>Check for Updates</span>
+                    </button>
+                  </div>
+                </div>
+
                 <div class="rounded-lg border border-border bg-canvas/60 p-4">
                   <div class="flex flex-wrap items-center justify-between gap-3">
                     <div>
@@ -634,6 +730,47 @@ async function handleResetDefaults() {
                 </div>
               </div>
             </template>
+          </div>
+        </div>
+
+        <div class="border-t border-border pt-4">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <p class="text-xs font-medium text-slate-300">PR Tour v{{ appVersion }}</p>
+              <p v-if="updateState === 'up-to-date'" class="text-[11px] text-emerald-400">
+                You're on the latest version.
+              </p>
+              <p v-else-if="updateState === 'available' && availableUpdate" class="text-[11px] text-blue-400">
+                Version v{{ availableUpdate.version }} is available.
+              </p>
+              <p v-else-if="updateState === 'installing'" class="text-[11px] text-slate-400">
+                {{ updateMessage }}
+              </p>
+              <p v-else-if="updateState === 'error'" class="text-[11px] text-amber-400">
+                {{ updateMessage }}
+              </p>
+            </div>
+
+            <button
+              v-if="updateState === 'available'"
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/40 bg-blue-500/15 px-3 py-1.5 text-xs font-medium text-blue-300 hover:bg-blue-500/25"
+              @click="handleInstallUpdate"
+            >
+              <Download class="h-3.5 w-3.5" />
+              <span>Install &amp; Restart</span>
+            </button>
+            <button
+              v-else
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-canvas px-3 py-1.5 text-xs text-slate-300 hover:bg-canvas-elevated disabled:opacity-50"
+              :disabled="updateState === 'checking' || updateState === 'installing'"
+              @click="handleCheckForUpdates"
+            >
+              <Loader2 v-if="updateState === 'checking' || updateState === 'installing'" class="h-3.5 w-3.5 animate-spin" />
+              <RefreshCw v-else class="h-3.5 w-3.5" />
+              <span>Check for Updates</span>
+            </button>
           </div>
         </div>
       </div>

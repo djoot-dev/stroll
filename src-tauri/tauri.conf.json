@@ -21,11 +21,20 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; img-src 'self' https://avatars.githubusercontent.com data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost https://api.github.com https://github.com"
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all"
+    "targets": "all",
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI4NUIwQjhDNDNBNjI3NzQKUldSMEo2WkRqQXRiS0RNZjQrN1Zna3gyM0hBa2dyRTNkYXcyY1VFS29OalIvN0Ezai9seEFoRzAK",
+      "endpoints": [
+        "https://github.com/totalfreak/pr-tour/releases/latest/download/latest.json"
+      ]
+    }
   }
 }
