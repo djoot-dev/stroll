@@ -4,17 +4,22 @@ import {
   Code2,
   Eye,
   EyeOff,
+  FolderGit2,
   Keyboard,
   KeyRound,
   ListOrdered,
   Loader2,
   LogOut,
+  Plus,
   RotateCcw,
   Settings,
   SlidersHorizontal,
+  Terminal,
+  Trash2,
   X,
 } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
+import { isTauriRuntime } from '@/services/native'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore, type SettingsSection } from '@/stores/settings'
@@ -27,6 +32,13 @@ const settings = useSettingsStore()
 const tokenInput = ref(auth.pat)
 const showToken = ref(false)
 const resetDone = ref(false)
+const repoInput = ref('')
+const pathInput = ref('')
+
+const linkedRepos = computed(() => Object.entries(review.repoPaths))
+const activePRRepo = computed(() =>
+  review.pr ? `${review.pr.owner}/${review.pr.repo}` : '',
+)
 
 watch(
   () => settings.isOpen,
@@ -35,6 +47,10 @@ watch(
       tokenInput.value = auth.pat
       showToken.value = false
       resetDone.value = false
+      if (!repoInput.value && activePRRepo.value) {
+        repoInput.value = activePRRepo.value
+        pathInput.value = review.repoPaths[activePRRepo.value] ?? ''
+      }
     }
   },
 )
@@ -53,6 +69,12 @@ const navItems: Array<{
     label: 'GitHub',
     icon: KeyRound,
     badge: () => (auth.isAuthenticated ? 'Connected' : null),
+  },
+  {
+    id: 'repositories',
+    label: 'Local & Git',
+    icon: FolderGit2,
+    badge: () => (linkedRepos.value.length > 0 ? `${linkedRepos.value.length}` : null),
   },
   { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
 ]
@@ -90,6 +112,20 @@ const activeSectionTitle = computed(
 async function handleSavePat() {
   if (!tokenInput.value.trim()) return
   await auth.verifyAndLoadProfile(tokenInput.value.trim())
+}
+
+async function handleSignInWithGh() {
+  const ok = await auth.signInWithGh()
+  if (ok) {
+    tokenInput.value = auth.pat
+  }
+}
+
+async function handleLinkRepo() {
+  if (!repoInput.value.trim() || !pathInput.value.trim()) return
+  await review.linkRepoPath(repoInput.value, pathInput.value)
+  repoInput.value = ''
+  pathInput.value = ''
 }
 
 async function handleDirectionChange(direction: TourDirection) {
@@ -408,11 +444,28 @@ async function handleResetDefaults() {
             <template v-else-if="settings.activeSection === 'github'">
               <div class="space-y-4">
                 <p class="text-xs leading-relaxed text-slate-400">
-                  Enter a GitHub Personal Access Token (PAT) with
+                  Sign in with your local <code class="text-slate-200">gh</code> CLI session or
+                  enter a GitHub Personal Access Token (PAT) with
                   <code class="text-slate-200">repo</code> and
-                  <code class="text-slate-200">read:user</code> scopes. Stored locally on your
-                  machine via Tauri Store.
+                  <code class="text-slate-200">read:user</code> scopes.
                 </p>
+
+                <div v-if="isTauriRuntime()">
+                  <button
+                    class="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-2 text-xs font-semibold text-blue-300 hover:bg-blue-500/20 disabled:opacity-50"
+                    :disabled="auth.isLoading"
+                    @click="handleSignInWithGh"
+                  >
+                    <Loader2 v-if="auth.isLoading" class="h-3.5 w-3.5 animate-spin" />
+                    <Terminal v-else class="h-3.5 w-3.5" />
+                    <span>Use GitHub CLI (gh auth token)</span>
+                  </button>
+                  <div class="mt-3 flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500">
+                    <span class="h-px flex-1 bg-border-muted" />
+                    <span>or paste PAT</span>
+                    <span class="h-px flex-1 bg-border-muted" />
+                  </div>
+                </div>
 
                 <div class="space-y-1.5">
                   <label class="block text-xs font-medium text-slate-300">
@@ -471,6 +524,91 @@ async function handleResetDefaults() {
                     <Loader2 v-if="auth.isLoading" class="h-3.5 w-3.5 animate-spin" />
                     <span>Verify & Save</span>
                   </button>
+                </div>
+              </div>
+            </template>
+
+            <!-- LOCAL & GIT -->
+            <template v-else-if="settings.activeSection === 'repositories'">
+              <div class="space-y-4">
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <p class="text-xs font-medium text-slate-200">Local Repository Checkouts</p>
+                    <p class="mt-0.5 text-[11px] leading-relaxed text-slate-400">
+                      Map <code class="text-slate-300">owner/repo</code> to a local git checkout for
+                      Tree-sitter unchanged-file symbol resolution and
+                      <code class="text-slate-300">git blame</code> on hover.
+                    </p>
+                  </div>
+                  <span
+                    v-if="!isTauriRuntime()"
+                    class="shrink-0 rounded border border-slate-700 bg-canvas px-1.5 py-0.5 text-[10px] text-slate-400"
+                  >
+                    Desktop-only
+                  </span>
+                </div>
+
+                <div v-if="linkedRepos.length > 0" class="max-h-40 space-y-1.5 overflow-y-auto">
+                  <div
+                    v-for="[ownerRepo, localPath] in linkedRepos"
+                    :key="ownerRepo"
+                    class="flex items-center justify-between gap-2 rounded-lg border border-border-muted bg-canvas px-3 py-2 text-[11px]"
+                  >
+                    <div class="min-w-0">
+                      <div class="font-mono font-semibold text-slate-200">{{ ownerRepo }}</div>
+                      <div class="truncate font-mono text-[10px] text-slate-400">{{ localPath }}</div>
+                    </div>
+                    <button
+                      class="shrink-0 rounded p-1 text-slate-500 hover:bg-canvas-elevated hover:text-rose-400"
+                      title="Unlink repository"
+                      @click="review.unlinkRepoPath(ownerRepo)"
+                    >
+                      <Trash2 class="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                <div
+                  v-else
+                  class="rounded-lg border border-dashed border-border bg-canvas/40 p-4 text-center text-[11px] text-slate-500"
+                >
+                  No local checkouts linked yet.
+                </div>
+
+                <div class="space-y-2 rounded-lg border border-border bg-canvas/60 p-3.5">
+                  <div class="flex flex-col gap-2 sm:flex-row">
+                    <input
+                      v-model="repoInput"
+                      type="text"
+                      placeholder="owner/repo"
+                      class="rounded-lg border border-border bg-canvas-inset px-2.5 py-1.5 font-mono text-xs text-slate-100 placeholder-slate-600 focus:border-blue-500 focus:outline-none sm:w-40"
+                    />
+                    <input
+                      v-model="pathInput"
+                      type="text"
+                      placeholder="/path/to/local/checkout"
+                      class="flex-1 rounded-lg border border-border bg-canvas-inset px-2.5 py-1.5 font-mono text-xs text-slate-100 placeholder-slate-600 focus:border-blue-500 focus:outline-none"
+                      @keydown.enter="handleLinkRepo"
+                    />
+                  </div>
+                  <div class="flex items-center justify-between">
+                    <button
+                      v-if="activePRRepo"
+                      class="text-[11px] text-blue-400 hover:text-blue-300"
+                      @click="repoInput = activePRRepo"
+                    >
+                      Use current PR ({{ activePRRepo }})
+                    </button>
+                    <span v-else />
+                    <button
+                      class="inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2.5 py-1 text-xs font-medium text-slate-200 hover:bg-canvas-elevated disabled:opacity-40"
+                      :disabled="!repoInput.trim() || !pathInput.trim()"
+                      @click="handleLinkRepo"
+                    >
+                      <Plus class="h-3.5 w-3.5" />
+                      <span>Link Checkout</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </template>

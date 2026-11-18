@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { fetchViewerAndRequestedPRs } from '@/services/github'
+import { getGhAuthToken, isTauriRuntime } from '@/services/native'
 import { loadGitHubPat, saveGitHubPat } from '@/services/storage'
 import type { GitHubUser, PRSummary } from '@/types/pr'
 
@@ -18,7 +19,26 @@ export const useAuthStore = defineStore('auth', () => {
     if (savedPat) {
       pat.value = savedPat
       await verifyAndLoadProfile(savedPat)
+      return
     }
+    if (isTauriRuntime()) {
+      const { token } = await getGhAuthToken()
+      if (token) {
+        await verifyAndLoadProfile(token)
+      }
+    }
+  }
+
+  async function signInWithGh(): Promise<boolean> {
+    isLoading.value = true
+    error.value = null
+    const { token, error: ghError } = await getGhAuthToken()
+    if (!token) {
+      isLoading.value = false
+      error.value = ghError ?? 'Failed to authenticate with GitHub CLI'
+      return false
+    }
+    return verifyAndLoadProfile(token)
   }
 
   async function verifyAndLoadProfile(token: string): Promise<boolean> {
@@ -63,6 +83,7 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     init,
     verifyAndLoadProfile,
+    signInWithGh,
     refreshRequestedPRs,
     clearPat,
   }

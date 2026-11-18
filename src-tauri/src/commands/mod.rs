@@ -1,3 +1,7 @@
+pub mod ast;
+pub mod gh;
+pub mod git;
+
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -10,15 +14,13 @@ pub struct RuntimeInfo {
 }
 
 /// Returns basic runtime capabilities.
-/// Future Phase 2 modules (`git`, `tree_sitter`) will register commands here
-/// and flip `git_supported` / `ast_supported` to true.
 #[tauri::command]
 pub fn get_runtime_info() -> RuntimeInfo {
     RuntimeInfo {
         app_version: env!("CARGO_PKG_VERSION"),
         os: std::env::consts::OS,
         arch: std::env::consts::ARCH,
-        git_supported: false,
-        ast_supported: false,
+        git_supported: true,
+        ast_supported: true,
     }
 }

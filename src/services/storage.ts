@@ -88,3 +88,11 @@ export async function loadAppSettings(): Promise<Partial<PersistedAppSettings>> 
 export async function saveAppSettings(settings: PersistedAppSettings): Promise<void> {
   await setItem('app_settings', settings)
 }
+
+export async function loadRepoPaths(): Promise<Record<string, string>> {
+  return (await getItem<Record<string, string>>('repo_paths')) ?? {}
+}
+
+export async function saveRepoPaths(paths: Record<string, string>): Promise<void> {
+  await setItem('repo_paths', paths)
+}

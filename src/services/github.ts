@@ -1,4 +1,5 @@
 import { httpFetch } from './http'
+import { gitReadBlobs, isTauriRuntime, type GitBlobSpec } from './native'
 import type {
   DiffSide,
   FileChangeStatus,
@@ -280,6 +281,7 @@ export async function fetchPullRequest(
   owner: string,
   repo: string,
   number: number,
+  localRepoPath?: string | null,
 ): Promise<PullRequestData> {
   const query = `
     query PullRequestDetails($owner: String!, $repo: String!, $number: Int!) {
@@ -412,14 +414,58 @@ export async function fetchPullRequest(
     throw new Error(`Pull Request ${owner}/${repo}#${number} not found`)
   }
 
-  const contentsMap = await fetchFileContentsBatch(
-    pat,
-    owner,
-    repo,
-    pr.baseRefOid,
-    pr.headRefOid,
-    restFiles,
-  )
+  // Hybrid local-first blob loading: read from linked local git checkout when available,
+  // and fall back to GitHub GraphQL only for missing blobs.
+  const contentsMap = new Map<string, { base: string | null; head: string | null }>()
+  let remainingFiles = restFiles
+
+  if (localRepoPath && isTauriRuntime() && restFiles.length > 0) {
+    const specs: GitBlobSpec[] = []
+    const specTargets: Array<{ filename: string; side: 'base' | 'head'; idx: number }> = []
+
+    for (const f of restFiles) {
+      const status = mapFileStatus(f.status)
+      if (status !== 'added') {
+        specTargets.push({ filename: f.filename, side: 'base', idx: specs.length })
+        specs.push({ oid: pr.baseRefOid, path: f.previous_filename ?? f.filename })
+      }
+      if (status !== 'deleted') {
+        specTargets.push({ filename: f.filename, side: 'head', idx: specs.length })
+        specs.push({ oid: pr.headRefOid, path: f.filename })
+      }
+    }
+
+    const localBlobs = await gitReadBlobs(localRepoPath, specs)
+    if (localBlobs) {
+      const missingFiles = new Set<string>()
+      for (const f of restFiles) {
+        contentsMap.set(f.filename, { base: null, head: null })
+      }
+      for (const target of specTargets) {
+        const text = localBlobs[target.idx] ?? null
+        if (text === null) {
+          missingFiles.add(target.filename)
+        } else {
+          contentsMap.get(target.filename)![target.side] = text
+        }
+      }
+      remainingFiles = restFiles.filter((f) => missingFiles.has(f.filename))
+    }
+  }
+
+  if (remainingFiles.length > 0) {
+    const remoteMap = await fetchFileContentsBatch(
+      pat,
+      owner,
+      repo,
+      pr.baseRefOid,
+      pr.headRefOid,
+      remainingFiles,
+    )
+    for (const [k, v] of remoteMap.entries()) {
+      contentsMap.set(k, v)
+    }
+  }
 
   const files: PRFile[] = restFiles.map((rf) => {
     const content = contentsMap.get(rf.filename) ?? { base: null, head: null }

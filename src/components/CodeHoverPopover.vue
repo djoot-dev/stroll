@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { ArrowUpRight, FileCode2, GitCompare, Layers, X } from '@lucide/vue'
+import { ArrowUpRight, FileCode2, GitCommitHorizontal, GitCompare, Layers, X } from '@lucide/vue'
 import { computed, ref } from 'vue'
 import type { HoverSymbolInfo } from '@/services/codeContext'
 import { highlightLinesWithCodeMirror } from '@/services/highlighter'
+import type { GitBlameInfo } from '@/services/native'
 
 const props = defineProps<{
-  info: HoverSymbolInfo
+  info: HoverSymbolInfo | null
+  blame?: GitBlameInfo | null
   replacedLines: string[]
   x: number
   y: number
@@ -22,18 +24,32 @@ const showBefore = ref(false)
 const showReplaced = ref(false)
 
 const activeSnippet = computed(() => {
+  if (!props.info) return ''
   if (showBefore.value && props.info.declaration.baseSnippet) {
     return props.info.declaration.baseSnippet
   }
   return props.info.declaration.headSnippet
 })
 
-const highlightedSnippet = computed(() =>
-  highlightLinesWithCodeMirror(
+const highlightedSnippet = computed(() => {
+  if (!props.info) return []
+  return highlightLinesWithCodeMirror(
     activeSnippet.value.split('\n'),
     props.info.declaration.language,
-  ),
-)
+  )
+})
+
+function formatBlameDate(timestamp: number): string {
+  if (!timestamp) return ''
+  const diffSec = Math.max(0, Math.floor(Date.now() / 1000) - timestamp)
+  const mins = Math.floor(diffSec / 60)
+  if (mins < 60) return `${Math.max(1, mins)}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  const days = Math.floor(hrs / 24)
+  if (days < 30) return `${days}d ago`
+  return new Date(timestamp * 1000).toLocaleDateString()
+}
 
 const popoverStyle = computed(() => {
   const maxWidth = 460
@@ -55,9 +71,10 @@ const popoverStyle = computed(() => {
 
 const hasBeforeAfter = computed(
   () =>
-    props.info.declaration.isModifiedInPR &&
-    Boolean(props.info.declaration.baseSnippet) &&
-    props.info.declaration.baseSnippet !== props.info.declaration.headSnippet,
+    Boolean(props.info) &&
+    props.info!.declaration.isModifiedInPR &&
+    Boolean(props.info!.declaration.baseSnippet) &&
+    props.info!.declaration.baseSnippet !== props.info!.declaration.headSnippet,
 )
 </script>
 
@@ -71,7 +88,10 @@ const hasBeforeAfter = computed(
       @click.stop
     >
       <!-- Header -->
-      <div class="flex items-center justify-between gap-2 border-b border-border bg-canvas-elevated px-3 py-2">
+      <div
+        v-if="info"
+        class="flex items-center justify-between gap-2 border-b border-border bg-canvas-elevated px-3 py-2"
+      >
         <div class="flex min-w-0 items-center gap-1.5">
           <FileCode2 class="h-3.5 w-3.5 shrink-0 text-blue-400" />
           <span class="rounded bg-blue-500/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-blue-300">
@@ -85,6 +105,12 @@ const hasBeforeAfter = computed(
             class="shrink-0 rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-300"
           >
             Modified in PR
+          </span>
+          <span
+            v-else-if="info.declaration.source === 'repo'"
+            class="shrink-0 rounded border border-purple-500/30 bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-medium text-purple-300"
+          >
+            Repo Definition (Unchanged)
           </span>
         </div>
 
@@ -101,7 +127,7 @@ const hasBeforeAfter = computed(
           </button>
 
           <button
-            v-if="!info.isSameFile"
+            v-if="!info.isSameFile && info.declaration.source !== 'repo'"
             class="inline-flex items-center gap-0.5 rounded border border-border bg-canvas px-1.5 py-0.5 text-[10px] text-blue-300 hover:bg-blue-500/15"
             title="Jump to definition step"
             @click="emit('jumpToFile', info.declaration.path)"
@@ -121,20 +147,26 @@ const hasBeforeAfter = computed(
       </div>
 
       <!-- Location -->
-      <div class="border-b border-border-muted bg-canvas px-3 py-1 font-mono text-[10px] text-slate-400">
+      <div
+        v-if="info"
+        class="border-b border-border-muted bg-canvas px-3 py-1 font-mono text-[10px] text-slate-400"
+      >
         {{ info.declaration.path }}:{{ info.declaration.line }}
       </div>
 
       <!-- Leading Doc Comment -->
       <div
-        v-if="info.declaration.docComment"
+        v-if="info?.declaration.docComment"
         class="border-b border-border-muted bg-canvas-subtle/60 px-3 py-1.5 font-mono text-[11px] text-slate-400 whitespace-pre-wrap"
       >
         {{ info.declaration.docComment }}
       </div>
 
       <!-- CodeMirror Highlighted Definition Snippet -->
-      <div class="max-h-48 overflow-auto bg-canvas-inset px-3 py-2 font-mono text-[11.5px] leading-relaxed">
+      <div
+        v-if="info"
+        class="max-h-48 overflow-auto bg-canvas-inset px-3 py-2 font-mono text-[11.5px] leading-relaxed"
+      >
         <div
           v-for="(spans, lIdx) in highlightedSnippet"
           :key="lIdx"
@@ -146,7 +178,7 @@ const hasBeforeAfter = computed(
 
       <!-- Blast Radius / Used By in PR -->
       <div
-        v-if="info.usages.length > 0"
+        v-if="info && info.usages.length > 0"
         class="border-t border-border-muted bg-canvas-subtle px-3 py-2"
       >
         <div class="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
@@ -164,6 +196,36 @@ const hasBeforeAfter = computed(
             <span class="truncate text-slate-500">{{ u.preview }}</span>
           </button>
         </div>
+      </div>
+
+      <!-- Git Blame (for unchanged context lines when local repo linked) -->
+      <div
+        v-if="blame"
+        class="border-t border-border-muted bg-canvas px-3 py-2"
+      >
+        <div class="flex items-center justify-between gap-2 text-[10.5px]">
+          <div class="flex min-w-0 items-center gap-1.5">
+            <GitCommitHorizontal class="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+            <span class="rounded bg-emerald-500/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-emerald-300">
+              {{ blame.shortOid }}
+            </span>
+            <span class="truncate font-medium text-slate-200">{{ blame.authorName }}</span>
+          </div>
+          <div class="flex shrink-0 items-center gap-1.5">
+            <span class="text-[10px] text-slate-500">{{ formatBlameDate(blame.timestamp) }}</span>
+            <button
+              v-if="!info"
+              class="rounded p-0.5 text-slate-400 hover:bg-canvas-elevated hover:text-slate-100"
+              title="Close (Esc)"
+              @click="emit('close')"
+            >
+              <X class="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+        <p v-if="blame.summary" class="mt-1 truncate text-[11px] text-slate-400">
+          {{ blame.summary }}
+        </p>
       </div>
 
       <!-- Replaced '-' Lines Peek (when hovering a '+' line) -->

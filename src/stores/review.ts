@@ -11,7 +11,12 @@ import {
   submitReview,
 } from '@/services/github'
 import { buildReadingOrder } from '@/services/readingOrder'
-import { loadDraftComments, saveDraftComments } from '@/services/storage'
+import {
+  loadDraftComments,
+  loadRepoPaths,
+  saveDraftComments,
+  saveRepoPaths,
+} from '@/services/storage'
 import type {
   DiffSide,
   DraftComment,
@@ -39,6 +44,7 @@ export const useReviewStore = defineStore('review', () => {
   const currentStepIndex = ref(0)
   const reviewedPaths = ref<Set<string>>(new Set())
   const draftComments = ref<DraftComment[]>([])
+  const repoPaths = ref<Record<string, string>>({})
   const lastSubmitted = ref<SubmittedReviewSummary | null>(null)
 
   const isLoadingPR = ref(false)
@@ -54,6 +60,11 @@ export const useReviewStore = defineStore('review', () => {
   const prKey = computed(() =>
     pr.value ? `${pr.value.owner}/${pr.value.repo}#${pr.value.number}` : '',
   )
+
+  const currentRepoPath = computed<string | null>(() => {
+    if (!pr.value) return null
+    return repoPaths.value[`${pr.value.owner}/${pr.value.repo}`] ?? null
+  })
 
   const tourSteps = computed<TourStep[]>(() => {
     if (!pr.value) return []
@@ -82,6 +93,22 @@ export const useReviewStore = defineStore('review', () => {
     const settings = useSettingsStore()
     await settings.init()
     tourDirection.value = settings.defaultTourDirection
+    repoPaths.value = await loadRepoPaths()
+  }
+
+  async function linkRepoPath(ownerRepo: string, localPath: string): Promise<void> {
+    const key = ownerRepo.trim()
+    const val = localPath.trim()
+    if (!key || !val) return
+    repoPaths.value = { ...repoPaths.value, [key]: val }
+    await saveRepoPaths(repoPaths.value)
+  }
+
+  async function unlinkRepoPath(ownerRepo: string): Promise<void> {
+    const next = { ...repoPaths.value }
+    delete next[ownerRepo]
+    repoPaths.value = next
+    await saveRepoPaths(repoPaths.value)
   }
 
   async function activatePR(data: PullRequestData): Promise<void> {
@@ -128,7 +155,8 @@ export const useReviewStore = defineStore('review', () => {
     isLoadingPR.value = true
     prError.value = null
     try {
-      const data = await fetchPullRequest(auth.pat, owner, repo, number)
+      const localRepoPath = repoPaths.value[`${owner}/${repo}`] ?? null
+      const data = await fetchPullRequest(auth.pat, owner, repo, number, localRepoPath)
       await activatePR(data)
       showLoaderModal.value = false
       return true
@@ -396,6 +424,8 @@ export const useReviewStore = defineStore('review', () => {
     currentStepIndex,
     reviewedPaths,
     draftComments,
+    repoPaths,
+    currentRepoPath,
     isLoadingPR,
     prError,
     isSubmittingReview,
@@ -410,6 +440,8 @@ export const useReviewStore = defineStore('review', () => {
     reviewedCount,
     progressPercent,
     init,
+    linkRepoPath,
+    unlinkRepoPath,
     loadMockPR,
     loadPRByUrl,
     loadPRByRepo,
