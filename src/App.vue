@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ChevronLeft, ChevronRight, FolderGit2 } from '@lucide/vue'
-import { onBeforeUnmount, onMounted } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import DiffViewer from '@/components/DiffViewer.vue'
 import FinishReviewModal from '@/components/FinishReviewModal.vue'
 import KeyboardShortcutsBar from '@/components/KeyboardShortcutsBar.vue'
@@ -16,6 +16,15 @@ import { useReviewStore } from '@/stores/review'
 
 const auth = useAuthStore()
 const review = useReviewStore()
+
+const stepTransitionName = ref<'step-next' | 'step-prev'>('step-next')
+
+watch(
+  () => review.currentStepIndex,
+  (nextIdx, prevIdx) => {
+    stepTransitionName.value = nextIdx >= prevIdx ? 'step-next' : 'step-prev'
+  },
+)
 
 function isEditableElement(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
@@ -59,77 +68,81 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <!-- 1. Splash Screen -->
-  <SplashScreen v-if="review.screen === 'splash'" />
+  <Transition name="screen-fade" mode="out-in">
+    <!-- 1. Splash Screen -->
+    <SplashScreen v-if="review.screen === 'splash'" key="splash" />
 
-  <!-- 2. Centralized PRs Pending Your Review -->
-  <PRInboxView v-else-if="review.screen === 'inbox'" />
+    <!-- 2. Centralized PRs Pending Your Review -->
+    <PRInboxView v-else-if="review.screen === 'inbox'" key="inbox" />
 
-  <!-- 4. Short Non-Interactive Success Screen -->
-  <ReviewSubmittedView v-else-if="review.screen === 'submitted'" />
+    <!-- 4. Short Non-Interactive Success Screen -->
+    <ReviewSubmittedView v-else-if="review.screen === 'submitted'" key="submitted" />
 
-  <!-- 3. Guided PR Review Screen -->
-  <div v-else class="flex h-screen flex-col overflow-hidden bg-canvas text-slate-100">
-    <TopBar />
+    <!-- 3. Guided PR Review Screen -->
+    <div v-else key="review" class="flex h-screen flex-col overflow-hidden bg-canvas text-slate-100">
+      <TopBar />
 
-    <div class="flex min-h-0 flex-1 overflow-hidden">
-      <TourSidebar />
+      <div class="flex min-h-0 flex-1 overflow-hidden">
+        <TourSidebar />
 
-      <main class="relative flex-1 overflow-y-auto bg-canvas">
-        <template v-if="review.currentStep">
-          <DiffViewer :step="review.currentStep" />
+        <main class="relative flex-1 overflow-y-auto overflow-x-hidden bg-canvas">
+          <template v-if="review.currentStep">
+            <Transition :name="stepTransitionName" mode="out-in">
+              <DiffViewer :key="review.currentStep.file.path" :step="review.currentStep" />
+            </Transition>
 
-          <!-- Bottom Step Pager -->
+            <!-- Bottom Step Pager -->
+            <div
+              class="mx-auto mb-10 flex max-w-6xl items-center justify-between border-t border-border-muted px-5 pt-4"
+            >
+              <button
+                class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-canvas-subtle px-3.5 py-2 text-xs font-medium text-slate-300 transition-all hover:bg-canvas-elevated active:scale-[0.98] disabled:opacity-40"
+                :disabled="review.currentStepIndex === 0"
+                @click="review.prevStep()"
+              >
+                <ChevronLeft class="h-4 w-4" />
+                <span>Previous Step</span>
+              </button>
+
+              <button
+                v-if="review.currentStepIndex < review.tourSteps.length - 1"
+                class="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition-all hover:bg-blue-500 active:scale-[0.98]"
+                @click="review.nextStep()"
+              >
+                <span>Next Step</span>
+                <ChevronRight class="h-4 w-4" />
+              </button>
+
+              <button
+                v-else
+                class="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white transition-all hover:bg-emerald-500 active:scale-[0.98]"
+                @click="review.showFinishModal = true"
+              >
+                <span>Complete Tour & Finish Review</span>
+                <ChevronRight class="h-4 w-4" />
+              </button>
+            </div>
+          </template>
+
           <div
-            class="mx-auto mb-10 flex max-w-6xl items-center justify-between border-t border-border-muted px-5 pt-4"
+            v-else
+            class="flex h-full flex-col items-center justify-center gap-3 p-8 text-center"
           >
+            <FolderGit2 class="h-10 w-10 text-slate-600" />
+            <p class="text-sm font-medium text-slate-300">No Pull Request loaded</p>
             <button
-              class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-canvas-subtle px-3.5 py-2 text-xs font-medium text-slate-300 hover:bg-canvas-elevated disabled:opacity-40"
-              :disabled="review.currentStepIndex === 0"
-              @click="review.prevStep()"
+              class="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition-all hover:bg-blue-500 active:scale-[0.98]"
+              @click="review.backToInbox()"
             >
-              <ChevronLeft class="h-4 w-4" />
-              <span>Previous Step</span>
-            </button>
-
-            <button
-              v-if="review.currentStepIndex < review.tourSteps.length - 1"
-              class="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-500"
-              @click="review.nextStep()"
-            >
-              <span>Next Step</span>
-              <ChevronRight class="h-4 w-4" />
-            </button>
-
-            <button
-              v-else
-              class="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
-              @click="review.showFinishModal = true"
-            >
-              <span>Complete Tour & Finish Review</span>
-              <ChevronRight class="h-4 w-4" />
+              Back to PR Inbox
             </button>
           </div>
-        </template>
+        </main>
+      </div>
 
-        <div
-          v-else
-          class="flex h-full flex-col items-center justify-center gap-3 p-8 text-center"
-        >
-          <FolderGit2 class="h-10 w-10 text-slate-600" />
-          <p class="text-sm font-medium text-slate-300">No Pull Request loaded</p>
-          <button
-            class="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-500"
-            @click="review.backToInbox()"
-          >
-            Back to PR Inbox
-          </button>
-        </div>
-      </main>
+      <KeyboardShortcutsBar />
     </div>
-
-    <KeyboardShortcutsBar />
-  </div>
+  </Transition>
 
   <!-- Global Modals -->
   <SettingsModal />

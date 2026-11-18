@@ -315,7 +315,7 @@ function statusBadgeClass(status: string): string {
               <div
                 v-for="draft in draftsForLine(line)"
                 :key="draft.id"
-                class="my-1.5 mx-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 font-sans"
+                class="animate-pop-in my-1.5 mx-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 font-sans"
               >
                 <div class="flex items-center justify-between text-[11px]">
                   <span class="font-semibold text-amber-300">

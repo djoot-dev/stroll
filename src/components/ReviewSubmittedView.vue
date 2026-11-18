@@ -9,7 +9,7 @@ const review = useReviewStore()
 
 const progress = ref(0)
 let timer: number | null = null
-let tickTimer: number | null = null
+let rafId: number | null = null
 
 const REDIRECT_MS = 2200
 
@@ -25,11 +25,15 @@ const verdictLabel = computed(() => {
 })
 
 onMounted(() => {
-  const started = Date.now()
-  tickTimer = window.setInterval(() => {
-    const elapsed = Date.now() - started
-    progress.value = Math.min(100, Math.round((elapsed / REDIRECT_MS) * 100))
-  }, 50)
+  const started = performance.now()
+  const tick = (now: number) => {
+    const elapsed = now - started
+    progress.value = Math.min(100, (elapsed / REDIRECT_MS) * 100)
+    if (elapsed < REDIRECT_MS) {
+      rafId = window.requestAnimationFrame(tick)
+    }
+  }
+  rafId = window.requestAnimationFrame(tick)
 
   timer = window.setTimeout(() => {
     review.backToInbox()
@@ -41,21 +45,23 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (timer !== null) window.clearTimeout(timer)
-  if (tickTimer !== null) window.clearInterval(tickTimer)
+  if (rafId !== null) window.cancelAnimationFrame(rafId)
 })
 </script>
 
 <template>
   <div class="flex h-screen flex-col items-center justify-center bg-canvas px-6 text-center">
-    <div class="w-full max-w-md space-y-5 rounded-2xl border border-border bg-canvas-subtle p-8 shadow-2xl">
+    <div
+      class="animate-pop-in w-full max-w-md space-y-5 rounded-2xl border border-border bg-canvas-subtle p-8 shadow-2xl"
+    >
       <div
-        class="mx-auto flex h-14 w-14 items-center justify-center rounded-full"
+        class="animate-check-pop mx-auto flex h-14 w-14 items-center justify-center rounded-full ring-4"
         :class="
           review.lastSubmitted?.event === 'REQUEST_CHANGES'
-            ? 'bg-rose-500/15 text-rose-400'
+            ? 'bg-rose-500/15 text-rose-400 ring-rose-500/10'
             : review.lastSubmitted?.event === 'APPROVE'
-              ? 'bg-emerald-500/15 text-emerald-400'
-              : 'bg-blue-500/15 text-blue-400'
+              ? 'bg-emerald-500/15 text-emerald-400 ring-emerald-500/10'
+              : 'bg-blue-500/15 text-blue-400 ring-blue-500/10'
         "
       >
         <AlertTriangle
@@ -89,7 +95,7 @@ onBeforeUnmount(() => {
       <div class="space-y-2 pt-2">
         <div class="h-1 w-full overflow-hidden rounded-full bg-canvas-inset">
           <div
-            class="h-full bg-emerald-500 transition-all duration-75"
+            class="h-full bg-emerald-500"
             :style="{ width: `${progress}%` }"
           />
         </div>

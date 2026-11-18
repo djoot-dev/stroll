@@ -22,10 +22,11 @@ function dirOnly(path: string): string {
 </script>
 
 <template>
-  <aside
-    v-if="review.sidebarOpen && review.pr"
-    class="flex w-72 shrink-0 flex-col border-r border-border bg-canvas-subtle"
-  >
+  <Transition name="sidebar-slide">
+    <aside
+      v-if="review.sidebarOpen && review.pr"
+      class="flex w-72 shrink-0 flex-col border-r border-border bg-canvas-subtle"
+    >
     <!-- PR Summary Header -->
     <div class="border-b border-border p-3.5">
       <h2 class="line-clamp-2 text-xs font-semibold leading-snug text-slate-100">
@@ -90,7 +91,7 @@ function dirOnly(path: string): string {
             </span>
             <span
               v-if="review.isStepReviewed(step.file.path)"
-              class="inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400"
+              class="animate-check-pop inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400"
               title="Reviewed"
             >
               <Check class="h-2.5 w-2.5" />
@@ -109,4 +110,5 @@ function dirOnly(path: string): string {
       </button>
     </div>
   </aside>
+  </Transition>
 </template>

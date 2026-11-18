@@ -21,11 +21,12 @@ async function handleLoadDemo() {
 </script>
 
 <template>
-  <div
-    v-if="review.showLoaderModal"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-    @click.self="review.showLoaderModal = false"
-  >
+  <Transition name="modal-pop">
+    <div
+      v-if="review.showLoaderModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      @click.self="review.showLoaderModal = false"
+    >
     <div class="w-full max-w-xl rounded-xl border border-border bg-canvas-subtle shadow-2xl">
       <div class="flex items-center justify-between border-b border-border px-5 py-3.5">
         <div class="flex items-center gap-2">
@@ -142,5 +143,6 @@ async function handleLoadDemo() {
         </div>
       </div>
     </div>
-  </div>
+    </div>
+  </Transition>
 </template>

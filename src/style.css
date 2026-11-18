@@ -41,3 +41,147 @@
     background: #484f58;
   }
 }
+
+/* --- Tactile UI Transitions & Juice --- */
+
+@keyframes pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.95) translateY(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes check-pop {
+  0% {
+    transform: scale(0.6);
+  }
+  60% {
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes shimmer-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+.animate-pop-in {
+  animation: pop-in 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-check-pop {
+  animation: check-pop 240ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.animate-shimmer {
+  animation: shimmer-slide 1.4s ease-in-out infinite;
+}
+
+/* Screen transitions (Splash -> Inbox -> Review -> Submitted) */
+.screen-fade-enter-active,
+.screen-fade-leave-active {
+  transition:
+    opacity 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.screen-fade-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.screen-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* Directional Tour Step transitions */
+.step-next-enter-active,
+.step-next-leave-active,
+.step-prev-enter-active,
+.step-prev-leave-active {
+  transition:
+    opacity 150ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.step-next-enter-from {
+  opacity: 0;
+  transform: translateX(16px);
+}
+.step-next-leave-to {
+  opacity: 0;
+  transform: translateX(-16px);
+}
+
+.step-prev-enter-from {
+  opacity: 0;
+  transform: translateX(-16px);
+}
+.step-prev-leave-to {
+  opacity: 0;
+  transform: translateX(16px);
+}
+
+/* Modal backdrop + dialog pop */
+.modal-pop-enter-active,
+.modal-pop-leave-active {
+  transition: opacity 160ms ease;
+}
+
+.modal-pop-enter-active > div,
+.modal-pop-leave-active > div {
+  transition:
+    transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 160ms ease;
+}
+
+.modal-pop-enter-from,
+.modal-pop-leave-to {
+  opacity: 0;
+}
+
+.modal-pop-enter-from > div,
+.modal-pop-leave-to > div {
+  opacity: 0;
+  transform: scale(0.96) translateY(8px);
+}
+
+/* Collapsible drawer/card reveal */
+.reveal-down-enter-active,
+.reveal-down-leave-active {
+  transition:
+    opacity 160ms ease,
+    transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.reveal-down-enter-from,
+.reveal-down-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* Sidebar slide */
+.sidebar-slide-enter-active,
+.sidebar-slide-leave-active {
+  transition:
+    margin-left 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 160ms ease;
+}
+
+.sidebar-slide-enter-from,
+.sidebar-slide-leave-to {
+  margin-left: -18rem;
+  opacity: 0;
+}

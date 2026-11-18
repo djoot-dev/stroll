@@ -112,8 +112,10 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <div v-if="expanded" class="border-t border-border-muted">
-      <div ref="editorHost" class="max-h-64 overflow-auto" />
-    </div>
+    <Transition name="reveal-down">
+      <div v-if="expanded" class="border-t border-border-muted">
+        <div ref="editorHost" class="max-h-64 overflow-auto" />
+      </div>
+    </Transition>
   </div>
 </template>

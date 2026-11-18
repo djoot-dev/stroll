@@ -23,11 +23,12 @@ async function handleSave() {
 </script>
 
 <template>
-  <div
-    v-if="auth.showSettingsModal"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-    @click.self="auth.showSettingsModal = false"
-  >
+  <Transition name="modal-pop">
+    <div
+      v-if="auth.showSettingsModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      @click.self="auth.showSettingsModal = false"
+    >
     <div class="w-full max-w-md rounded-xl border border-border bg-canvas-subtle shadow-2xl">
       <div class="flex items-center justify-between border-b border-border px-5 py-3.5">
         <div class="flex items-center gap-2">
@@ -102,5 +103,6 @@ async function handleSave() {
         </button>
       </div>
     </div>
-  </div>
+    </div>
+  </Transition>
 </template>
