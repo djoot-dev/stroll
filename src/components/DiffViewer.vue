@@ -123,19 +123,43 @@ const visibleLines = computed<DiffLine[]>(() => {
   return list
 })
 
-const selectedLineKeys = computed<Set<string>>(() => {
-  if (isDraggingSelection.value && dragAnchorKey.value && dragFocusKey.value) {
-    const lines = visibleLines.value
-    const idxA = lines.findIndex((l) => l.key === dragAnchorKey.value)
-    const idxB = lines.findIndex((l) => l.key === dragFocusKey.value)
-    if (idxA !== -1 && idxB !== -1) {
-      const lo = Math.min(idxA, idxB)
-      const hi = Math.max(idxA, idxB)
-      return new Set(lines.slice(lo, hi + 1).map((l) => l.key))
+const selectedRange = computed<{
+  keys: Set<string>
+  startKey: string | null
+  endKey: string | null
+}>(() => {
+  const keys = (() => {
+    if (isDraggingSelection.value && dragAnchorKey.value && dragFocusKey.value) {
+      const lines = visibleLines.value
+      const idxA = lines.findIndex((l) => l.key === dragAnchorKey.value)
+      const idxB = lines.findIndex((l) => l.key === dragFocusKey.value)
+      if (idxA !== -1 && idxB !== -1) {
+        const lo = Math.min(idxA, idxB)
+        const hi = Math.max(idxA, idxB)
+        return lines.slice(lo, hi + 1).map((l) => l.key)
+      }
     }
+    return Array.from(activeComposer.value?.selectedKeys ?? [])
+  })()
+
+  return {
+    keys: new Set(keys),
+    startKey: keys[0] ?? null,
+    endKey: keys[keys.length - 1] ?? null,
   }
-  return activeComposer.value?.selectedKeys ?? new Set()
 })
+
+function selectionRowClass(key: string): string {
+  const { keys, startKey, endKey } = selectedRange.value
+  if (!keys.has(key)) return ''
+  const classes = [
+    'bg-blue-500/15',
+    'shadow-[inset_2px_0_0_#60a5fa,inset_-1px_0_0_rgba(96,165,250,0.45)]',
+  ]
+  if (key === startKey) classes.push('border-t border-t-blue-400/50')
+  if (key === endKey) classes.push('border-b border-b-blue-400/50')
+  return classes.join(' ')
+}
 
 /**
  * Pre-computes CodeMirror 6 highlight spans + resolvable PR identifier parts
@@ -474,8 +498,8 @@ function statusBadgeClass(status: string): string {
                 <div
                   class="group flex cursor-pointer items-stretch"
                   :class="
-                    selectedLineKeys.has(line.key)
-                      ? 'bg-blue-500/18 shadow-[inset_2px_0_0_#60a5fa]'
+                    selectedRange.keys.has(line.key)
+                      ? selectionRowClass(line.key)
                       : 'hover:bg-slate-800/40'
                   "
                   @mousedown.left="startLineDrag(line)"
@@ -534,8 +558,8 @@ function statusBadgeClass(status: string): string {
               <div
                 class="group flex cursor-pointer items-stretch"
                 :class="
-                  selectedLineKeys.has(line.key)
-                    ? 'bg-blue-500/18 shadow-[inset_2px_0_0_#60a5fa]'
+                  selectedRange.keys.has(line.key)
+                    ? selectionRowClass(line.key)
                     : {
                         'bg-emerald-500/10 hover:bg-emerald-500/15': line.type === 'add',
                         'bg-rose-500/10 hover:bg-rose-500/15': line.type === 'del',
