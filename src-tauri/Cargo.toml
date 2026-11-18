@@ -1,6 +1,6 @@
 [package]
 name = "pr-tour"
-version = "0.1.0"
+version = "0.1.2"
 description = "Guided, step-by-step GitHub Pull Request review desktop app"
 authors = ["Daniel"]
 edition = "2021"
