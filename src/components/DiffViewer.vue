@@ -23,6 +23,7 @@ import type { DiffSide, DraftComment, ReviewThread, TourStep } from '@/types/pr'
 import CodeHoverPopover from './CodeHoverPopover.vue'
 import CommentComposer from './CommentComposer.vue'
 import ReferencedContextCard from './ReferencedContextCard.vue'
+import ReviewThreadCard from './ReviewThreadCard.vue'
 
 interface TokenPart {
   text: string
@@ -500,6 +501,13 @@ function statusBadgeClass(status: string): string {
                   >{{ pt.text }}</span><span v-else :class="pt.className">{{ pt.text }}</span></template></pre>
                 </div>
 
+                <!-- Existing GitHub Review Threads -->
+                <ReviewThreadCard
+                  v-for="thread in threadsForLine(line)"
+                  :key="thread.id"
+                  :thread="thread"
+                />
+
                 <!-- Inline Composer -->
                 <CommentComposer
                   v-if="activeComposer?.key === line.key"
@@ -568,25 +576,11 @@ function statusBadgeClass(status: string): string {
               </div>
 
               <!-- Existing GitHub Review Threads -->
-              <div
+              <ReviewThreadCard
                 v-for="thread in threadsForLine(line)"
                 :key="thread.id"
-                class="my-1.5 mx-3 rounded-lg border border-border bg-canvas-subtle p-3 font-sans"
-              >
-                <div
-                  v-for="comment in thread.comments"
-                  :key="comment.id"
-                  class="space-y-1"
-                >
-                  <div class="flex items-center justify-between text-[11px]">
-                    <span class="font-semibold text-slate-200">@{{ comment.author.login }}</span>
-                    <span class="text-slate-500">
-                      {{ new Date(comment.createdAt).toLocaleString() }}
-                    </span>
-                  </div>
-                  <p class="whitespace-pre-wrap text-xs text-slate-300">{{ comment.body }}</p>
-                </div>
-              </div>
+                :thread="thread"
+              />
 
               <!-- Local Pending Draft Comments -->
               <div

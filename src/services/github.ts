@@ -7,6 +7,7 @@ import type {
   PRFile,
   PRSummary,
   PullRequestData,
+  ReviewComment,
   ReviewEvent,
   ReviewThread,
 } from '@/types/pr'
@@ -554,6 +555,77 @@ export async function addReviewThread(
     body,
   })
   return data.addPullRequestReviewThread.thread.id
+}
+
+export async function replyToReviewThread(
+  pat: string,
+  pullRequestReviewThreadId: string,
+  body: string,
+): Promise<ReviewComment> {
+  const mutation = `
+    mutation ReplyToReviewThread($threadId: ID!, $body: String!) {
+      addPullRequestReviewThreadReply(
+        input: { pullRequestReviewThreadId: $threadId, body: $body }
+      ) {
+        comment {
+          id
+          body
+          createdAt
+          author {
+            login
+            avatarUrl
+          }
+        }
+      }
+    }
+  `
+  const data = await graphql<{
+    addPullRequestReviewThreadReply: {
+      comment: {
+        id: string
+        body: string
+        createdAt: string
+        author: GitHubUser | null
+      }
+    }
+  }>(pat, mutation, { threadId: pullRequestReviewThreadId, body })
+
+  const c = data.addPullRequestReviewThreadReply.comment
+  return {
+    id: c.id,
+    body: c.body,
+    createdAt: c.createdAt,
+    author: c.author ?? { login: 'ghost', avatarUrl: '' },
+  }
+}
+
+export async function setReviewThreadResolved(
+  pat: string,
+  threadId: string,
+  resolved: boolean,
+): Promise<boolean> {
+  const mutation = resolved
+    ? `
+      mutation ResolveThread($threadId: ID!) {
+        resolveReviewThread(input: { threadId: $threadId }) {
+          thread { isResolved }
+        }
+      }
+    `
+    : `
+      mutation UnresolveThread($threadId: ID!) {
+        unresolveReviewThread(input: { threadId: $threadId }) {
+          thread { isResolved }
+        }
+      }
+    `
+  const data = await graphql<Record<string, { thread: { isResolved: boolean } }>>(
+    pat,
+    mutation,
+    { threadId },
+  )
+  const key = resolved ? 'resolveReviewThread' : 'unresolveReviewThread'
+  return data[key].thread.isResolved
 }
 
 export async function submitReview(

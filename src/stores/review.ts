@@ -6,6 +6,8 @@ import {
   createPendingReview,
   fetchPullRequest,
   parsePRUrl,
+  replyToReviewThread,
+  setReviewThreadResolved,
   submitReview,
 } from '@/services/github'
 import { buildReadingOrder } from '@/services/readingOrder'
@@ -319,6 +321,52 @@ export const useReviewStore = defineStore('review', () => {
     }
   }
 
+  async function replyToThread(threadId: string, body: string): Promise<void> {
+    if (!pr.value || !body.trim()) return
+    const auth = useAuthStore()
+    const target = pr.value.threads.find((t) => t.id === threadId)
+    if (!target) return
+
+    if (pr.value.isMock) {
+      target.comments.push({
+        id: `mock_reply_${Date.now()}`,
+        author: auth.viewer ?? {
+          login: 'you (demo)',
+          avatarUrl: 'https://avatars.githubusercontent.com/u/0?v=4',
+        },
+        body: body.trim(),
+        createdAt: new Date().toISOString(),
+      })
+      return
+    }
+
+    if (!auth.pat) {
+      throw new Error('GitHub PAT is required to reply to a review thread.')
+    }
+
+    const comment = await replyToReviewThread(auth.pat, threadId, body.trim())
+    target.comments.push(comment)
+  }
+
+  async function toggleThreadResolved(threadId: string): Promise<void> {
+    if (!pr.value) return
+    const auth = useAuthStore()
+    const target = pr.value.threads.find((t) => t.id === threadId)
+    if (!target) return
+
+    const nextState = !target.isResolved
+    if (pr.value.isMock) {
+      target.isResolved = nextState
+      return
+    }
+
+    if (!auth.pat) {
+      throw new Error('GitHub PAT is required to resolve a review thread.')
+    }
+
+    target.isResolved = await setReviewThreadResolved(auth.pat, threadId, nextState)
+  }
+
   return {
     screen,
     pr,
@@ -354,6 +402,8 @@ export const useReviewStore = defineStore('review', () => {
     isStepReviewed,
     addDraftComment,
     deleteDraftComment,
+    replyToThread,
+    toggleThreadResolved,
     submitCompleteReview,
   }
 })
