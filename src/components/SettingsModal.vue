@@ -129,6 +129,12 @@ const navItems: Array<{
     icon: FolderGit2,
     badge: () => (linkedRepos.value.length > 0 ? `${linkedRepos.value.length}` : null),
   },
+  {
+    id: 'updates',
+    label: 'Updates',
+    icon: RefreshCw,
+    badge: () => (updateState.value === 'available' ? 'Update available' : null),
+  },
   { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
 ]
 
@@ -270,49 +276,6 @@ async function handleResetDefaults() {
             <!-- GENERAL -->
             <template v-if="settings.activeSection === 'general'">
               <div class="space-y-4">
-                <div class="rounded-lg border border-border bg-canvas/60 p-4">
-                  <div class="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p class="text-xs font-medium text-slate-200">Application Updates</p>
-                      <p v-if="updateState === 'up-to-date'" class="mt-0.5 text-[11px] text-emerald-400">
-                        PR Tour v{{ appVersion }} is up to date.
-                      </p>
-                      <p v-else-if="updateState === 'available' && availableUpdate" class="mt-0.5 text-[11px] text-blue-400">
-                        Version v{{ availableUpdate.version }} is available.
-                      </p>
-                      <p v-else-if="updateState === 'installing'" class="mt-0.5 text-[11px] text-slate-400">
-                        {{ updateMessage }}
-                      </p>
-                      <p v-else-if="updateState === 'error'" class="mt-0.5 text-[11px] text-amber-400">
-                        {{ updateMessage }}
-                      </p>
-                      <p v-else class="mt-0.5 text-[11px] text-slate-400">
-                        Installed version: v{{ appVersion }}
-                      </p>
-                    </div>
-                    <button
-                      v-if="updateState === 'available'"
-                      type="button"
-                      class="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/40 bg-blue-500/15 px-3 py-1.5 text-xs font-medium text-blue-300 hover:bg-blue-500/25"
-                      @click="handleInstallUpdate"
-                    >
-                      <Download class="h-3.5 w-3.5" />
-                      <span>Install &amp; Restart</span>
-                    </button>
-                    <button
-                      v-else
-                      type="button"
-                      class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-canvas px-3 py-1.5 text-xs text-slate-300 hover:bg-canvas-elevated disabled:opacity-50"
-                      :disabled="updateState === 'checking' || updateState === 'installing'"
-                      @click="handleCheckForUpdates"
-                    >
-                      <Loader2 v-if="updateState === 'checking' || updateState === 'installing'" class="h-3.5 w-3.5 animate-spin" />
-                      <RefreshCw v-else class="h-3.5 w-3.5" />
-                      <span>Check for Updates</span>
-                    </button>
-                  </div>
-                </div>
-
                 <div class="rounded-lg border border-border bg-canvas/60 p-4">
                   <div class="flex flex-wrap items-center justify-between gap-3">
                     <div>
@@ -709,6 +672,61 @@ async function handleResetDefaults() {
               </div>
             </template>
 
+            <!-- UPDATES -->
+            <template v-else-if="settings.activeSection === 'updates'">
+              <div class="space-y-4">
+                <div class="rounded-lg border border-border bg-canvas/60 p-4">
+                  <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p class="text-xs font-medium text-slate-200">PR Tour v{{ appVersion }}</p>
+                      <p v-if="updateState === 'up-to-date'" class="mt-0.5 text-[11px] text-emerald-400">
+                        You're on the latest version.
+                      </p>
+                      <p
+                        v-else-if="updateState === 'available' && availableUpdate"
+                        class="mt-0.5 text-[11px] text-blue-400"
+                      >
+                        Version v{{ availableUpdate.version }} is available.
+                      </p>
+                      <p v-else-if="updateState === 'installing'" class="mt-0.5 text-[11px] text-slate-400">
+                        {{ updateMessage }}
+                      </p>
+                      <p v-else-if="updateState === 'error'" class="mt-0.5 text-[11px] text-amber-400">
+                        {{ updateMessage }}
+                      </p>
+                      <p v-else class="mt-0.5 text-[11px] text-slate-400">
+                        Check for new desktop releases and install updates automatically.
+                      </p>
+                    </div>
+
+                    <button
+                      v-if="updateState === 'available'"
+                      type="button"
+                      class="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/40 bg-blue-500/15 px-3 py-1.5 text-xs font-medium text-blue-300 hover:bg-blue-500/25"
+                      @click="handleInstallUpdate"
+                    >
+                      <Download class="h-3.5 w-3.5" />
+                      <span>Install &amp; Restart</span>
+                    </button>
+                    <button
+                      v-else
+                      type="button"
+                      class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-canvas px-3 py-1.5 text-xs text-slate-300 hover:bg-canvas-elevated disabled:opacity-50"
+                      :disabled="updateState === 'checking' || updateState === 'installing'"
+                      @click="handleCheckForUpdates"
+                    >
+                      <Loader2
+                        v-if="updateState === 'checking' || updateState === 'installing'"
+                        class="h-3.5 w-3.5 animate-spin"
+                      />
+                      <RefreshCw v-else class="h-3.5 w-3.5" />
+                      <span>Check for Updates</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </template>
+
             <!-- SHORTCUTS -->
             <template v-else-if="settings.activeSection === 'shortcuts'">
               <div class="divide-y divide-border-muted rounded-lg border border-border bg-canvas/60">
@@ -730,47 +748,6 @@ async function handleResetDefaults() {
                 </div>
               </div>
             </template>
-          </div>
-        </div>
-
-        <div class="border-t border-border pt-4">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <p class="text-xs font-medium text-slate-300">PR Tour v{{ appVersion }}</p>
-              <p v-if="updateState === 'up-to-date'" class="text-[11px] text-emerald-400">
-                You're on the latest version.
-              </p>
-              <p v-else-if="updateState === 'available' && availableUpdate" class="text-[11px] text-blue-400">
-                Version v{{ availableUpdate.version }} is available.
-              </p>
-              <p v-else-if="updateState === 'installing'" class="text-[11px] text-slate-400">
-                {{ updateMessage }}
-              </p>
-              <p v-else-if="updateState === 'error'" class="text-[11px] text-amber-400">
-                {{ updateMessage }}
-              </p>
-            </div>
-
-            <button
-              v-if="updateState === 'available'"
-              type="button"
-              class="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/40 bg-blue-500/15 px-3 py-1.5 text-xs font-medium text-blue-300 hover:bg-blue-500/25"
-              @click="handleInstallUpdate"
-            >
-              <Download class="h-3.5 w-3.5" />
-              <span>Install &amp; Restart</span>
-            </button>
-            <button
-              v-else
-              type="button"
-              class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-canvas px-3 py-1.5 text-xs text-slate-300 hover:bg-canvas-elevated disabled:opacity-50"
-              :disabled="updateState === 'checking' || updateState === 'installing'"
-              @click="handleCheckForUpdates"
-            >
-              <Loader2 v-if="updateState === 'checking' || updateState === 'installing'" class="h-3.5 w-3.5 animate-spin" />
-              <RefreshCw v-else class="h-3.5 w-3.5" />
-              <span>Check for Updates</span>
-            </button>
           </div>
         </div>
       </div>

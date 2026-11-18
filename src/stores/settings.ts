@@ -9,7 +9,14 @@ import {
 } from '@/services/storage'
 import type { TourDirection } from '@/types/pr'
 
-export type SettingsSection = 'general' | 'tour' | 'diff' | 'github' | 'repositories' | 'shortcuts'
+export type SettingsSection =
+  | 'general'
+  | 'tour'
+  | 'diff'
+  | 'github'
+  | 'repositories'
+  | 'updates'
+  | 'shortcuts'
 
 export interface AppSettings extends PersistedAppSettings {
   defaultTourDirection: TourDirection
