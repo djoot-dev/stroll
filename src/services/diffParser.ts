@@ -31,7 +31,7 @@ export interface DiffHunkBlock {
 
 export type DiffSegment = DiffGap | DiffHunkBlock
 
-interface RawHunk {
+export interface RawHunk {
   oldStart: number
   oldCount: number
   newStart: number
@@ -40,7 +40,7 @@ interface RawHunk {
   lines: DiffLine[]
 }
 
-function parsePatchHunks(patch: string): RawHunk[] {
+export function parsePatchHunks(patch: string): RawHunk[] {
   if (!patch.trim()) return []
 
   const rawLines = patch.split('\n')
@@ -159,16 +159,18 @@ export function buildDiffSegments(file: PRFile): DiffSegment[] {
   const sourceLines = fullText !== null ? fullText.split('\n') : []
   const hunks = parsePatchHunks(file.patch)
 
-  // If there's no patch (e.g. newly added binary/large or full-file view), show headContent
+  // If there's no patch (e.g. newly added binary/large or full-file view), show full content
   if (hunks.length === 0 && sourceLines.length > 0) {
     return [
       {
         id: 'hunk-full',
         kind: 'hunk',
-        header: `@@ -0,0 +1,${sourceLines.length} @@`,
+        header: isDeleted
+          ? `@@ -1,${sourceLines.length} +0,0 @@`
+          : `@@ -0,0 +1,${sourceLines.length} @@`,
         lines: sourceLines.map((content, idx) => ({
           key: `full-${idx + 1}`,
-          type: file.status === 'added' ? 'add' : 'context',
+          type: file.status === 'added' ? 'add' : isDeleted ? 'del' : 'context',
           content,
           oldLineNumber: file.status === 'added' ? null : idx + 1,
           newLineNumber: isDeleted ? null : idx + 1,
