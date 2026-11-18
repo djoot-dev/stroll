@@ -1,5 +1,6 @@
 import type { PRFile } from '@/types/pr'
 import type { DiffLine } from './diffParser'
+import { isTauriRuntime, resolveRepoSymbol } from './native'
 
 export type SymbolKind =
   | 'interface'
@@ -20,6 +21,7 @@ export interface SymbolDeclaration {
   headSnippet: string
   baseSnippet: string | null
   isModifiedInPR: boolean
+  source?: 'pr' | 'repo'
 }
 
 export interface SymbolUsage {
@@ -244,6 +246,101 @@ export function resolveHoverSymbol(
 
   const sameFile = candidates.find((c) => c.path === currentFile.path)
   const declaration = sameFile ?? candidates[0]
+  const usages = findUsagesInPR(
+    declaration.name,
+    declaration.path,
+    declaration.line,
+    allFiles,
+  )
+
+  return {
+    declaration,
+    usages,
+    isSameFile: declaration.path === currentFile.path,
+  }
+}
+
+/**
+ * Finds the import specifier (e.g. `'../types/webhook'`, `'@/services/storage'`, `'crate::commands::git'`)
+ * that brings `symbolName` into scope in `content`.
+ */
+export function findImportSpecifierForSymbol(
+  content: string | null | undefined,
+  symbolName: string,
+): string | null {
+  if (!content || !symbolName) return null
+  const escaped = symbolName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const wordRegex = new RegExp(`\\b${escaped}\\b`)
+
+  const lines = content.split('\n')
+  // Join multiline ES imports simply by tracking `import ... from '...'`
+  const joined = content.replace(/\r\n/g, '\n')
+  const esImportRegex =
+    /import\s+(?:type\s+)?([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g
+  let match: RegExpExecArray | null
+  while ((match = esImportRegex.exec(joined)) !== null) {
+    if (wordRegex.test(match[1])) {
+      return match[2]
+    }
+  }
+
+  for (const line of lines) {
+    const pyMatch = line.match(/^\s*from\s+([A-Za-z0-9_.]+)\s+import\s+(.+)$/)
+    if (pyMatch && wordRegex.test(pyMatch[2])) {
+      return pyMatch[1]
+    }
+
+    const rustMatch = line.match(/^\s*(?:pub\s+)?use\s+([A-Za-z0-9_:]+)\s*;/)
+    if (rustMatch && wordRegex.test(rustMatch[1])) {
+      // Strip trailing `::Symbol` to get module path
+      return rustMatch[1].replace(new RegExp(`::${escaped}$`), '')
+    }
+  }
+
+  return null
+}
+
+/**
+ * Resolves hover context: first checks the in-memory `PRSymbolIndex`, and if not found
+ * and a local `repoPath` is configured in Tauri, falls back to native `tree-sitter` resolution.
+ */
+export async function resolveHoverSymbolWithRepoFallback(
+  identifier: string,
+  currentFile: PRFile,
+  allFiles: PRFile[],
+  index: PRSymbolIndex,
+  repoPath: string | null,
+): Promise<HoverSymbolInfo | null> {
+  const fastResult = resolveHoverSymbol(identifier, currentFile, allFiles, index)
+  if (fastResult) return fastResult
+
+  if (!repoPath || !isTauriRuntime()) return null
+
+  const sourceContent = currentFile.headContent ?? currentFile.baseContent
+  const importSpecifier = findImportSpecifierForSymbol(sourceContent, identifier)
+
+  const resolved = await resolveRepoSymbol({
+    repoPath,
+    importerPath: currentFile.path,
+    symbolName: identifier,
+    importSpecifier,
+  })
+
+  if (!resolved) return null
+
+  const declaration: SymbolDeclaration = {
+    name: resolved.name,
+    kind: normalizeKind(resolved.kind),
+    path: resolved.path,
+    line: resolved.line,
+    language: resolved.language,
+    docComment: resolved.docComment,
+    headSnippet: resolved.snippet,
+    baseSnippet: null,
+    isModifiedInPR: false,
+    source: 'repo',
+  }
+
   const usages = findUsagesInPR(
     declaration.name,
     declaration.path,

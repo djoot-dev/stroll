@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { MOCK_PR } from '@/data/mockPR'
 import {
   buildPRSymbolIndex,
+  findImportSpecifierForSymbol,
   getEnclosingScope,
   getReplacedLinesForAddedLine,
   resolveHoverSymbol,
+  resolveHoverSymbolWithRepoFallback,
 } from '@/services/codeContext'
 import { buildDiffSegments } from '@/services/diffParser'
 
@@ -46,5 +48,44 @@ describe('codeContext', () => {
     const replaced = getReplacedLinesForAddedLine(hunk.lines, addIdx)
     expect(replaced.length).toBe(1)
     expect(replaced[0]).toContain("from '../types/webhook'")
+  })
+
+  it('extracts import specifiers for TS, Python, and Rust symbols', () => {
+    const tsSrc = `import { Foo, Bar as Baz } from '@/types/pr'\nimport DefaultThing from '../utils/thing'`
+    expect(findImportSpecifierForSymbol(tsSrc, 'Foo')).toBe('@/types/pr')
+    expect(findImportSpecifierForSymbol(tsSrc, 'DefaultThing')).toBe('../utils/thing')
+
+    const pySrc = `from app.models.user import UserAccount`
+    expect(findImportSpecifierForSymbol(pySrc, 'UserAccount')).toBe('app.models.user')
+
+    const rsSrc = `use crate::commands::git::GitBlameInfo;`
+    expect(findImportSpecifierForSymbol(rsSrc, 'GitBlameInfo')).toBe('crate::commands::git')
+  })
+
+  it('falls back gracefully in browser mode for resolveHoverSymbolWithRepoFallback', async () => {
+    const index = buildPRSymbolIndex(MOCK_PR.files)
+    const dispatcherFile = MOCK_PR.files.find((f) =>
+      f.path.endsWith('webhookDispatcher.ts'),
+    )!
+
+    // Fast path still resolves PR symbols
+    const prHit = await resolveHoverSymbolWithRepoFallback(
+      'WebhookEndpoint',
+      dispatcherFile,
+      MOCK_PR.files,
+      index,
+      '/tmp/fake-repo',
+    )
+    expect(prHit?.declaration.path).toBe('src/types/webhook.ts')
+
+    // Unknown symbol returns null safely without __TAURI_INTERNALS__
+    const miss = await resolveHoverSymbolWithRepoFallback(
+      'NonExistentExternalSymbol',
+      dispatcherFile,
+      MOCK_PR.files,
+      index,
+      '/tmp/fake-repo',
+    )
+    expect(miss).toBeNull()
   })
 })

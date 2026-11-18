@@ -71,3 +71,11 @@ export async function saveDraftComments(prKey: string, drafts: DraftComment[]): 
   all[prKey] = drafts
   await setItem('draft_comments', all)
 }
+
+export async function loadRepoPaths(): Promise<Record<string, string>> {
+  return (await getItem<Record<string, string>>('repo_paths')) ?? {}
+}
+
+export async function saveRepoPaths(paths: Record<string, string>): Promise<void> {
+  await setItem('repo_paths', paths)
+}

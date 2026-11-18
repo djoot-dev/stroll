@@ -3,6 +3,7 @@ import {
   ArrowRight,
   Clock,
   FileDiff,
+  FolderGit2,
   GitPullRequest,
   KeyRound,
   Loader2,
@@ -88,6 +89,21 @@ onBeforeUnmount(() => {
           >
             <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': auth.isLoading }" />
             <span>Refresh</span>
+          </button>
+
+          <button
+            class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-canvas px-3 py-1.5 text-xs text-slate-300 hover:bg-canvas-elevated"
+            title="Link local repository checkouts for AST & git blame"
+            @click="auth.showSettingsModal = true"
+          >
+            <FolderGit2 class="h-3.5 w-3.5 text-purple-400" />
+            <span>Local Repos</span>
+            <span
+              v-if="Object.keys(review.repoPaths).length > 0"
+              class="rounded-full bg-purple-500/20 px-1.5 py-0.5 font-mono text-[10px] text-purple-300"
+            >
+              {{ Object.keys(review.repoPaths).length }}
+            </span>
           </button>
 
           <button

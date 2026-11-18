@@ -12,9 +12,10 @@ import {
   buildPRSymbolIndex,
   getEnclosingScope,
   getReplacedLinesForAddedLine,
-  resolveHoverSymbol,
+  resolveHoverSymbolWithRepoFallback,
   type HoverSymbolInfo,
 } from '@/services/codeContext'
+import { gitBlameLine, isTauriRuntime, type GitBlameInfo } from '@/services/native'
 import { buildDiffSegments, type DiffLine } from '@/services/diffParser'
 import { highlightLinesWithCodeMirror, type HighlightSpan } from '@/services/highlighter'
 import { LAYER_META } from '@/services/readingOrder'
@@ -57,11 +58,15 @@ const requireAltForHover = ref(false)
 const activeScopes = ref<string[]>([])
 const activeReplacedCount = ref(0)
 const hoverState = ref<{
-  info: HoverSymbolInfo
+  info: HoverSymbolInfo | null
+  blame: GitBlameInfo | null
   replacedLines: string[]
   x: number
   y: number
 } | null>(null)
+
+const blameCache = new Map<string, GitBlameInfo | null>()
+let hoverRequestSeq = 0
 
 let hoverOpenTimer: number | null = null
 let hoverCloseTimer: number | null = null
@@ -279,28 +284,57 @@ function handleLineMouseEnter(line: DiffLine, hunkLines: DiffLine[], lineIdx: nu
     line.type === 'add' ? getReplacedLinesForAddedLine(hunkLines, lineIdx).length : 0
 }
 
+async function fetchBlameForLine(line: DiffLine): Promise<GitBlameInfo | null> {
+  const repoPath = review.currentRepoPath
+  if (!repoPath || !isTauriRuntime() || line.type !== 'context' || line.oldLineNumber == null) {
+    return null
+  }
+  const filePath = props.step.file.previousPath ?? props.step.file.path
+  const refOid = review.pr?.baseRefOid ?? ''
+  const cacheKey = `${repoPath}:${filePath}:${refOid}:${line.oldLineNumber}`
+  if (blameCache.has(cacheKey)) {
+    return blameCache.get(cacheKey) ?? null
+  }
+  const info = await gitBlameLine({
+    repoPath,
+    filePath,
+    line: line.oldLineNumber,
+    refOid: refOid || undefined,
+  })
+  blameCache.set(cacheKey, info)
+  return info
+}
+
 function handleIdentMouseEnter(
   event: MouseEvent,
   ident: string,
   hunkLines: DiffLine[],
   lineIdx: number,
+  line: DiffLine,
 ) {
   if (requireAltForHover.value && !event.altKey) return
 
   clearHoverTimers()
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
   const replacedLines = getReplacedLinesForAddedLine(hunkLines, lineIdx)
+  const reqId = ++hoverRequestSeq
 
-  hoverOpenTimer = window.setTimeout(() => {
-    const info = resolveHoverSymbol(
-      ident,
-      props.step.file,
-      review.pr?.files ?? [],
-      symbolIndex.value,
-    )
-    if (!info) return
+  hoverOpenTimer = window.setTimeout(async () => {
+    const [info, blame] = await Promise.all([
+      resolveHoverSymbolWithRepoFallback(
+        ident,
+        props.step.file,
+        review.pr?.files ?? [],
+        symbolIndex.value,
+        review.currentRepoPath,
+      ),
+      fetchBlameForLine(line),
+    ])
+    if (reqId !== hoverRequestSeq) return
+    if (!info && !blame) return
     hoverState.value = {
       info,
+      blame,
       replacedLines,
       x: rect.left,
       y: rect.bottom,
@@ -520,7 +554,7 @@ function statusBadgeClass(status: string): string {
                   ><span
                     v-if="pt.ident"
                     :class="[pt.className, 'cursor-help hover:underline hover:decoration-blue-400/70 hover:decoration-dotted']"
-                    @mouseenter="handleIdentMouseEnter($event, pt.ident, seg.lines, lIdx)"
+                    @mouseenter="handleIdentMouseEnter($event, pt.ident, seg.lines, lIdx, line)"
                     @mouseleave="handleIdentMouseLeave"
                   >{{ pt.text }}</span><span v-else :class="pt.className">{{ pt.text }}</span></template></pre>
                 </div>
@@ -594,7 +628,7 @@ function statusBadgeClass(status: string): string {
                 ><span
                   v-if="pt.ident"
                   :class="[pt.className, 'cursor-help hover:underline hover:decoration-blue-400/70 hover:decoration-dotted']"
-                  @mouseenter="handleIdentMouseEnter($event, pt.ident, seg.lines, lIdx)"
+                  @mouseenter="handleIdentMouseEnter($event, pt.ident, seg.lines, lIdx, line)"
                   @mouseleave="handleIdentMouseLeave"
                 >{{ pt.text }}</span><span v-else :class="pt.className">{{ pt.text }}</span></template></pre>
               </div>
@@ -652,6 +686,7 @@ function statusBadgeClass(status: string): string {
     <CodeHoverPopover
       v-if="hoverState"
       :info="hoverState.info"
+      :blame="hoverState.blame"
       :replaced-lines="hoverState.replacedLines"
       :x="hoverState.x"
       :y="hoverState.y"
