@@ -1,10 +1,61 @@
 <script setup lang="ts">
-import { CheckCircle2, KeyRound, Loader2, LogOut, X } from '@lucide/vue'
-import { ref, watch } from 'vue'
+import { getVersion } from '@tauri-apps/api/app'
+import { CheckCircle2, Download, KeyRound, Loader2, LogOut, RefreshCw, X } from '@lucide/vue'
+import { onMounted, ref, watch } from 'vue'
+import { checkForAppUpdate, type AvailableUpdate } from '@/services/updater'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
 const tokenInput = ref(auth.pat)
+const appVersion = ref('0.1.0')
+const updateState = ref<'idle' | 'checking' | 'up-to-date' | 'available' | 'installing' | 'error'>('idle')
+const availableUpdate = ref<AvailableUpdate | null>(null)
+const updateMessage = ref('')
+
+onMounted(async () => {
+  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+    try {
+      appVersion.value = await getVersion()
+    } catch {
+      // Fallback to default version
+    }
+  }
+})
+
+async function handleCheckForUpdates() {
+  updateState.value = 'checking'
+  updateMessage.value = ''
+  availableUpdate.value = null
+  try {
+    const result = await checkForAppUpdate()
+    if (result.available) {
+      availableUpdate.value = result
+      updateState.value = 'available'
+    } else {
+      updateState.value = 'up-to-date'
+    }
+  } catch (err) {
+    updateState.value = 'error'
+    updateMessage.value = err instanceof Error ? err.message : 'Unable to check for updates.'
+  }
+}
+
+async function handleInstallUpdate() {
+  if (!availableUpdate.value) return
+  updateState.value = 'installing'
+  updateMessage.value = 'Downloading update...'
+  try {
+    await availableUpdate.value.install((downloaded, total) => {
+      if (total && total > 0) {
+        const pct = Math.round((downloaded / total) * 100)
+        updateMessage.value = `Downloading update (${pct}%)...`
+      }
+    })
+  } catch (err) {
+    updateState.value = 'error'
+    updateMessage.value = err instanceof Error ? err.message : 'Failed to install update.'
+  }
+}
 
 watch(
   () => auth.showSettingsModal,
@@ -83,6 +134,47 @@ async function handleSave() {
             <LogOut class="h-3.5 w-3.5" />
             <span>Sign out</span>
           </button>
+        </div>
+
+        <div class="border-t border-border pt-4">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <p class="text-xs font-medium text-slate-300">PR Tour v{{ appVersion }}</p>
+              <p v-if="updateState === 'up-to-date'" class="text-[11px] text-emerald-400">
+                You're on the latest version.
+              </p>
+              <p v-else-if="updateState === 'available' && availableUpdate" class="text-[11px] text-blue-400">
+                Version v{{ availableUpdate.version }} is available.
+              </p>
+              <p v-else-if="updateState === 'installing'" class="text-[11px] text-slate-400">
+                {{ updateMessage }}
+              </p>
+              <p v-else-if="updateState === 'error'" class="text-[11px] text-amber-400">
+                {{ updateMessage }}
+              </p>
+            </div>
+
+            <button
+              v-if="updateState === 'available'"
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/40 bg-blue-500/15 px-3 py-1.5 text-xs font-medium text-blue-300 hover:bg-blue-500/25"
+              @click="handleInstallUpdate"
+            >
+              <Download class="h-3.5 w-3.5" />
+              <span>Install &amp; Restart</span>
+            </button>
+            <button
+              v-else
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-canvas px-3 py-1.5 text-xs text-slate-300 hover:bg-canvas-elevated disabled:opacity-50"
+              :disabled="updateState === 'checking' || updateState === 'installing'"
+              @click="handleCheckForUpdates"
+            >
+              <Loader2 v-if="updateState === 'checking' || updateState === 'installing'" class="h-3.5 w-3.5 animate-spin" />
+              <RefreshCw v-else class="h-3.5 w-3.5" />
+              <span>Check for Updates</span>
+            </button>
+          </div>
         </div>
       </div>
 
