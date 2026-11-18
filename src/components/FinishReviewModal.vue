@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { AlertTriangle, Check, Loader2, MessageSquare, Send, Trash2, X } from '@lucide/vue'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { useReviewStore } from '@/stores/review'
 import type { ReviewEvent } from '@/types/pr'
 
@@ -9,13 +9,20 @@ const review = useReviewStore()
 const summary = ref('')
 const selectedEvent = ref<ReviewEvent>('COMMENT')
 
+watch(
+  () => review.showFinishModal,
+  (open) => {
+    if (open) {
+      review.submitError = null
+      review.submitSuccessMessage = null
+    }
+  },
+)
+
 async function handleSubmit() {
   const ok = await review.submitCompleteReview(selectedEvent.value, summary.value)
   if (ok) {
     summary.value = ''
-    setTimeout(() => {
-      review.showFinishModal = false
-    }, 1200)
   }
 }
 </script>

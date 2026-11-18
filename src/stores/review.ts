@@ -25,12 +25,23 @@ import type {
 } from '@/types/pr'
 import { useAuthStore } from './auth'
 
+export type AppScreen = 'splash' | 'inbox' | 'review' | 'submitted'
+
+export interface SubmittedReviewSummary {
+  prRef: string
+  prTitle: string
+  event: ReviewEvent
+  commentCount: number
+}
+
 export const useReviewStore = defineStore('review', () => {
+  const screen = ref<AppScreen>('splash')
   const pr = ref<PullRequestData | null>(null)
   const tourDirection = ref<TourDirection>('bottom-up')
   const currentStepIndex = ref(0)
   const reviewedPaths = ref<Set<string>>(new Set())
   const draftComments = ref<DraftComment[]>([])
+  const lastSubmitted = ref<SubmittedReviewSummary | null>(null)
 
   const isLoadingPR = ref(false)
   const prError = ref<string | null>(null)
@@ -71,7 +82,6 @@ export const useReviewStore = defineStore('review', () => {
 
   async function init(): Promise<void> {
     tourDirection.value = await loadTourDirection()
-    await loadMockPR()
   }
 
   async function activatePR(data: PullRequestData): Promise<void> {
@@ -82,6 +92,13 @@ export const useReviewStore = defineStore('review', () => {
     submitSuccessMessage.value = null
     const key = `${data.owner}/${data.repo}#${data.number}`
     draftComments.value = await loadDraftComments(key)
+    screen.value = 'review'
+  }
+
+  function backToInbox(): void {
+    showFinishModal.value = false
+    prError.value = null
+    screen.value = 'inbox'
   }
 
   async function loadMockPR(): Promise<void> {
@@ -232,7 +249,15 @@ export const useReviewStore = defineStore('review', () => {
         }
         draftComments.value = []
         await saveDraftComments(prKey.value, [])
+        lastSubmitted.value = {
+          prRef: prKey.value,
+          prTitle: pr.value.title,
+          event,
+          commentCount: syncedThreads.length,
+        }
         submitSuccessMessage.value = `Demo review submitted (${event}) with ${syncedThreads.length} inline comment(s).`
+        showFinishModal.value = false
+        screen.value = 'submitted'
         return true
       }
 
@@ -264,12 +289,19 @@ export const useReviewStore = defineStore('review', () => {
 
       await submitReview(auth.pat, pr.value.id, reviewId, event, summary.trim())
 
-      // Clear local drafts and reload PR to reflect submitted threads
       const count = draftComments.value.length
       draftComments.value = []
       await saveDraftComments(prKey.value, [])
       pr.value.pendingReviewId = null
+      lastSubmitted.value = {
+        prRef: prKey.value,
+        prTitle: pr.value.title,
+        event,
+        commentCount: count,
+      }
       submitSuccessMessage.value = `Review submitted (${event}) with ${count} inline comment(s).`
+      showFinishModal.value = false
+      screen.value = 'submitted'
       return true
     } catch (err) {
       submitError.value = err instanceof Error ? err.message : 'Failed to submit review'
@@ -280,7 +312,9 @@ export const useReviewStore = defineStore('review', () => {
   }
 
   return {
+    screen,
     pr,
+    lastSubmitted,
     tourDirection,
     currentStepIndex,
     reviewedPaths,
@@ -302,6 +336,7 @@ export const useReviewStore = defineStore('review', () => {
     loadMockPR,
     loadPRByUrl,
     loadPRByRepo,
+    backToInbox,
     setTourDirection,
     goToStep,
     goToFile,

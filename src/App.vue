@@ -4,8 +4,11 @@ import { onBeforeUnmount, onMounted } from 'vue'
 import DiffViewer from '@/components/DiffViewer.vue'
 import FinishReviewModal from '@/components/FinishReviewModal.vue'
 import KeyboardShortcutsBar from '@/components/KeyboardShortcutsBar.vue'
+import PRInboxView from '@/components/PRInboxView.vue'
 import PRLoaderModal from '@/components/PRLoaderModal.vue'
+import ReviewSubmittedView from '@/components/ReviewSubmittedView.vue'
 import SettingsModal from '@/components/SettingsModal.vue'
+import SplashScreen from '@/components/SplashScreen.vue'
 import TopBar from '@/components/TopBar.vue'
 import TourSidebar from '@/components/TourSidebar.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -21,6 +24,7 @@ function isEditableElement(target: EventTarget | null): boolean {
 }
 
 function handleKeydown(e: KeyboardEvent) {
+  if (review.screen !== 'review') return
   if (isEditableElement(e.target)) return
   if (e.metaKey || e.ctrlKey || e.altKey) return
 
@@ -44,7 +48,9 @@ function handleKeydown(e: KeyboardEvent) {
 
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
-  await Promise.all([auth.init(), review.init()])
+  const minSplashDelay = new Promise((resolve) => setTimeout(resolve, 750))
+  await Promise.all([auth.init(), review.init(), minSplashDelay])
+  review.screen = 'inbox'
 })
 
 onBeforeUnmount(() => {
@@ -53,7 +59,17 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="flex h-screen flex-col overflow-hidden bg-canvas text-slate-100">
+  <!-- 1. Splash Screen -->
+  <SplashScreen v-if="review.screen === 'splash'" />
+
+  <!-- 2. Centralized PRs Pending Your Review -->
+  <PRInboxView v-else-if="review.screen === 'inbox'" />
+
+  <!-- 4. Short Non-Interactive Success Screen -->
+  <ReviewSubmittedView v-else-if="review.screen === 'submitted'" />
+
+  <!-- 3. Guided PR Review Screen -->
+  <div v-else class="flex h-screen flex-col overflow-hidden bg-canvas text-slate-100">
     <TopBar />
 
     <div class="flex min-h-0 flex-1 overflow-hidden">
@@ -104,19 +120,19 @@ onBeforeUnmount(() => {
           <p class="text-sm font-medium text-slate-300">No Pull Request loaded</p>
           <button
             class="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-500"
-            @click="review.showLoaderModal = true"
+            @click="review.backToInbox()"
           >
-            Load a Pull Request
+            Back to PR Inbox
           </button>
         </div>
       </main>
     </div>
 
     <KeyboardShortcutsBar />
-
-    <!-- Modals -->
-    <SettingsModal />
-    <PRLoaderModal />
-    <FinishReviewModal />
   </div>
+
+  <!-- Global Modals -->
+  <SettingsModal />
+  <PRLoaderModal />
+  <FinishReviewModal />
 </template>

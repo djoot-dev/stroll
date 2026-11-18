@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   ArrowDownUp,
+  ArrowLeft,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -25,8 +26,17 @@ function toggleDirection() {
 <template>
   <header class="shrink-0 border-b border-border bg-canvas-subtle">
     <div class="flex h-12 items-center justify-between gap-3 px-4">
-      <!-- Left: Sidebar toggle + Brand + PR badge -->
-      <div class="flex min-w-0 items-center gap-2.5">
+      <!-- Left: Back to PRs + Sidebar toggle + Brand + PR badge -->
+      <div class="flex min-w-0 items-center gap-2">
+        <button
+          class="inline-flex items-center gap-1 rounded border border-border bg-canvas px-2 py-1 text-xs text-slate-300 hover:bg-canvas-elevated"
+          title="Back to PR Inbox"
+          @click="review.backToInbox()"
+        >
+          <ArrowLeft class="h-3.5 w-3.5" />
+          <span class="hidden sm:inline">PRs</span>
+        </button>
+
         <button
           class="rounded p-1.5 text-slate-400 hover:bg-canvas-elevated hover:text-slate-100"
           :title="review.sidebarOpen ? 'Hide tour outline ([)' : 'Show tour outline ([)'"
