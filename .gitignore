@@ -1,0 +1,18 @@
+# Dependencies & build outputs
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Tauri / Rust build artifacts
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Bun
+bun.lockb
+
+# Editor & OS
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/

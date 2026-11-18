@@ -1,0 +1,73 @@
+import { LazyStore } from '@tauri-apps/plugin-store'
+import type { DraftComment, TourDirection } from '@/types/pr'
+
+const STORE_FILE = 'pr-tour-settings.json'
+const FALLBACK_PREFIX = 'pr_tour_'
+
+function isTauriRuntime(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+}
+
+let tauriStore: LazyStore | null = null
+
+function getStore(): LazyStore {
+  if (!tauriStore) {
+    tauriStore = new LazyStore(STORE_FILE)
+  }
+  return tauriStore
+}
+
+async function getItem<T>(key: string): Promise<T | null> {
+  if (isTauriRuntime()) {
+    try {
+      const value = await getStore().get<T>(key)
+      return value ?? null
+    } catch {
+      return null
+    }
+  }
+  const raw = localStorage.getItem(FALLBACK_PREFIX + key)
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    return null
+  }
+}
+
+async function setItem<T>(key: string, value: T): Promise<void> {
+  if (isTauriRuntime()) {
+    const store = getStore()
+    await store.set(key, value)
+    await store.save()
+    return
+  }
+  localStorage.setItem(FALLBACK_PREFIX + key, JSON.stringify(value))
+}
+
+export async function loadGitHubPat(): Promise<string> {
+  return (await getItem<string>('github_pat')) ?? ''
+}
+
+export async function saveGitHubPat(pat: string): Promise<void> {
+  await setItem('github_pat', pat.trim())
+}
+
+export async function loadTourDirection(): Promise<TourDirection> {
+  return (await getItem<TourDirection>('tour_direction')) ?? 'bottom-up'
+}
+
+export async function saveTourDirection(direction: TourDirection): Promise<void> {
+  await setItem('tour_direction', direction)
+}
+
+export async function loadDraftComments(prKey: string): Promise<DraftComment[]> {
+  const all = (await getItem<Record<string, DraftComment[]>>('draft_comments')) ?? {}
+  return all[prKey] ?? []
+}
+
+export async function saveDraftComments(prKey: string, drafts: DraftComment[]): Promise<void> {
+  const all = (await getItem<Record<string, DraftComment[]>>('draft_comments')) ?? {}
+  all[prKey] = drafts
+  await setItem('draft_comments', all)
+}
