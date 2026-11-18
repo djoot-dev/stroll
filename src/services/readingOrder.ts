@@ -254,11 +254,7 @@ function findPairedImplFile(
   implFiles: PRFile[],
   depsOfTest: string[],
 ): string | undefined {
-  // 1. Direct relative import from the test file to a non-test PR file
-  const nonTestDep = depsOfTest.find((d) => classifyLayer(d) !== 'tests')
-  if (nonTestDep) return nonTestDep
-
-  // 2. Basename heuristic: foo.test.ts -> foo.ts / foo.vue
+  // 1. Basename heuristic: foo.test.ts -> foo.ts / foo.vue
   const testName = testFile.path.split('/').pop() ?? ''
   const cleanTestBase = testName
     .replace(/\.(test|spec)\.[cm]?[jt]sx?$/i, '')
@@ -270,8 +266,10 @@ function findPairedImplFile(
     const implBase = stripExt(implName)
     return implBase === cleanTestBase
   })
+  if (match) return match.path
 
-  return match?.path
+  // 2. Fallback: direct relative import from the test file to a non-test PR file
+  return depsOfTest.find((d) => classifyLayer(d) !== 'tests')
 }
 
 /**
