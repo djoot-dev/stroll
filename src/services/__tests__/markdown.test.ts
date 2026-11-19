@@ -140,4 +140,26 @@ describe('renderSafeMarkdown', () => {
     expect(html).toContain('&lt;!-- kept in backticks --&gt;')
     expect(html).toContain('&lt;!-- kept in fenced block --&gt;')
   })
+
+  it('strips HTML comments that contain backticks or fenced code blocks', () => {
+    const md = [
+      '<!-- PR template: run `bun run test` and check `Fixes #123` -->',
+      '<!--',
+      '```ts',
+      'const example = true',
+      '```',
+      '-->',
+      'Actual PR description.',
+    ].join('\n')
+
+    const html = renderSafeMarkdown(md)
+    expect(html).toContain('Actual PR description.')
+    expect(html).not.toContain('PR template')
+    expect(html).not.toContain('bun run test')
+    expect(html).not.toContain('const example')
+  })
+
+  it('returns empty string when markdown only contains HTML comments', () => {
+    expect(renderSafeMarkdown('<!-- Describe your changes -->\n\n<!-- Checklist -->')).toBe('')
+  })
 })
