@@ -15,5 +15,5 @@ pub fn run() {
             commands::git::git_read_blobs,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running PR Tour Tauri application");
+        .expect("error while running Stroll Tauri application");
 }
