@@ -1,5 +1,6 @@
 import { httpFetch } from './http'
 import { gitReadBlobs, isTauriRuntime, type GitBlobSpec } from './native'
+import { isGeneratedOrLockfile } from './readingOrder'
 import type {
   CheckRollupState,
   DiffSide,
@@ -26,6 +27,9 @@ import type {
 
 const GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql'
 const GITHUB_REST_URL = 'https://api.github.com'
+const MAX_PR_FILES = 3000
+const MAX_COMMIT_PAGES = 10
+const MAX_THREAD_PAGES = 20
 
 interface GraphQLResponse<T> {
   data?: T
@@ -77,8 +81,103 @@ export function parsePRUrl(
   }
 }
 
-export function detectLanguage(path: string): string {
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  ico: 'image/x-icon',
+  avif: 'image/avif',
+  bmp: 'image/bmp',
+}
+
+const BINARY_EXTENSIONS = new Set([
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'webp',
+  'ico',
+  'avif',
+  'bmp',
+  'pdf',
+  'woff',
+  'woff2',
+  'ttf',
+  'otf',
+  'eot',
+  'zip',
+  'tar',
+  'gz',
+  'tgz',
+  'bz2',
+  'xz',
+  '7z',
+  'rar',
+  'icns',
+  'exe',
+  'dll',
+  'so',
+  'dylib',
+  'wasm',
+  'mp3',
+  'mp4',
+  'mov',
+  'webm',
+  'wav',
+  'ogg',
+  'sqlite',
+  'db',
+  'jar',
+  'class',
+  'pyc',
+  'o',
+  'a',
+  'bin',
+  'dmg',
+  'pkg',
+  'apk',
+  'ipa',
+  'lockb',
+  'xls',
+  'xlsx',
+  'doc',
+  'docx',
+  'ppt',
+  'pptx',
+])
+
+export function getImageMimeType(path: string): string | null {
   const ext = path.split('.').pop()?.toLowerCase() ?? ''
+  return IMAGE_MIME_TYPES[ext] ?? null
+}
+
+export function isImageFilePath(path: string): boolean {
+  return getImageMimeType(path) !== null
+}
+
+export function isBinaryFilePath(path: string): boolean {
+  const ext = path.split('.').pop()?.toLowerCase() ?? ''
+  return BINARY_EXTENSIONS.has(ext)
+}
+
+export function detectLanguage(path: string): string {
+  const fileName = (path.split('/').pop() ?? path).toLowerCase()
+  if (fileName === 'dockerfile' || fileName.startsWith('dockerfile.')) {
+    return 'dockerfile'
+  }
+  if (
+    fileName === '.bashrc' ||
+    fileName === '.zshrc' ||
+    fileName === '.bash_profile' ||
+    fileName === '.profile'
+  ) {
+    return 'shell'
+  }
+
+  const ext = fileName.includes('.') ? (fileName.split('.').pop() ?? '') : ''
   const map: Record<string, string> = {
     ts: 'typescript',
     tsx: 'typescript',
@@ -87,18 +186,54 @@ export function detectLanguage(path: string): string {
     js: 'javascript',
     jsx: 'javascript',
     mjs: 'javascript',
+    cjs: 'javascript',
     vue: 'vue',
     rs: 'rust',
     py: 'python',
+    cs: 'csharp',
+    go: 'go',
+    java: 'java',
+    c: 'cpp',
+    h: 'cpp',
+    cc: 'cpp',
+    cpp: 'cpp',
+    cxx: 'cpp',
+    hpp: 'cpp',
+    hxx: 'cpp',
+    hh: 'cpp',
+    php: 'php',
+    xml: 'xml',
+    svg: 'xml',
+    plist: 'xml',
+    csproj: 'xml',
+    props: 'xml',
+    targets: 'xml',
+    xaml: 'xml',
+    resx: 'xml',
     sql: 'sql',
     json: 'json',
+    jsonc: 'json',
     yaml: 'yaml',
     yml: 'yaml',
     css: 'css',
-    scss: 'css',
+    scss: 'scss',
+    sass: 'sass',
     html: 'html',
+    htm: 'html',
     md: 'markdown',
+    markdown: 'markdown',
     toml: 'toml',
+    sh: 'shell',
+    bash: 'shell',
+    zsh: 'shell',
+    fish: 'shell',
+    rb: 'ruby',
+    rake: 'ruby',
+    gemspec: 'ruby',
+    swift: 'swift',
+    kt: 'kotlin',
+    kts: 'kotlin',
+    dockerfile: 'dockerfile',
   }
   return map[ext] ?? 'text'
 }
@@ -112,19 +247,27 @@ const PR_SEARCH_QUERIES: Record<PRFilterMode, string> = {
 export async function fetchViewerAndRequestedPRs(
   pat: string,
   filter: PRFilterMode = 'review-requested',
+  after: string | null = null,
+  pageSize = 30,
 ): Promise<{
   viewer: GitHubUser
   requestedPRs: PRSummary[]
+  hasNextPage: boolean
+  endCursor: string | null
 }> {
   const searchQuery = PR_SEARCH_QUERIES[filter]
   const query = `
-    query ViewerAndRequestedPRs {
+    query ViewerAndRequestedPRs($searchQuery: String!, $first: Int!, $after: String) {
       viewer {
         login
         name
         avatarUrl
       }
-      search(query: "${searchQuery}", type: ISSUE, first: 20) {
+      search(query: $searchQuery, type: ISSUE, first: $first, after: $after) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
         nodes {
           ... on PullRequest {
             id
@@ -154,6 +297,10 @@ export async function fetchViewerAndRequestedPRs(
   interface RawResp {
     viewer: GitHubUser
     search: {
+      pageInfo: {
+        hasNextPage: boolean
+        endCursor: string | null
+      }
       nodes: Array<{
         id: string
         number: number
@@ -169,7 +316,11 @@ export async function fetchViewerAndRequestedPRs(
     }
   }
 
-  const data = await graphql<RawResp>(pat, query)
+  const data = await graphql<RawResp>(pat, query, {
+    searchQuery,
+    first: pageSize,
+    after,
+  })
   const requestedPRs: PRSummary[] = data.search.nodes
     .filter((n): n is NonNullable<typeof n> => Boolean(n && n.repository))
     .map((n) => ({
@@ -189,10 +340,12 @@ export async function fetchViewerAndRequestedPRs(
   return {
     viewer: data.viewer,
     requestedPRs,
+    hasNextPage: data.search.pageInfo.hasNextPage,
+    endCursor: data.search.pageInfo.endCursor,
   }
 }
 
-interface RestPRFile {
+export interface RestPRFile {
   sha?: string
   filename: string
   previous_filename?: string
@@ -202,27 +355,137 @@ interface RestPRFile {
   patch?: string
 }
 
-async function fetchRestPRFiles(
+function parseNextLinkUrl(linkHeader: string | null): string | null {
+  if (!linkHeader) return null
+  const match = linkHeader.match(/<([^>]+)>;\s*rel="next"/i)
+  return match ? match[1] : null
+}
+
+/**
+ * Fetches all changed files for a PR via GitHub REST API, following pagination
+ * (`Link: <...>; rel="next"` or incrementing `page`) up to GitHub's 3,000-file cap.
+ */
+export async function fetchRestPRFiles(
   pat: string,
   owner: string,
   repo: string,
   number: number,
+  maxFiles = MAX_PR_FILES,
 ): Promise<RestPRFile[]> {
-  const res = await httpFetch(
-    `${GITHUB_REST_URL}/repos/${owner}/${repo}/pulls/${number}/files?per_page=100`,
-    {
+  const perPage = 100
+  const allFiles: RestPRFile[] = []
+  let page = 1
+  let nextUrl: string | null =
+    `${GITHUB_REST_URL}/repos/${owner}/${repo}/pulls/${number}/files?per_page=${perPage}&page=${page}`
+
+  while (nextUrl && allFiles.length < maxFiles) {
+    const res = await httpFetch(nextUrl, {
       headers: {
         Authorization: `Bearer ${pat}`,
         Accept: 'application/vnd.github.v3+json',
         'User-Agent': 'Stroll-Desktop',
       },
-    },
-  )
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`GitHub REST /files error (${res.status}): ${text}`)
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`GitHub REST /files error (${res.status}): ${text}`)
+    }
+
+    const batch = (await res.json()) as RestPRFile[]
+    if (!Array.isArray(batch) || batch.length === 0) break
+
+    allFiles.push(...batch)
+    if (allFiles.length >= maxFiles) break
+
+    const linkHeader = res.headers?.get?.('link') ?? res.headers?.get?.('Link') ?? null
+    const linkNext = parseNextLinkUrl(linkHeader)
+    if (linkNext) {
+      nextUrl = linkNext
+    } else if (linkHeader) {
+      // Server provided Link header without rel="next" -> last page reached
+      nextUrl = null
+    } else if (batch.length === perPage) {
+      page += 1
+      nextUrl = `${GITHUB_REST_URL}/repos/${owner}/${repo}/pulls/${number}/files?per_page=${perPage}&page=${page}`
+    } else {
+      nextUrl = null
+    }
   }
-  return (await res.json()) as RestPRFile[]
+
+  return allFiles.slice(0, maxFiles)
+}
+
+/**
+ * Fetches a binary/image file from GitHub using the user's PAT and returns
+ * an inline `data:<mime>;base64,...` URL so private repositories work seamlessly.
+ */
+export async function fetchFileBlobDataUrl(
+  pat: string,
+  owner: string,
+  repo: string,
+  path: string,
+  refOid: string,
+  blobSha?: string,
+): Promise<string | null> {
+  const mime = getImageMimeType(path) ?? 'application/octet-stream'
+  const headers = {
+    Authorization: `Bearer ${pat}`,
+    Accept: 'application/vnd.github.v3+json',
+    'User-Agent': 'Stroll-Desktop',
+  }
+
+  // Prefer Git Blobs API when blob SHA is already known (works for files > 1MB too)
+  if (blobSha) {
+    const blobRes = await httpFetch(
+      `${GITHUB_REST_URL}/repos/${owner}/${repo}/git/blobs/${encodeURIComponent(blobSha)}`,
+      { headers },
+    )
+    if (blobRes.ok) {
+      const blobJson = (await blobRes.json()) as { content?: string; encoding?: string }
+      if (blobJson.content && blobJson.encoding === 'base64') {
+        const clean = blobJson.content.replace(/\s+/g, '')
+        return `data:${mime};base64,${clean}`
+      }
+    }
+  }
+
+  const encodedPath = path
+    .split('/')
+    .map((seg) => encodeURIComponent(seg))
+    .join('/')
+  const contentsRes = await httpFetch(
+    `${GITHUB_REST_URL}/repos/${owner}/${repo}/contents/${encodedPath}?ref=${encodeURIComponent(refOid)}`,
+    { headers },
+  )
+  if (!contentsRes.ok) return null
+
+  const contentsJson = (await contentsRes.json()) as {
+    content?: string
+    encoding?: string
+    sha?: string
+  }
+
+  if (contentsJson.content && contentsJson.encoding === 'base64') {
+    const clean = contentsJson.content.replace(/\s+/g, '')
+    return `data:${mime};base64,${clean}`
+  }
+
+  // Fallback to git blob endpoint for files > 1MB where /contents omits `content`
+  if (contentsJson.sha) {
+    const blobRes = await httpFetch(
+      `${GITHUB_REST_URL}/repos/${owner}/${repo}/git/blobs/${encodeURIComponent(contentsJson.sha)}`,
+      { headers },
+    )
+    if (blobRes.ok) {
+      const blobJson = (await blobRes.json()) as { content?: string; encoding?: string }
+      if (blobJson.content && blobJson.encoding === 'base64') {
+        const clean = blobJson.content.replace(/\s+/g, '')
+        return `data:${mime};base64,${clean}`
+      }
+    }
+  }
+
+  return null
 }
 
 function mapFileStatus(status: string): FileChangeStatus {
@@ -249,8 +512,8 @@ async function fetchFileContentsBatch(
   baseOid: string,
   headOid: string,
   files: RestPRFile[],
-): Promise<Map<string, { base: string | null; head: string | null }>> {
-  const result = new Map<string, { base: string | null; head: string | null }>()
+): Promise<Map<string, { base: string | null; head: string | null; isBinary: boolean }>> {
+  const result = new Map<string, { base: string | null; head: string | null; isBinary: boolean }>()
   const chunkSize = 20
 
   for (let i = 0; i < files.length; i += chunkSize) {
@@ -262,11 +525,11 @@ async function fetchFileContentsBatch(
       if (status !== 'added') {
         const basePath = f.previous_filename ?? f.filename
         const expr = `${baseOid}:${basePath}`.replace(/"/g, '\\"')
-        fields.push(`b_${idx}: object(expression: "${expr}") { ... on Blob { text } }`)
+        fields.push(`b_${idx}: object(expression: "${expr}") { ... on Blob { text isBinary } }`)
       }
       if (status !== 'deleted') {
         const expr = `${headOid}:${f.filename}`.replace(/"/g, '\\"')
-        fields.push(`h_${idx}: object(expression: "${expr}") { ... on Blob { text } }`)
+        fields.push(`h_${idx}: object(expression: "${expr}") { ... on Blob { text isBinary } }`)
       }
     })
 
@@ -281,7 +544,7 @@ async function fetchFileContentsBatch(
     `
 
     interface BlobResp {
-      repository: Record<string, { text?: string } | null>
+      repository: Record<string, { text?: string | null; isBinary?: boolean } | null>
     }
 
     const data = await graphql<BlobResp>(pat, query, { owner, repo })
@@ -291,11 +554,182 @@ async function fetchFileContentsBatch(
       result.set(f.filename, {
         base: baseBlob?.text ?? null,
         head: headBlob?.text ?? null,
+        isBinary: Boolean(baseBlob?.isBinary || headBlob?.isBinary),
       })
     })
   }
 
   return result
+}
+
+interface RawCommitNode {
+  commit: {
+    oid: string
+    abbreviatedOid: string
+    messageHeadline: string
+    committedDate: string
+    author: { name?: string | null } | null
+  }
+}
+
+interface RawThreadNode {
+  id: string
+  path: string
+  line: number | null
+  diffSide: DiffSide | null
+  startLine: number | null
+  startDiffSide: DiffSide | null
+  isResolved: boolean
+  isOutdated: boolean
+  comments: {
+    nodes: Array<{
+      id: string
+      body: string
+      createdAt: string
+      state: string
+      author: GitHubUser | null
+    }>
+  }
+}
+
+interface PageInfo {
+  hasNextPage: boolean
+  endCursor: string | null
+}
+
+async function fetchRemainingCommits(
+  pat: string,
+  owner: string,
+  repo: string,
+  number: number,
+  initialCursor: string,
+): Promise<RawCommitNode[]> {
+  const extra: RawCommitNode[] = []
+  let cursor: string | null = initialCursor
+  let pages = 0
+
+  const query = `
+    query PullRequestCommitsPage($owner: String!, $repo: String!, $number: Int!, $after: String!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $number) {
+          commits(first: 100, after: $after) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            nodes {
+              commit {
+                oid
+                abbreviatedOid
+                messageHeadline
+                committedDate
+                author {
+                  name
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `
+
+  interface CommitsPageResp {
+    repository: {
+      pullRequest: {
+        commits: { pageInfo: PageInfo; nodes: RawCommitNode[] }
+      } | null
+    } | null
+  }
+
+  while (cursor && pages < MAX_COMMIT_PAGES) {
+    pages += 1
+    const resp: CommitsPageResp = await graphql<CommitsPageResp>(pat, query, {
+      owner,
+      repo,
+      number,
+      after: cursor,
+    })
+    const conn = resp.repository?.pullRequest?.commits
+    if (!conn) break
+    extra.push(...conn.nodes)
+    cursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null
+  }
+
+  return extra
+}
+
+async function fetchRemainingReviewThreads(
+  pat: string,
+  owner: string,
+  repo: string,
+  number: number,
+  initialCursor: string,
+): Promise<RawThreadNode[]> {
+  const extra: RawThreadNode[] = []
+  let cursor: string | null = initialCursor
+  let pages = 0
+
+  const query = `
+    query PullRequestThreadsPage($owner: String!, $repo: String!, $number: Int!, $after: String!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $number) {
+          reviewThreads(first: 100, after: $after) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            nodes {
+              id
+              path
+              line
+              diffSide
+              startLine
+              startDiffSide
+              isResolved
+              isOutdated
+              comments(first: 30) {
+                nodes {
+                  id
+                  body
+                  createdAt
+                  state
+                  author {
+                    login
+                    avatarUrl
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `
+
+  interface ThreadsPageResp {
+    repository: {
+      pullRequest: {
+        reviewThreads: { pageInfo: PageInfo; nodes: RawThreadNode[] }
+      } | null
+    } | null
+  }
+
+  while (cursor && pages < MAX_THREAD_PAGES) {
+    pages += 1
+    const resp: ThreadsPageResp = await graphql<ThreadsPageResp>(pat, query, {
+      owner,
+      repo,
+      number,
+      after: cursor,
+    })
+    const conn = resp.repository?.pullRequest?.reviewThreads
+    if (!conn) break
+    extra.push(...conn.nodes)
+    cursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null
+  }
+
+  return extra
 }
 
 export async function fetchPullRequest(
@@ -351,7 +785,11 @@ export async function fetchPullRequest(
               }
             }
           }
-          commits(first: 50) {
+          commits(first: 100) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
             nodes {
               commit {
                 oid
@@ -425,6 +863,10 @@ export async function fetchPullRequest(
             }
           }
           reviewThreads(first: 100) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
             nodes {
               id
               path
@@ -504,15 +946,8 @@ export async function fetchPullRequest(
           } | null>
         }
         commits: {
-          nodes: Array<{
-            commit: {
-              oid: string
-              abbreviatedOid: string
-              messageHeadline: string
-              committedDate: string
-              author: { name?: string | null } | null
-            }
-          }>
+          pageInfo?: PageInfo
+          nodes: RawCommitNode[]
         }
         headCommit: {
           nodes: Array<{
@@ -547,25 +982,8 @@ export async function fetchPullRequest(
           } | null>
         }
         reviewThreads: {
-          nodes: Array<{
-            id: string
-            path: string
-            line: number | null
-            diffSide: DiffSide | null
-            startLine: number | null
-            startDiffSide: DiffSide | null
-            isResolved: boolean
-            isOutdated: boolean
-            comments: {
-              nodes: Array<{
-                id: string
-                body: string
-                createdAt: string
-                state: string
-                author: GitHubUser | null
-              }>
-            }
-          }>
+          pageInfo?: PageInfo
+          nodes: RawThreadNode[]
         }
       } | null
     } | null
@@ -581,16 +999,34 @@ export async function fetchPullRequest(
     throw new Error(`Pull Request ${owner}/${repo}#${number} not found`)
   }
 
+  // Paginate remaining commits & reviewThreads if truncated
+  const [extraCommits, extraThreads] = await Promise.all([
+    pr.commits.pageInfo?.hasNextPage && pr.commits.pageInfo.endCursor
+      ? fetchRemainingCommits(pat, owner, repo, number, pr.commits.pageInfo.endCursor)
+      : Promise.resolve([] as RawCommitNode[]),
+    pr.reviewThreads.pageInfo?.hasNextPage && pr.reviewThreads.pageInfo.endCursor
+      ? fetchRemainingReviewThreads(pat, owner, repo, number, pr.reviewThreads.pageInfo.endCursor)
+      : Promise.resolve([] as RawThreadNode[]),
+  ])
+
+  // Avoid fetching full text blobs for binary or generated/lockfiles where unnecessary
+  const blobEligibleFiles = restFiles.filter(
+    (rf) => !isBinaryFilePath(rf.filename) && !isGeneratedOrLockfile(rf.filename),
+  )
+
   // Hybrid local-first blob loading: read from linked local git checkout when available,
   // and fall back to GitHub GraphQL only for missing blobs.
-  const contentsMap = new Map<string, { base: string | null; head: string | null }>()
-  let remainingFiles = restFiles
+  const contentsMap = new Map<
+    string,
+    { base: string | null; head: string | null; isBinary: boolean }
+  >()
+  let remainingFiles = blobEligibleFiles
 
-  if (localRepoPath && isTauriRuntime() && restFiles.length > 0) {
+  if (localRepoPath && isTauriRuntime() && blobEligibleFiles.length > 0) {
     const specs: GitBlobSpec[] = []
     const specTargets: Array<{ filename: string; side: 'base' | 'head'; idx: number }> = []
 
-    for (const f of restFiles) {
+    for (const f of blobEligibleFiles) {
       const status = mapFileStatus(f.status)
       if (status !== 'added') {
         specTargets.push({ filename: f.filename, side: 'base', idx: specs.length })
@@ -605,8 +1041,8 @@ export async function fetchPullRequest(
     const localBlobs = await gitReadBlobs(localRepoPath, specs)
     if (localBlobs) {
       const missingFiles = new Set<string>()
-      for (const f of restFiles) {
-        contentsMap.set(f.filename, { base: null, head: null })
+      for (const f of blobEligibleFiles) {
+        contentsMap.set(f.filename, { base: null, head: null, isBinary: false })
       }
       for (const target of specTargets) {
         const text = localBlobs[target.idx] ?? null
@@ -616,7 +1052,7 @@ export async function fetchPullRequest(
           contentsMap.get(target.filename)![target.side] = text
         }
       }
-      remainingFiles = restFiles.filter((f) => missingFiles.has(f.filename))
+      remainingFiles = blobEligibleFiles.filter((f) => missingFiles.has(f.filename))
     }
   }
 
@@ -635,22 +1071,43 @@ export async function fetchPullRequest(
   }
 
   const files: PRFile[] = restFiles.map((rf) => {
-    const content = contentsMap.get(rf.filename) ?? { base: null, head: null }
+    const content = contentsMap.get(rf.filename) ?? { base: null, head: null, isBinary: false }
+    const status = mapFileStatus(rf.status)
+    const patch = rf.patch ?? ''
+    const isImage = isImageFilePath(rf.filename)
+    const isGenerated = isGeneratedOrLockfile(rf.filename)
+    const isPureMove =
+      status === 'renamed' && !patch.trim() && rf.additions === 0 && rf.deletions === 0
+    const isBinary =
+      content.isBinary ||
+      isBinaryFilePath(rf.filename) ||
+      (!patch.trim() &&
+        !isPureMove &&
+        !isGenerated &&
+        content.base === null &&
+        content.head === null &&
+        rf.additions === 0 &&
+        rf.deletions === 0)
+
     return {
       path: rf.filename,
       previousPath: rf.previous_filename,
-      status: mapFileStatus(rf.status),
+      status,
       additions: rf.additions,
       deletions: rf.deletions,
       sha: rf.sha,
-      patch: rf.patch ?? '',
+      patch,
       baseContent: content.base,
       headContent: content.head,
       language: detectLanguage(rf.filename),
+      isBinary: isBinary || undefined,
+      isImage: isImage || undefined,
+      isGenerated: isGenerated || undefined,
     }
   })
 
-  const commits: PRCommit[] = pr.commits.nodes.map((n) => ({
+  const allCommitNodes = [...pr.commits.nodes, ...extraCommits]
+  const commits: PRCommit[] = allCommitNodes.map((n) => ({
     oid: n.commit.oid,
     shortOid: n.commit.abbreviatedOid,
     messageHeadline: n.commit.messageHeadline,
@@ -658,7 +1115,8 @@ export async function fetchPullRequest(
     committedDate: n.commit.committedDate,
   }))
 
-  const threads: ReviewThread[] = pr.reviewThreads.nodes
+  const allThreadNodes = [...pr.reviewThreads.nodes, ...extraThreads]
+  const threads: ReviewThread[] = allThreadNodes
     .filter((t) => t.line !== null)
     .map((t) => ({
       id: t.id,

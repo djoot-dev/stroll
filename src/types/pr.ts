@@ -94,6 +94,16 @@ export interface PRFile {
   /** Full file content at head commit (null for deleted files) */
   headContent: string | null
   language: string
+  /** True when the file is detected as binary (non-text blob or known binary extension) */
+  isBinary?: boolean
+  /** True when the file is a previewable image asset */
+  isImage?: boolean
+  /** True when the file is a lockfile or generated asset */
+  isGenerated?: boolean
+  /** Optional preloaded base64 data URL for base image preview */
+  baseImageDataUrl?: string | null
+  /** Optional preloaded base64 data URL for head image preview */
+  headImageDataUrl?: string | null
 }
 
 export interface ReviewComment {
@@ -144,6 +154,8 @@ export interface TourStep {
   file: PRFile
   layer: ArchitecturalLayer
   reason: string
+  /** True when this step is a generated file or lockfile (collapsed by default) */
+  isGenerated?: boolean
   /** Paths of other PR files that this file imports */
   dependencies: string[]
   /** Paths of other PR files that import this file */
