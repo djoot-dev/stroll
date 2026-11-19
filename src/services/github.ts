@@ -183,6 +183,7 @@ export async function fetchViewerAndRequestedPRs(
 }
 
 interface RestPRFile {
+  sha?: string
   filename: string
   previous_filename?: string
   status: string
@@ -486,6 +487,7 @@ export async function fetchPullRequest(
       status: mapFileStatus(rf.status),
       additions: rf.additions,
       deletions: rf.deletions,
+      sha: rf.sha,
       patch: rf.patch ?? '',
       baseContent: content.base,
       headContent: content.head,

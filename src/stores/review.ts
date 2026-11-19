@@ -12,10 +12,14 @@ import {
 } from '@/services/github'
 import { buildReadingOrder } from '@/services/readingOrder'
 import {
+  computeFileFingerprint,
   loadDraftComments,
   loadRepoPaths,
+  loadViewedFiles,
   saveDraftComments,
   saveRepoPaths,
+  saveViewedFiles,
+  type ViewedFilesMap,
 } from '@/services/storage'
 import type {
   DiffSide,
@@ -43,6 +47,7 @@ export const useReviewStore = defineStore('review', () => {
   const tourDirection = ref<TourDirection>('bottom-up')
   const currentStepIndex = ref(0)
   const reviewedPaths = ref<Set<string>>(new Set())
+  let fileFingerprints = new Map<string, string>()
   const draftComments = ref<DraftComment[]>([])
   const repoPaths = ref<Record<string, string>>({})
   const lastSubmitted = ref<SubmittedReviewSummary | null>(null)
@@ -116,11 +121,34 @@ export const useReviewStore = defineStore('review', () => {
     pr.value = data
     currentStepIndex.value = 0
     reviewedPaths.value = new Set()
+    fileFingerprints = new Map(
+      data.files.map((file) => [file.path, computeFileFingerprint(file)]),
+    )
     sidebarOpen.value = settings.sidebarDefaultOpen
     submitError.value = null
     submitSuccessMessage.value = null
     const key = `${data.owner}/${data.repo}#${data.number}`
-    draftComments.value = await loadDraftComments(key)
+    const [savedDrafts, savedViewed] = await Promise.all([
+      loadDraftComments(key),
+      loadViewedFiles(key),
+    ])
+    draftComments.value = savedDrafts
+
+    const restoredPaths = new Set<string>()
+    const validViewed: ViewedFilesMap = {}
+    for (const file of data.files) {
+      const fingerprint = fileFingerprints.get(file.path) ?? computeFileFingerprint(file)
+      if (savedViewed[file.path] === fingerprint) {
+        restoredPaths.add(file.path)
+        validViewed[file.path] = fingerprint
+      }
+    }
+    reviewedPaths.value = restoredPaths
+
+    if (Object.keys(validViewed).length !== Object.keys(savedViewed).length) {
+      await saveViewedFiles(key, validViewed)
+    }
+
     screen.value = 'review'
   }
 
@@ -202,7 +230,7 @@ export const useReviewStore = defineStore('review', () => {
     }
   }
 
-  function toggleReviewed(path?: string): void {
+  async function toggleReviewed(path?: string): Promise<void> {
     const target = path ?? currentStep.value?.file.path
     if (!target) return
     const next = new Set(reviewedPaths.value)
@@ -230,6 +258,16 @@ export const useReviewStore = defineStore('review', () => {
           currentStepIndex.value += 1
         }
       }
+    }
+
+    if (pr.value && prKey.value) {
+      const viewedMap: ViewedFilesMap = {}
+      for (const file of pr.value.files) {
+        if (next.has(file.path)) {
+          viewedMap[file.path] = fileFingerprints.get(file.path) ?? computeFileFingerprint(file)
+        }
+      }
+      await saveViewedFiles(prKey.value, viewedMap)
     }
   }
 
