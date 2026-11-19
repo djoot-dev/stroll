@@ -17,7 +17,9 @@ CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_retry
   ON webhook_deliveries (status, next_retry_at)
   WHERE status IN ('pending', 'retrying');`
 
-const TYPES_BASE = `export interface WebhookEndpoint {
+const TYPES_BASE = `export type WebhookEventType = 'invoice.paid' | 'subscription.updated'
+
+export interface WebhookEndpoint {
   id: string
   url: string
   secret: string
@@ -28,11 +30,16 @@ export interface WebhookEventPayload {
   id: string
   type: string
   createdAt: string
-  data: Record<string, unknown>
+  data: Record<string, any>
 }`
 
-const TYPES_HEAD = `export interface WebhookEndpoint {
-  id: string
+const TYPES_HEAD = `export type WebhookEventType =
+  | 'invoice.paid'
+  | 'subscription.updated'
+  | 'delivery.failed'
+
+export interface WebhookEndpoint {
+  readonly id: string
   url: string
   secret: string
   enabled: boolean
@@ -56,9 +63,9 @@ export interface WebhookDeliveryResult {
 }
 
 export interface WebhookEventPayload {
-  id: string
-  type: string
-  createdAt: string
+  readonly id: string
+  type: WebhookEventType
+  createdAt: string // ISO-8601 UTC timestamp
   data: Record<string, unknown>
 }`
 
@@ -169,14 +176,30 @@ export class WebhookDispatcher {
       }
     }
 
-    const res = await fetch(endpoint.url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Webhook-Event': event.type,
-      },
-      body: JSON.stringify(event),
-    })
+    let res: Response
+    try {
+      res = await fetch(endpoint.url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Webhook-Event': event.type,
+          'X-Webhook-Attempt': String(attempt),
+        },
+        body: JSON.stringify(event),
+        signal: AbortSignal.timeout(5_000),
+      })
+    } catch (err) {
+      const canRetry = attempt < this.policy.maxAttempts
+      return {
+        deliveryId,
+        status: canRetry ? 'retrying' : 'failed',
+        attemptCount: attempt,
+        nextRetryAt: canRetry
+          ? new Date(Date.now() + computeBackoffMs(attempt, this.policy)).toISOString()
+          : null,
+        errorMessage: err instanceof Error ? err.message : 'Network error',
+      }
+    }
 
     if (res.ok) {
       return { deliveryId, status: 'delivered', attemptCount: attempt, nextRetryAt: null }
@@ -274,7 +297,7 @@ function saveLimit() {
     <div class="flex items-center justify-between">
       <h3 class="text-sm font-semibold">{{ props.endpoint.url }}</h3>
       <span class="text-xs text-slate-400">
-        {{ props.endpoint.enabled ? 'Active' : 'Paused' }}
+        {{ props.endpoint.enabled ? 'Active' : 'Disabled' }}
       </span>
     </div>
     <label class="flex items-center gap-2 text-xs text-slate-300">
@@ -410,7 +433,7 @@ export const MOCK_PR: PullRequestData = {
 +    <div class="flex items-center justify-between">
 +      <h3 class="text-sm font-semibold">{{ props.endpoint.url }}</h3>
 +      <span class="text-xs text-slate-400">
-+        {{ props.endpoint.enabled ? 'Active' : 'Paused' }}
++        {{ props.endpoint.enabled ? 'Active' : 'Disabled' }}
 +      </span>
 +    </div>
 +    <label class="flex items-center gap-2 text-xs text-slate-300">
@@ -480,12 +503,12 @@ export const MOCK_PR: PullRequestData = {
     {
       path: 'src/services/webhookDispatcher.ts',
       status: 'modified',
-      additions: 49,
-      deletions: 4,
+      additions: 73,
+      deletions: 12,
       language: 'typescript',
       baseContent: DISPATCHER_BASE,
       headContent: DISPATCHER_HEAD,
-      patch: `@@ -1,17 +1,62 @@
+      patch: `@@ -1,17 +1,78 @@
 -import type { WebhookEndpoint, WebhookEventPayload } from '../types/webhook'
 +import type {
 +  RetryPolicy,
@@ -535,14 +558,38 @@ export const MOCK_PR: PullRequestData = {
 +      }
 +    }
  
-     const res = await fetch(endpoint.url, {
-       method: 'POST',
-       headers: {
-         'Content-Type': 'application/json',
-         'X-Webhook-Event': event.type,
-       },
-       body: JSON.stringify(event),
-     })
+-    const res = await fetch(endpoint.url, {
+-      method: 'POST',
+-      headers: {
+-        'Content-Type': 'application/json',
+-        'X-Webhook-Event': event.type,
+-      },
+-      body: JSON.stringify(event),
+-    })
++    let res: Response
++    try {
++      res = await fetch(endpoint.url, {
++        method: 'POST',
++        headers: {
++          'Content-Type': 'application/json',
++          'X-Webhook-Event': event.type,
++          'X-Webhook-Attempt': String(attempt),
++        },
++        body: JSON.stringify(event),
++        signal: AbortSignal.timeout(5_000),
++      })
++    } catch (err) {
++      const canRetry = attempt < this.policy.maxAttempts
++      return {
++        deliveryId,
++        status: canRetry ? 'retrying' : 'failed',
++        attemptCount: attempt,
++        nextRetryAt: canRetry
++          ? new Date(Date.now() + computeBackoffMs(attempt, this.policy)).toISOString()
++          : null,
++        errorMessage: err instanceof Error ? err.message : 'Network error',
++      }
++    }
  
 -    return res.ok
 +    if (res.ok) {
@@ -614,12 +661,21 @@ export const MOCK_PR: PullRequestData = {
     {
       path: 'src/types/webhook.ts',
       status: 'modified',
-      additions: 20,
-      deletions: 0,
+      additions: 29,
+      deletions: 6,
       language: 'typescript',
       baseContent: TYPES_BASE,
       headContent: TYPES_HEAD,
-      patch: `@@ -3,6 +3,26 @@ export interface WebhookEndpoint {
+      patch: `@@ -1,15 +1,38 @@
+-export type WebhookEventType = 'invoice.paid' | 'subscription.updated'
++export type WebhookEventType =
++  | 'invoice.paid'
++  | 'subscription.updated'
++  | 'delivery.failed'
+ 
+ export interface WebhookEndpoint {
+-  id: string
++  readonly id: string
    url: string
    secret: string
    enabled: boolean
@@ -642,7 +698,16 @@ export const MOCK_PR: PullRequestData = {
 +  errorMessage?: string
  }
  
- export interface WebhookEventPayload {`,
+ export interface WebhookEventPayload {
+-  id: string
+-  type: string
+-  createdAt: string
+-  data: Record<string, any>
++  readonly id: string
++  type: WebhookEventType
++  createdAt: string // ISO-8601 UTC timestamp
++  data: Record<string, unknown>
+ }`,
     },
   ],
 }
