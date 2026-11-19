@@ -109,10 +109,11 @@ export function classifyLayer(path: string): ArchitecturalLayer {
 
   // 5. Tests
   if (
-    /\.(test|spec)\.[cm]?[jt]sx?$/.test(lower) ||
+    /(^|[._-])(test|spec)s?\.[cm]?[jt]sx?$/i.test(rawFileName) ||
+    /(Test|Tests|Spec|Specs)\.[cm]?[jt]sx?$/.test(rawFileName) ||
     /_test\.(rs|py|go)$/.test(lower) ||
     /tests?\.cs$/.test(lower) ||
-    /(^|\/)[^/]+\.tests\//.test(lower) ||
+    /(^|\/)[^/]+\.tests?\//.test(lower) ||
     /\/__tests__\//.test(lower) ||
     /(^|\/)tests?\//.test(lower)
   ) {
@@ -399,7 +400,8 @@ function findPairedImplFile(
   // 1. Basename heuristic: foo.test.ts -> foo.ts / foo.vue, FooTests.cs -> Foo.cs
   const testName = testFile.path.split('/').pop() ?? ''
   const cleanTestBase = testName
-    .replace(/\.(test|spec)\.[cm]?[jt]sx?$/i, '')
+    .replace(/(^|[._-])(test|spec)s?\.[cm]?[jt]sx?$/i, '')
+    .replace(/(Test|Tests|Spec|Specs)\.[cm]?[jt]sx?$/, '')
     .replace(/_test\.(rs|py|go)$/i, '')
     .replace(/tests?\.cs$/i, '')
     .toLowerCase()
