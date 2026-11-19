@@ -150,6 +150,10 @@ async function handleLoadUrl() {
   await review.loadPRByUrl(urlInput.value)
 }
 
+function isItemLoading(owner: string, repo: string, number: number): boolean {
+  return review.isLoadingPR && review.loadingPRKey === `${owner}/${repo}#${number}`
+}
+
 function formatRelativeTime(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime()
   const mins = Math.max(1, Math.floor(diffMs / 60_000))
@@ -266,8 +270,9 @@ onBeforeUnmount(() => {
             <input
               v-model="urlInput"
               type="url"
+              :disabled="review.isLoadingPR"
               :placeholder="`https://${settings.githubHost}/owner/repo/pull/123`"
-              class="flex-1 rounded-xl border border-border bg-canvas-inset px-3.5 py-2 font-mono text-xs text-ink placeholder-ink-faint transition-colors focus:border-terra focus:outline-none"
+              class="flex-1 rounded-xl border border-border bg-canvas-inset px-3.5 py-2 font-mono text-xs text-ink placeholder-ink-faint transition-colors focus:border-terra focus:outline-none disabled:opacity-60"
               @keydown.enter="handleLoadUrl"
             />
             <button
@@ -276,7 +281,7 @@ onBeforeUnmount(() => {
               @click="handleLoadUrl"
             >
               <Loader2 v-if="review.isLoadingPR" class="h-3.5 w-3.5 animate-spin" />
-              <span>Start Tour</span>
+              <span>{{ review.isLoadingPR ? 'Loading…' : 'Start Tour' }}</span>
               <ArrowRight v-if="!review.isLoadingPR" class="h-3.5 w-3.5" />
             </button>
           </div>
@@ -470,8 +475,14 @@ onBeforeUnmount(() => {
               <button
                 v-for="item in filteredPRs"
                 :key="item.id"
-                class="stroll-card group flex w-full items-center justify-between gap-4 rounded-2xl border border-border bg-canvas-subtle px-4 py-3.5 text-left transition-all hover:border-terra-border hover:bg-canvas-elevated/50"
+                class="stroll-card group flex w-full items-center justify-between gap-4 rounded-2xl border px-4 py-3.5 text-left transition-all"
+                :class="
+                  isItemLoading(item.owner, item.repo, item.number)
+                    ? 'cursor-wait border-terra-border bg-terra-soft/20'
+                    : 'border-border bg-canvas-subtle hover:border-terra-border hover:bg-canvas-elevated/50 disabled:cursor-not-allowed disabled:opacity-60'
+                "
                 :disabled="review.isLoadingPR"
+                :aria-busy="isItemLoading(item.owner, item.repo, item.number)"
                 @click="review.loadPRByRepo(item.owner, item.repo, item.number)"
               >
                 <div class="min-w-0 space-y-1">
@@ -545,10 +556,22 @@ onBeforeUnmount(() => {
                     <span class="text-crimson-text">-{{ item.deletions }}</span>
                   </div>
                   <span
-                    class="inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2.5 py-1 text-xs font-medium text-ink-secondary transition-colors group-hover:border-terra-border group-hover:bg-terra-soft group-hover:text-terra-text"
+                    class="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors"
+                    :class="
+                      isItemLoading(item.owner, item.repo, item.number)
+                        ? 'border-terra-border bg-terra-soft text-terra-text'
+                        : 'border-border bg-canvas text-ink-secondary group-hover:border-terra-border group-hover:bg-terra-soft group-hover:text-terra-text'
+                    "
                   >
-                    <span>Review</span>
-                    <ArrowRight class="h-3 w-3" />
+                    <Loader2
+                      v-if="isItemLoading(item.owner, item.repo, item.number)"
+                      class="h-3 w-3 animate-spin"
+                    />
+                    <span>{{ isItemLoading(item.owner, item.repo, item.number) ? 'Loading…' : 'Review' }}</span>
+                    <ArrowRight
+                      v-if="!isItemLoading(item.owner, item.repo, item.number)"
+                      class="h-3 w-3"
+                    />
                   </span>
                 </div>
               </button>
@@ -579,5 +602,30 @@ onBeforeUnmount(() => {
         </section>
       </div>
     </main>
+
+    <!-- Loading PR Overlay -->
+    <Transition name="modal-pop">
+      <div
+        v-if="review.isLoadingPR"
+        role="status"
+        aria-live="polite"
+        class="stroll-backdrop fixed inset-0 z-40 flex items-center justify-center p-4 backdrop-blur-[2px]"
+      >
+        <div
+          class="stroll-elevated flex w-full max-w-sm flex-col items-center rounded-2xl border border-border bg-canvas-subtle px-6 py-7 text-center"
+        >
+          <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-terra-soft text-terra">
+            <Loader2 class="h-6 w-6 animate-spin" />
+          </div>
+          <h3 class="mt-4 text-sm font-semibold text-ink">Opening Pull Request…</h3>
+          <p v-if="review.loadingPRKey" class="mt-1 font-mono text-xs text-terra-text">
+            {{ review.loadingPRKey }}
+          </p>
+          <p class="mt-1.5 text-xs text-ink-muted">
+            Fetching files, diffs, and building tour order…
+          </p>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
