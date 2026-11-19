@@ -259,50 +259,81 @@ export interface MarkdownRenderOptions {
 }
 
 function stripHtmlComments(markdown: string): string {
-  const lines = markdown.split('\n')
-  const segments: Array<{ isFence: boolean; text: string }> = []
-  let buffer: string[] = []
-  let inFence = false
-  let closeRe: RegExp | null = null
+  const out: string[] = []
+  let i = 0
+  const len = markdown.length
 
-  const flush = (isFence: boolean) => {
-    if (buffer.length > 0) {
-      segments.push({ isFence, text: buffer.join('\n') })
-      buffer = []
-    }
-  }
-
-  for (const line of lines) {
-    if (!inFence) {
+  while (i < len) {
+    // Preserve fenced code blocks (``` or ~~~) verbatim
+    if (i === 0 || markdown[i - 1] === '\n') {
+      const restOfLineEnd = markdown.indexOf('\n', i)
+      const lineEnd = restOfLineEnd === -1 ? len : restOfLineEnd
+      const line = markdown.slice(i, lineEnd)
       const fenceMatch = line.match(/^(`{3,}|~{3,})([\w+-]*)\s*$/)
       if (fenceMatch) {
-        flush(false)
-        inFence = true
-        closeRe = new RegExp(`^${fenceMatch[1][0]}{${fenceMatch[1].length},}\\s*$`)
-        buffer.push(line)
+        const fenceChar = fenceMatch[1][0]
+        const fenceLen = fenceMatch[1].length
+        const closeRe = new RegExp(`^${fenceChar}{${fenceLen},}\\s*$`)
+        let pos = lineEnd
+        while (pos < len) {
+          const nextNl = markdown.indexOf('\n', pos + 1)
+          const nextEnd = nextNl === -1 ? len : nextNl
+          const nextLine = markdown.slice(pos + 1, nextEnd)
+          pos = nextEnd
+          if (closeRe.test(nextLine)) {
+            break
+          }
+        }
+        out.push(markdown.slice(i, pos))
+        i = pos
         continue
       }
-      buffer.push(line)
-    } else {
-      buffer.push(line)
-      if (closeRe?.test(line)) {
-        flush(true)
-        inFence = false
-        closeRe = null
+    }
+
+    // Preserve inline code spans (`...` or ``...``) verbatim
+    if (markdown[i] === '`') {
+      let tickCount = 0
+      while (i + tickCount < len && markdown[i + tickCount] === '`') {
+        tickCount += 1
+      }
+      const closeTicks = '`'.repeat(tickCount)
+      let searchFrom = i + tickCount
+      let foundClose = -1
+      while (searchFrom < len) {
+        const idx = markdown.indexOf(closeTicks, searchFrom)
+        if (idx === -1) break
+        const beforeOk = idx === 0 || markdown[idx - 1] !== '`'
+        const afterOk = idx + tickCount >= len || markdown[idx + tickCount] !== '`'
+        if (beforeOk && afterOk) {
+          foundClose = idx + tickCount
+          break
+        }
+        searchFrom = idx + 1
+      }
+      if (foundClose !== -1) {
+        out.push(markdown.slice(i, foundClose))
+        i = foundClose
+        continue
+      }
+      out.push(closeTicks)
+      i += tickCount
+      continue
+    }
+
+    // Strip HTML comments outside code blocks and code spans
+    if (markdown.startsWith('<!--', i)) {
+      const closeIdx = markdown.indexOf('-->', i + 4)
+      if (closeIdx !== -1) {
+        i = closeIdx + 3
+        continue
       }
     }
-  }
-  flush(inFence)
 
-  return segments
-    .map((seg) => {
-      if (seg.isFence) return seg.text
-      const parts = seg.text.split(/(``(?:[^`]|`(?!`))+``|`[^`]+`)/g)
-      return parts
-        .map((part, idx) => (idx % 2 === 1 ? part : part.replace(/<!--[\s\S]*?-->/g, '')))
-        .join('')
-    })
-    .join('\n')
+    out.push(markdown[i])
+    i += 1
+  }
+
+  return out.join('')
 }
 
 function renderSuggestionBlock(codeLines: string[], originalLines?: string[]): string {

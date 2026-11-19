@@ -28,6 +28,7 @@ import {
   XCircle,
 } from '@lucide/vue'
 import { computed, ref } from 'vue'
+import { renderSafeMarkdown } from '@/services/markdown'
 import { openExternalUrl } from '@/services/native'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
@@ -121,7 +122,9 @@ const diffTotals = computed(() => {
   return { additions, deletions, fileCount: files.length }
 })
 
-const hasDescription = computed(() => Boolean(pr.value?.body?.trim()))
+const hasDescription = computed(() =>
+  Boolean(pr.value?.body && renderSafeMarkdown(pr.value.body)),
+)
 
 function isCheckPassed(check: PRStatusCheck): boolean {
   const c = (check.conclusion ?? check.status).toUpperCase()
