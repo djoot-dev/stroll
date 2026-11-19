@@ -9,6 +9,7 @@ import {
   Eye,
   FileArchive,
   FileCode2,
+  FileText,
   Image as ImageIcon,
   Loader2,
   MessageSquarePlus,
@@ -39,6 +40,7 @@ import { useSettingsStore } from '@/stores/settings'
 import type { DiffSide, DraftComment, ReviewThread, TourStep } from '@/types/pr'
 import CodeHoverPopover from './CodeHoverPopover.vue'
 import CommentComposer from './CommentComposer.vue'
+import MarkdownContent from './MarkdownContent.vue'
 import ReferencedContextCard from './ReferencedContextCard.vue'
 import ReviewThreadCard from './ReviewThreadCard.vue'
 
@@ -53,6 +55,7 @@ const settings = useSettingsStore()
 const expandedGaps = ref<Set<string>>(new Set())
 const isGeneratedExpanded = ref(false)
 const showSvgSource = ref(false)
+const showMarkdownPreview = ref(false)
 const baseImageSrc = ref<string | null>(null)
 const headImageSrc = ref<string | null>(null)
 const isLoadingImages = ref(false)
@@ -122,6 +125,20 @@ const isImageFile = computed(() =>
 )
 
 const isSvgFile = computed(() => props.step.file.path.toLowerCase().endsWith('.svg'))
+
+const isMarkdownFile = computed(() => /\.(md|markdown)$/i.test(props.step.file.path))
+
+const markdownPreviewSource = computed(() => {
+  if (!isMarkdownFile.value) return null
+  if (props.step.file.status === 'deleted') {
+    return props.step.file.baseContent ?? null
+  }
+  return props.step.file.headContent ?? props.step.file.baseContent ?? null
+})
+
+const canPreviewMarkdown = computed(
+  () => isMarkdownFile.value && Boolean(markdownPreviewSource.value?.trim()),
+)
 
 const isNonImageBinary = computed(
   () =>
@@ -238,6 +255,7 @@ watch(
     expandedGaps.value = new Set()
     isGeneratedExpanded.value = false
     showSvgSource.value = false
+    showMarkdownPreview.value = false
     activeComposer.value = null
     activeScopes.value = []
     activeReplacedCount.value = 0
@@ -273,7 +291,14 @@ const showImagePreview = computed(
 )
 
 const visibleLines = computed<DiffLine[]>(() => {
-  if (isCollapsedGenerated.value || showImagePreview.value || isNonImageBinary.value) return []
+  if (
+    isCollapsedGenerated.value ||
+    showImagePreview.value ||
+    isNonImageBinary.value ||
+    (showMarkdownPreview.value && canPreviewMarkdown.value)
+  ) {
+    return []
+  }
   const list: DiffLine[] = []
   for (const seg of segments.value) {
     if (seg.kind === 'gap' && !expandedGaps.value.has(seg.id)) continue
@@ -839,6 +864,34 @@ function statusBadgeClass(status: string): string {
         </div>
       </div>
 
+      <!-- Rendered Markdown File Preview -->
+      <template v-else-if="showMarkdownPreview && canPreviewMarkdown">
+        <div
+          class="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-canvas-subtle/95 px-3.5 py-1.5 text-[11px] text-ink-muted"
+        >
+          <div class="flex items-center gap-2">
+            <FileText class="h-3.5 w-3.5 text-terra" />
+            <span>
+              Markdown preview ({{ step.file.status === 'deleted' ? 'Before / Base' : 'After / Head' }})
+            </span>
+          </div>
+          <button
+            class="inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-0.5 text-[10.5px] text-ink-secondary transition-colors hover:bg-canvas-elevated hover:text-ink"
+            @click="showMarkdownPreview = false"
+          >
+            <Code2 class="h-3 w-3" />
+            <span>View Source Diff</span>
+          </button>
+        </div>
+
+        <div class="bg-canvas p-6">
+          <MarkdownContent
+            :content="markdownPreviewSource ?? ''"
+            class="mx-auto max-w-3xl text-[13px] leading-relaxed text-ink-secondary"
+          />
+        </div>
+      </template>
+
       <!-- Standard Textual Diff -->
       <template v-else>
         <!-- Sticky Diff Context Toolbar (Enclosing Scope Breadcrumb + Hover Guardrail Toggle) -->
@@ -872,6 +925,15 @@ function statusBadgeClass(status: string): string {
             >
               <ImageIcon class="h-3 w-3" />
               <span>Image Preview</span>
+            </button>
+
+            <button
+              v-if="canPreviewMarkdown"
+              class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-0.5 text-[10.5px] text-ink-secondary transition-colors hover:bg-canvas-elevated hover:text-ink"
+              @click="showMarkdownPreview = true"
+            >
+              <FileText class="h-3 w-3" />
+              <span>Preview Markdown</span>
             </button>
 
             <button
@@ -1072,7 +1134,10 @@ function statusBadgeClass(status: string): string {
                     <span>Discard</span>
                   </button>
                 </div>
-                <p class="mt-1 whitespace-pre-wrap text-xs text-ink">{{ draft.body }}</p>
+                <MarkdownContent
+                  :content="draft.body"
+                  class="mt-1 text-xs leading-relaxed text-ink"
+                />
               </div>
 
               <!-- Inline Comment Composer -->

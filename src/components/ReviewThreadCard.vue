@@ -3,6 +3,7 @@ import { CheckCircle2, CornerDownRight, Loader2, RotateCcw } from '@lucide/vue'
 import { ref } from 'vue'
 import { useReviewStore } from '@/stores/review'
 import type { ReviewThread } from '@/types/pr'
+import MarkdownContent from './MarkdownContent.vue'
 
 const props = defineProps<{
   thread: ReviewThread
@@ -110,7 +111,10 @@ async function handleToggleResolve() {
             {{ new Date(comment.createdAt).toLocaleString() }}
           </span>
         </div>
-        <p class="whitespace-pre-wrap text-xs leading-relaxed text-ink-secondary">{{ comment.body }}</p>
+        <MarkdownContent
+          :content="comment.body"
+          class="text-xs leading-relaxed text-ink-secondary"
+        />
       </div>
 
       <!-- Inline Reply Area -->
