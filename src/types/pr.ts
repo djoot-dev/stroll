@@ -10,6 +10,8 @@ export type DiffSide = 'LEFT' | 'RIGHT'
 
 export type PRFilterMode = 'review-requested' | 'authored' | 'involves'
 
+export type PRInboxSortOption = 'updated-desc' | 'updated-asc' | 'diff-asc' | 'diff-desc'
+
 export type PRMergeableState = 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN'
 
 export type PRReviewDecision = 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | null
@@ -198,4 +200,8 @@ export interface PRSummary {
   additions: number
   deletions: number
   changedFiles: number
+  isDraft: boolean
+  reviewDecision: PRReviewDecision
+  ciState: CheckRollupState | null
+  totalCommentsCount: number
 }

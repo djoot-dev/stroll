@@ -1,4 +1,10 @@
 import { invoke } from '@tauri-apps/api/core'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from '@tauri-apps/plugin-notification'
 import { openUrl } from '@tauri-apps/plugin-opener'
 
 export interface RuntimeInfo {
@@ -137,4 +143,93 @@ export async function openExternalUrl(url: string): Promise<void> {
   if (typeof window !== 'undefined') {
     window.open(parsed.toString(), '_blank', 'noopener,noreferrer')
   }
+}
+
+export interface LocalRepoInspection {
+  isGitRepo: boolean
+  ownerRepo: string | null
+}
+
+export async function pickLocalDirectory(): Promise<string | null> {
+  if (!isTauriRuntime()) return null
+  try {
+    const selected = await openDialog({
+      directory: true,
+      multiple: false,
+      title: 'Select Local Git Repository',
+    })
+    return typeof selected === 'string' ? selected : null
+  } catch {
+    return null
+  }
+}
+
+export async function inspectLocalRepo(path: string): Promise<LocalRepoInspection | null> {
+  if (!isTauriRuntime()) return null
+  try {
+    return await invoke<LocalRepoInspection>('inspect_local_repo', { path })
+  } catch {
+    return null
+  }
+}
+
+export async function saveGitHubTokenKeychain(token: string): Promise<void> {
+  if (!isTauriRuntime()) return
+  await invoke<void>('save_github_token', { token })
+}
+
+export async function loadGitHubTokenKeychain(): Promise<string | null> {
+  if (!isTauriRuntime()) return null
+  return invoke<string | null>('load_github_token')
+}
+
+export async function deleteGitHubTokenKeychain(): Promise<void> {
+  if (!isTauriRuntime()) return
+  await invoke<void>('delete_github_token')
+}
+
+export async function requestNotificationPermission(): Promise<boolean> {
+  if (isTauriRuntime()) {
+    try {
+      let granted = await isPermissionGranted()
+      if (!granted) {
+        const result = await requestPermission()
+        granted = result === 'granted'
+      }
+      return granted
+    } catch {
+      return false
+    }
+  }
+  if (typeof Notification === 'undefined') return false
+  if (Notification.permission === 'granted') return true
+  if (Notification.permission === 'denied') return false
+  try {
+    const result = await Notification.requestPermission()
+    return result === 'granted'
+  } catch {
+    return false
+  }
+}
+
+export async function sendDesktopNotification(title: string, body: string): Promise<boolean> {
+  if (isTauriRuntime()) {
+    try {
+      const granted = await isPermissionGranted()
+      if (!granted) return false
+      sendNotification({ title, body })
+      return true
+    } catch {
+      return false
+    }
+  }
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    try {
+      new Notification(title, { body })
+      return true
+    } catch {
+      return false
+    }
+  }
+  return false
 }

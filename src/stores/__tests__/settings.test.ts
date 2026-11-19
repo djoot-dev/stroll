@@ -37,6 +37,8 @@ describe('useSettingsStore', () => {
     expect(store.requireAltForHover).toBe(false)
     expect(store.showShortcutsBar).toBe(true)
     expect(store.inboxAutoRefreshSeconds).toBe(60)
+    expect(store.inboxNotificationsEnabled).toBe(false)
+    expect(store.githubHost).toBe('github.com')
   })
 
   it('persists updated settings and reloads them in a fresh store', async () => {
@@ -51,6 +53,8 @@ describe('useSettingsStore', () => {
     await store.setRequireAltForHover(true)
     await store.setShowShortcutsBar(false)
     await store.setInboxAutoRefreshSeconds(300)
+    await store.setInboxNotificationsEnabled(true)
+    await store.setGithubHost('https://GHE.Company.com/')
 
     setActivePinia(createPinia())
     const reloaded = useSettingsStore()
@@ -65,6 +69,8 @@ describe('useSettingsStore', () => {
     expect(reloaded.requireAltForHover).toBe(true)
     expect(reloaded.showShortcutsBar).toBe(false)
     expect(reloaded.inboxAutoRefreshSeconds).toBe(300)
+    expect(reloaded.inboxNotificationsEnabled).toBe(true)
+    expect(reloaded.githubHost).toBe('ghe.company.com')
   })
 
   it('opens to a specific section and resets preferences to defaults', async () => {
@@ -79,11 +85,15 @@ describe('useSettingsStore', () => {
     expect(store.theme).toBe('dark')
     await store.setCodeFontSize(11.5)
     await store.setAutoAdvanceOnReview(true)
+    await store.setInboxNotificationsEnabled(true)
+    await store.setGithubHost('ghe.acme.internal')
     await store.resetToDefaults()
 
     expect(store.theme).toBe(DEFAULT_APP_SETTINGS.theme)
     expect(store.codeFontSize).toBe(DEFAULT_APP_SETTINGS.codeFontSize)
     expect(store.autoAdvanceOnReview).toBe(DEFAULT_APP_SETTINGS.autoAdvanceOnReview)
+    expect(store.inboxNotificationsEnabled).toBe(DEFAULT_APP_SETTINGS.inboxNotificationsEnabled)
+    expect(store.githubHost).toBe(DEFAULT_APP_SETTINGS.githubHost)
 
     store.closeSettings()
     expect(store.isOpen).toBe(false)

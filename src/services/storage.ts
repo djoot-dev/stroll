@@ -1,4 +1,9 @@
 import { LazyStore } from '@tauri-apps/plugin-store'
+import {
+  deleteGitHubTokenKeychain,
+  loadGitHubTokenKeychain,
+  saveGitHubTokenKeychain,
+} from './native'
 import type { DraftComment, PRFile, TourDirection } from '@/types/pr'
 
 const STORE_FILE = 'stroll-settings.json'
@@ -45,12 +50,66 @@ async function setItem<T>(key: string, value: T): Promise<void> {
   localStorage.setItem(FALLBACK_PREFIX + key, JSON.stringify(value))
 }
 
+async function deleteItem(key: string): Promise<void> {
+  if (isTauriRuntime()) {
+    try {
+      const store = getStore()
+      await store.delete(key)
+      await store.save()
+    } catch {
+      // Ignore deletion errors if key does not exist
+    }
+    return
+  }
+  localStorage.removeItem(FALLBACK_PREFIX + key)
+}
+
 export async function loadGitHubPat(): Promise<string> {
+  if (isTauriRuntime()) {
+    try {
+      const keychainPat = await loadGitHubTokenKeychain()
+      if (keychainPat && keychainPat.trim()) {
+        return keychainPat.trim()
+      }
+
+      // One-time migration from legacy plaintext stroll-settings.json into OS Keychain
+      const legacyPat = await getItem<string>('github_pat')
+      if (legacyPat && legacyPat.trim()) {
+        const trimmed = legacyPat.trim()
+        await saveGitHubTokenKeychain(trimmed)
+        await deleteItem('github_pat')
+        return trimmed
+      }
+      return ''
+    } catch {
+      // Fallback to store if OS keychain is unavailable
+      return (await getItem<string>('github_pat')) ?? ''
+    }
+  }
   return (await getItem<string>('github_pat')) ?? ''
 }
 
 export async function saveGitHubPat(pat: string): Promise<void> {
-  await setItem('github_pat', pat.trim())
+  const trimmed = pat.trim()
+  if (isTauriRuntime()) {
+    try {
+      if (!trimmed) {
+        await deleteGitHubTokenKeychain()
+      } else {
+        await saveGitHubTokenKeychain(trimmed)
+      }
+      // Remove any legacy plaintext entry from stroll-settings.json
+      await deleteItem('github_pat')
+      return
+    } catch {
+      // Fallback if keychain write fails
+    }
+  }
+  if (!trimmed) {
+    await deleteItem('github_pat')
+    return
+  }
+  await setItem('github_pat', trimmed)
 }
 
 export async function loadTourDirection(): Promise<TourDirection> {
@@ -82,6 +141,8 @@ export interface PersistedAppSettings {
   requireAltForHover: boolean
   showShortcutsBar: boolean
   inboxAutoRefreshSeconds: number
+  inboxNotificationsEnabled: boolean
+  githubHost: string
 }
 
 export async function loadAppSettings(): Promise<Partial<PersistedAppSettings>> {

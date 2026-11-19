@@ -137,13 +137,25 @@ function handleKeydown(e: KeyboardEvent) {
     return
   }
 
-  if (e.key === 'Escape' && settings.isOpen) {
-    e.preventDefault()
-    settings.closeSettings()
-    return
+  if (e.key === 'Escape') {
+    if (settings.isOpen) {
+      e.preventDefault()
+      settings.closeSettings()
+      return
+    }
+    if (review.showFinishModal) {
+      e.preventDefault()
+      review.showFinishModal = false
+      return
+    }
+    if (review.showLoaderModal) {
+      e.preventDefault()
+      review.showLoaderModal = false
+      return
+    }
   }
 
-  if (settings.isOpen) return
+  if (settings.isOpen || review.showFinishModal || review.showLoaderModal) return
   if (review.screen !== 'review') return
   if (isEditableElement(e.target)) return
   if (e.metaKey || e.ctrlKey || e.altKey) return

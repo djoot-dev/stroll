@@ -1,8 +1,10 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { fetchViewerAndRequestedPRs } from '@/services/github'
-import { getGhAuthToken, isTauriRuntime } from '@/services/native'
+import { diffNewPRs } from '@/services/inbox'
+import { getGhAuthToken, isTauriRuntime, sendDesktopNotification } from '@/services/native'
 import { loadGitHubPat, saveGitHubPat } from '@/services/storage'
+import { useSettingsStore } from './settings'
 import type { GitHubUser, PRFilterMode, PRSummary } from '@/types/pr'
 
 export const PR_FILTER_OPTIONS: ReadonlyArray<{
@@ -38,10 +40,13 @@ export const useAuthStore = defineStore('auth', () => {
   const prFilter = ref<PRFilterMode>('review-requested')
   const isLoading = ref(false)
   const error = ref<string | null>(null)
+  let knownReviewRequestedIds: Set<string> | null = null
 
   const isAuthenticated = computed(() => Boolean(pat.value && viewer.value))
 
   async function init(): Promise<void> {
+    const settings = useSettingsStore()
+    await settings.init()
     const savedPat = await loadGitHubPat()
     if (savedPat) {
       pat.value = savedPat
@@ -68,18 +73,41 @@ export const useAuthStore = defineStore('auth', () => {
     return verifyAndLoadProfile(token)
   }
 
-  async function verifyAndLoadProfile(token: string): Promise<boolean> {
+  async function verifyAndLoadProfile(
+    token: string,
+    options?: { notifyOnNew?: boolean },
+  ): Promise<boolean> {
     isLoading.value = true
     error.value = null
     try {
+      const activeFilter = prFilter.value
       const { viewer: user, requestedPRs: prs } = await fetchViewerAndRequestedPRs(
         token,
-        prFilter.value,
+        activeFilter,
       )
       pat.value = token
       viewer.value = user
       requestedPRs.value = prs
       await saveGitHubPat(token)
+
+      if (activeFilter === 'review-requested') {
+        const settings = useSettingsStore()
+        if (
+          options?.notifyOnNew &&
+          settings.inboxNotificationsEnabled &&
+          knownReviewRequestedIds !== null
+        ) {
+          const newlyArrived = diffNewPRs(knownReviewRequestedIds, prs)
+          for (const pr of newlyArrived) {
+            await sendDesktopNotification(
+              `Review requested: ${pr.owner}/${pr.repo}#${pr.number}`,
+              pr.title,
+            )
+          }
+        }
+        knownReviewRequestedIds = new Set(prs.map((p) => p.id))
+      }
+
       return true
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to authenticate with GitHub'
@@ -91,9 +119,9 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function refreshRequestedPRs(): Promise<void> {
+  async function refreshRequestedPRs(options?: { notifyOnNew?: boolean }): Promise<void> {
     if (!pat.value) return
-    await verifyAndLoadProfile(pat.value)
+    await verifyAndLoadProfile(pat.value, options)
   }
 
   async function setPrFilter(mode: PRFilterMode): Promise<void> {
@@ -109,6 +137,7 @@ export const useAuthStore = defineStore('auth', () => {
     viewer.value = null
     requestedPRs.value = []
     error.value = null
+    knownReviewRequestedIds = null
     await saveGitHubPat('')
   }
 
