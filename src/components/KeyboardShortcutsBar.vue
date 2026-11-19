@@ -17,16 +17,16 @@ onMounted(async () => {
 
 <template>
   <footer
-    class="flex h-7 shrink-0 items-center justify-between border-t border-border bg-canvas-subtle px-4 text-[11px] text-slate-500"
+    class="flex h-7 shrink-0 items-center justify-between gap-4 overflow-hidden border-t border-border bg-canvas-subtle px-4 text-[11px] text-ink-muted"
   >
-    <div class="flex items-center gap-4">
-      <span><kbd class="rounded border border-border px-1 font-mono text-slate-300">L</kbd> / <kbd class="rounded border border-border px-1 font-mono text-slate-300">→</kbd> Next</span>
-      <span><kbd class="rounded border border-border px-1 font-mono text-slate-300">H</kbd> / <kbd class="rounded border border-border px-1 font-mono text-slate-300">←</kbd> Prev</span>
-      <span><kbd class="rounded border border-border px-1 font-mono text-slate-300">J</kbd> / <kbd class="rounded border border-border px-1 font-mono text-slate-300">↓</kbd> &amp; <kbd class="rounded border border-border px-1 font-mono text-slate-300">K</kbd> / <kbd class="rounded border border-border px-1 font-mono text-slate-300">↑</kbd> Scroll</span>
-      <span><kbd class="rounded border border-border px-1 font-mono text-slate-300">M</kbd> Mark Reviewed</span>
-      <span><kbd class="rounded border border-border px-1 font-mono text-slate-300">[</kbd> Toggle Sidebar</span>
-      <span><kbd class="rounded border border-border px-1 font-mono text-slate-300">R</kbd> Finish Review</span>
+    <div class="flex items-center gap-4 overflow-x-auto whitespace-nowrap">
+      <span><kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">L</kbd> / <kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">→</kbd> Next</span>
+      <span><kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">H</kbd> / <kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">←</kbd> Prev</span>
+      <span><kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">J</kbd> / <kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">↓</kbd> &amp; <kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">K</kbd> / <kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">↑</kbd> Scroll</span>
+      <span><kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">M</kbd> Mark Reviewed</span>
+      <span><kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">[</kbd> Toggle Sidebar</span>
+      <span><kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">R</kbd> Finish Review</span>
     </div>
-    <span class="hidden font-mono text-slate-600 sm:inline">Stroll<template v-if="appVersion"> v{{ appVersion }}</template></span>
+    <span class="hidden font-mono text-ink-faint sm:inline">Stroll<template v-if="appVersion"> v{{ appVersion }}</template></span>
   </footer>
 </template>

@@ -12,11 +12,14 @@ import {
   ListOrdered,
   Loader2,
   LogOut,
+  Monitor,
+  Moon,
   Plus,
   RefreshCw,
   RotateCcw,
   Settings,
   SlidersHorizontal,
+  Sun,
   Terminal,
   Trash2,
   X,
@@ -26,7 +29,7 @@ import { isTauriRuntime } from '@/services/native'
 import { checkForAppUpdate, type AvailableUpdate } from '@/services/updater'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
-import { useSettingsStore, type SettingsSection } from '@/stores/settings'
+import { useSettingsStore, type SettingsSection, type ThemeMode } from '@/stores/settings'
 import type { TourDirection } from '@/types/pr'
 
 const auth = useAuthStore()
@@ -138,6 +141,36 @@ const navItems: Array<{
   { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
 ]
 
+const themeOptions: Array<{
+  value: ThemeMode
+  label: string
+  subtitle: string
+  icon: typeof Sun
+  swatches: [string, string, string]
+}> = [
+  {
+    value: 'light',
+    label: 'Warm Parchment',
+    subtitle: 'Sunlit cream, sage & pine',
+    icon: Sun,
+    swatches: ['#f7f1e5', '#245e48', '#c86130'],
+  },
+  {
+    value: 'dark',
+    label: 'Deep Pine',
+    subtitle: 'Night forest & warm clay',
+    icon: Moon,
+    swatches: ['#0f1915', '#2d7a5b', '#de7b47'],
+  },
+  {
+    value: 'system',
+    label: 'System',
+    subtitle: 'Match macOS appearance',
+    icon: Monitor,
+    swatches: ['#f7f1e5', '#0f1915', '#c86130'],
+  },
+]
+
 const refreshOptions = [
   { label: 'Off', value: 0 },
   { label: '30s', value: 30 },
@@ -205,23 +238,23 @@ async function handleResetDefaults() {
   <Transition name="modal-pop">
     <div
       v-if="settings.isOpen"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      class="stroll-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
       @click.self="settings.closeSettings()"
     >
       <div
-        class="flex h-[540px] max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-canvas-subtle shadow-2xl sm:flex-row"
+        class="stroll-elevated flex h-[560px] max-h-[86vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-canvas-subtle sm:flex-row"
       >
         <!-- Sidebar Navigation -->
         <aside
-          class="flex shrink-0 flex-col border-b border-border bg-canvas-inset/60 sm:w-48 sm:border-r sm:border-b-0"
+          class="flex shrink-0 flex-col border-b border-border bg-canvas/80 sm:w-48 sm:border-r sm:border-b-0"
         >
           <div class="flex items-center justify-between px-4 py-3.5 sm:border-b sm:border-border-muted">
             <div class="flex items-center gap-2">
-              <Settings class="h-4 w-4 text-blue-400" />
-              <span class="text-sm font-semibold text-slate-100">Settings</span>
+              <Settings class="h-4 w-4 text-terra" />
+              <span class="text-sm font-semibold text-ink">Settings</span>
             </div>
             <button
-              class="rounded p-1 text-slate-400 hover:bg-canvas-elevated hover:text-slate-100 sm:hidden"
+              class="rounded-lg p-1 text-ink-muted hover:bg-canvas-elevated hover:text-ink sm:hidden"
               @click="settings.closeSettings()"
             >
               <X class="h-4 w-4" />
@@ -232,11 +265,11 @@ async function handleResetDefaults() {
             <button
               v-for="item in navItems"
               :key="item.id"
-              class="flex shrink-0 items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-xs font-medium transition-colors"
+              class="flex shrink-0 items-center justify-between gap-2 rounded-xl px-3 py-2 text-left text-xs font-medium transition-colors"
               :class="
                 settings.activeSection === item.id
-                  ? 'bg-blue-500/15 text-blue-300'
-                  : 'text-slate-400 hover:bg-canvas-elevated/70 hover:text-slate-200'
+                  ? 'bg-terra-soft text-terra-text'
+                  : 'text-ink-muted hover:bg-canvas-elevated/70 hover:text-ink'
               "
               @click="settings.activeSection = item.id"
             >
@@ -246,13 +279,13 @@ async function handleResetDefaults() {
               </span>
               <span
                 v-if="item.badge?.()"
-                class="hidden h-1.5 w-1.5 rounded-full bg-emerald-400 sm:inline-block"
+                class="hidden h-1.5 w-1.5 rounded-full bg-pine sm:inline-block"
                 :title="item.badge() ?? ''"
               />
             </button>
           </nav>
 
-          <div class="hidden border-t border-border-muted px-4 py-2.5 text-[10px] text-slate-500 sm:block">
+          <div class="hidden border-t border-border-muted px-4 py-2.5 text-[10px] text-ink-faint sm:block">
             Stroll v{{ appVersion }}
           </div>
         </aside>
@@ -262,9 +295,9 @@ async function handleResetDefaults() {
           <header
             class="hidden items-center justify-between border-b border-border px-5 py-3.5 sm:flex"
           >
-            <h2 class="text-sm font-semibold text-slate-100">{{ activeSectionTitle }}</h2>
+            <h2 class="text-sm font-semibold text-ink">{{ activeSectionTitle }}</h2>
             <button
-              class="rounded p-1 text-slate-400 hover:bg-canvas-elevated hover:text-slate-100"
+              class="rounded-lg p-1 text-ink-muted hover:bg-canvas-elevated hover:text-ink"
               title="Close (Esc)"
               @click="settings.closeSettings()"
             >
@@ -276,23 +309,62 @@ async function handleResetDefaults() {
             <!-- GENERAL -->
             <template v-if="settings.activeSection === 'general'">
               <div class="space-y-4">
-                <div class="rounded-lg border border-border bg-canvas/60 p-4">
+                <!-- Appearance / Theme Picker -->
+                <div class="rounded-xl border border-border bg-canvas/60 p-4">
+                  <p class="text-xs font-medium text-ink">Appearance</p>
+                  <p class="mt-0.5 text-[11px] text-ink-muted">
+                    Choose between Warm Parchment Light, Deep Pine Dark, or your system setting.
+                  </p>
+                  <div class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <button
+                      v-for="opt in themeOptions"
+                      :key="opt.value"
+                      class="rounded-xl border p-2.5 text-left transition-all"
+                      :class="
+                        settings.theme === opt.value
+                          ? 'border-terra-border bg-terra-soft'
+                          : 'border-border bg-canvas-subtle hover:bg-canvas-elevated/60'
+                      "
+                      @click="settings.setTheme(opt.value)"
+                    >
+                      <div class="flex items-center justify-between gap-2">
+                        <component
+                          :is="opt.icon"
+                          class="h-3.5 w-3.5"
+                          :class="settings.theme === opt.value ? 'text-terra-text' : 'text-ink-muted'"
+                        />
+                        <div class="flex items-center gap-1">
+                          <span
+                            v-for="(hex, sIdx) in opt.swatches"
+                            :key="sIdx"
+                            class="h-2.5 w-2.5 rounded-full border border-black/15"
+                            :style="{ backgroundColor: hex }"
+                          />
+                        </div>
+                      </div>
+                      <p class="mt-2 text-xs font-semibold text-ink">{{ opt.label }}</p>
+                      <p class="mt-0.5 text-[10px] text-ink-muted">{{ opt.subtitle }}</p>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="rounded-xl border border-border bg-canvas/60 p-4">
                   <div class="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <p class="text-xs font-medium text-slate-200">Inbox Auto-Refresh</p>
-                      <p class="mt-0.5 text-[11px] text-slate-400">
+                      <p class="text-xs font-medium text-ink">Inbox Auto-Refresh</p>
+                      <p class="mt-0.5 text-[11px] text-ink-muted">
                         Automatically poll GitHub for pending review requests while on the Inbox screen.
                       </p>
                     </div>
-                    <div class="inline-flex rounded-lg border border-border bg-canvas-inset p-0.5">
+                    <div class="inline-flex rounded-xl border border-border bg-canvas-inset p-0.5">
                       <button
                         v-for="opt in refreshOptions"
                         :key="opt.value"
-                        class="rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors"
+                        class="rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors"
                         :class="
                           settings.inboxAutoRefreshSeconds === opt.value
-                            ? 'bg-blue-600 text-white'
-                            : 'text-slate-400 hover:text-slate-200'
+                            ? 'bg-terra text-white shadow-xs'
+                            : 'text-ink-muted hover:text-ink'
                         "
                         @click="settings.setInboxAutoRefreshSeconds(opt.value)"
                       >
@@ -303,32 +375,32 @@ async function handleResetDefaults() {
                 </div>
 
                 <label
-                  class="flex cursor-pointer items-center justify-between gap-4 rounded-lg border border-border bg-canvas/60 p-4"
+                  class="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-border bg-canvas/60 p-4"
                 >
                   <div>
-                    <p class="text-xs font-medium text-slate-200">Show Keyboard Shortcuts Bar</p>
-                    <p class="mt-0.5 text-[11px] text-slate-400">
+                    <p class="text-xs font-medium text-ink">Show Keyboard Shortcuts Bar</p>
+                    <p class="mt-0.5 text-[11px] text-ink-muted">
                       Display the quick-reference shortcut bar at the bottom of the review screen.
                     </p>
                   </div>
                   <input
                     type="checkbox"
                     :checked="settings.showShortcutsBar"
-                    class="h-4 w-4 rounded border-border bg-canvas-inset accent-blue-500"
+                    class="h-4 w-4 rounded border-border bg-canvas-inset accent-terra"
                     @change="settings.setShowShortcutsBar(($event.target as HTMLInputElement).checked)"
                   />
                 </label>
 
-                <div class="rounded-lg border border-border-muted bg-canvas-inset/50 p-4">
+                <div class="rounded-xl border border-border-muted bg-canvas-inset/60 p-4">
                   <div class="flex items-center justify-between gap-3">
                     <div>
-                      <p class="text-xs font-medium text-slate-300">Reset Preferences</p>
-                      <p class="mt-0.5 text-[11px] text-slate-500">
+                      <p class="text-xs font-medium text-ink-secondary">Reset Preferences</p>
+                      <p class="mt-0.5 text-[11px] text-ink-faint">
                         Restore all tour, diff, and general settings to defaults. Your GitHub PAT is kept.
                       </p>
                     </div>
                     <button
-                      class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-canvas px-3 py-1.5 text-xs text-slate-300 hover:bg-canvas-elevated"
+                      class="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-border bg-canvas-subtle px-3 py-1.5 text-xs text-ink-secondary hover:bg-canvas-elevated"
                       @click="handleResetDefaults"
                     >
                       <RotateCcw class="h-3.5 w-3.5" />
@@ -342,38 +414,38 @@ async function handleResetDefaults() {
             <!-- TOUR & ORDER -->
             <template v-else-if="settings.activeSection === 'tour'">
               <div class="space-y-4">
-                <div class="rounded-lg border border-border bg-canvas/60 p-4">
-                  <p class="text-xs font-medium text-slate-200">Default Reading Order</p>
-                  <p class="mt-0.5 text-[11px] text-slate-400">
+                <div class="rounded-xl border border-border bg-canvas/60 p-4">
+                  <p class="text-xs font-medium text-ink">Default Reading Order</p>
+                  <p class="mt-0.5 text-[11px] text-ink-muted">
                     Controls how Stroll orders files in the dependency graph.
                   </p>
                   <div class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <button
-                      class="rounded-lg border p-3 text-left transition-colors"
+                      class="rounded-xl border p-3 text-left transition-colors"
                       :class="
                         settings.defaultTourDirection === 'bottom-up'
-                          ? 'border-blue-500/60 bg-blue-500/10'
-                          : 'border-border bg-canvas-inset/60 hover:bg-canvas-elevated/60'
+                          ? 'border-terra-border bg-terra-soft'
+                          : 'border-border bg-canvas-subtle hover:bg-canvas-elevated/60'
                       "
                       @click="handleDirectionChange('bottom-up')"
                     >
-                      <p class="text-xs font-semibold text-slate-100">Bottom-Up</p>
-                      <p class="mt-1 text-[11px] leading-relaxed text-slate-400">
+                      <p class="text-xs font-semibold text-ink">Bottom-Up</p>
+                      <p class="mt-1 text-[11px] leading-relaxed text-ink-muted">
                         Start with config, types, and core foundations before UI and tests.
                       </p>
                     </button>
 
                     <button
-                      class="rounded-lg border p-3 text-left transition-colors"
+                      class="rounded-xl border p-3 text-left transition-colors"
                       :class="
                         settings.defaultTourDirection === 'top-down'
-                          ? 'border-blue-500/60 bg-blue-500/10'
-                          : 'border-border bg-canvas-inset/60 hover:bg-canvas-elevated/60'
+                          ? 'border-terra-border bg-terra-soft'
+                          : 'border-border bg-canvas-subtle hover:bg-canvas-elevated/60'
                       "
                       @click="handleDirectionChange('top-down')"
                     >
-                      <p class="text-xs font-semibold text-slate-100">Top-Down</p>
-                      <p class="mt-1 text-[11px] leading-relaxed text-slate-400">
+                      <p class="text-xs font-semibold text-ink">Top-Down</p>
+                      <p class="mt-1 text-[11px] leading-relaxed text-ink-muted">
                         Start at entrypoints and UI components, drilling down into helpers.
                       </p>
                     </button>
@@ -381,18 +453,18 @@ async function handleResetDefaults() {
                 </div>
 
                 <label
-                  class="flex cursor-pointer items-center justify-between gap-4 rounded-lg border border-border bg-canvas/60 p-4"
+                  class="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-border bg-canvas/60 p-4"
                 >
                   <div>
-                    <p class="text-xs font-medium text-slate-200">Auto-Advance on Mark Reviewed</p>
-                    <p class="mt-0.5 text-[11px] text-slate-400">
+                    <p class="text-xs font-medium text-ink">Auto-Advance on Mark Reviewed</p>
+                    <p class="mt-0.5 text-[11px] text-ink-muted">
                       Automatically jump to the next unreviewed step after marking a file reviewed.
                     </p>
                   </div>
                   <input
                     type="checkbox"
                     :checked="settings.autoAdvanceOnReview"
-                    class="h-4 w-4 rounded border-border bg-canvas-inset accent-blue-500"
+                    class="h-4 w-4 rounded border-border bg-canvas-inset accent-terra"
                     @change="
                       settings.setAutoAdvanceOnReview(($event.target as HTMLInputElement).checked)
                     "
@@ -400,20 +472,20 @@ async function handleResetDefaults() {
                 </label>
 
                 <label
-                  class="flex cursor-pointer items-center justify-between gap-4 rounded-lg border border-border bg-canvas/60 p-4"
+                  class="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-border bg-canvas/60 p-4"
                 >
                   <div>
-                    <p class="text-xs font-medium text-slate-200">
+                    <p class="text-xs font-medium text-ink">
                       Open Tour Outline Sidebar by Default
                     </p>
-                    <p class="mt-0.5 text-[11px] text-slate-400">
+                    <p class="mt-0.5 text-[11px] text-ink-muted">
                       Show the step outline sidebar automatically when opening a Pull Request.
                     </p>
                   </div>
                   <input
                     type="checkbox"
                     :checked="settings.sidebarDefaultOpen"
-                    class="h-4 w-4 rounded border-border bg-canvas-inset accent-blue-500"
+                    class="h-4 w-4 rounded border-border bg-canvas-inset accent-terra"
                     @change="
                       settings.setSidebarDefaultOpen(($event.target as HTMLInputElement).checked)
                     "
@@ -425,23 +497,23 @@ async function handleResetDefaults() {
             <!-- DIFF & CODE -->
             <template v-else-if="settings.activeSection === 'diff'">
               <div class="space-y-4">
-                <div class="rounded-lg border border-border bg-canvas/60 p-4">
+                <div class="rounded-xl border border-border bg-canvas/60 p-4">
                   <div class="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <p class="text-xs font-medium text-slate-200">Code Font Size</p>
-                      <p class="mt-0.5 text-[11px] text-slate-400">
+                      <p class="text-xs font-medium text-ink">Code Font Size</p>
+                      <p class="mt-0.5 text-[11px] text-ink-muted">
                         Adjusts the monospace font size in the diff viewer.
                       </p>
                     </div>
-                    <div class="inline-flex rounded-lg border border-border bg-canvas-inset p-0.5">
+                    <div class="inline-flex rounded-xl border border-border bg-canvas-inset p-0.5">
                       <button
                         v-for="opt in fontSizeOptions"
                         :key="opt.value"
-                        class="rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors"
+                        class="rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors"
                         :class="
                           settings.codeFontSize === opt.value
-                            ? 'bg-blue-600 text-white'
-                            : 'text-slate-400 hover:text-slate-200'
+                            ? 'bg-terra text-white shadow-xs'
+                            : 'text-ink-muted hover:text-ink'
                         "
                         @click="settings.setCodeFontSize(opt.value)"
                       >
@@ -451,46 +523,46 @@ async function handleResetDefaults() {
                   </div>
 
                   <div
-                    class="mt-3 overflow-hidden rounded-md border border-border-muted bg-canvas-inset p-2.5 font-mono leading-[1.55]"
+                    class="mt-3 overflow-hidden rounded-xl border border-border-muted bg-code p-2.5 font-mono leading-[1.55]"
                     :style="{ fontSize: `${settings.codeFontSize}px` }"
                   >
-                    <div class="text-slate-500">  const order = buildReadingOrder(files, dir)</div>
-                    <div class="bg-emerald-500/10 text-emerald-300">+ return order.filter((s) =&gt; !s.skipped)</div>
+                    <div class="text-ink-muted">  const order = buildReadingOrder(files, dir)</div>
+                    <div class="bg-diff-add text-pine-text">+ return order.filter((s) =&gt; !s.skipped)</div>
                   </div>
                 </div>
 
-                <div class="rounded-lg border border-border bg-canvas/60 p-4">
-                  <p class="text-xs font-medium text-slate-200">Symbol Hover Popover</p>
-                  <p class="mt-0.5 text-[11px] text-slate-400">
+                <div class="rounded-xl border border-border bg-canvas/60 p-4">
+                  <p class="text-xs font-medium text-ink">Symbol Hover Popover</p>
+                  <p class="mt-0.5 text-[11px] text-ink-muted">
                     Choose how symbol definitions and PR context popovers are triggered in diffs.
                   </p>
                   <div class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <button
-                      class="rounded-lg border p-3 text-left transition-colors"
+                      class="rounded-xl border p-3 text-left transition-colors"
                       :class="
                         !settings.requireAltForHover
-                          ? 'border-blue-500/60 bg-blue-500/10'
-                          : 'border-border bg-canvas-inset/60 hover:bg-canvas-elevated/60'
+                          ? 'border-terra-border bg-terra-soft'
+                          : 'border-border bg-canvas-subtle hover:bg-canvas-elevated/60'
                       "
                       @click="settings.setRequireAltForHover(false)"
                     >
-                      <p class="text-xs font-semibold text-slate-100">Automatic (250ms)</p>
-                      <p class="mt-1 text-[11px] text-slate-400">
+                      <p class="text-xs font-semibold text-ink">Automatic (250ms)</p>
+                      <p class="mt-1 text-[11px] text-ink-muted">
                         Opens automatically when hovering an identifier.
                       </p>
                     </button>
 
                     <button
-                      class="rounded-lg border p-3 text-left transition-colors"
+                      class="rounded-xl border p-3 text-left transition-colors"
                       :class="
                         settings.requireAltForHover
-                          ? 'border-blue-500/60 bg-blue-500/10'
-                          : 'border-border bg-canvas-inset/60 hover:bg-canvas-elevated/60'
+                          ? 'border-terra-border bg-terra-soft'
+                          : 'border-border bg-canvas-subtle hover:bg-canvas-elevated/60'
                       "
                       @click="settings.setRequireAltForHover(true)"
                     >
-                      <p class="text-xs font-semibold text-slate-100">⌥ / Alt + Hover</p>
-                      <p class="mt-1 text-[11px] text-slate-400">
+                      <p class="text-xs font-semibold text-ink">⌥ / Alt + Hover</p>
+                      <p class="mt-1 text-[11px] text-ink-muted">
                         Only opens while holding Option / Alt to avoid accidental popovers.
                       </p>
                     </button>
@@ -502,16 +574,16 @@ async function handleResetDefaults() {
             <!-- GITHUB -->
             <template v-else-if="settings.activeSection === 'github'">
               <div class="space-y-4">
-                <p class="text-xs leading-relaxed text-slate-400">
-                  Sign in with your local <code class="text-slate-200">gh</code> CLI session or
+                <p class="text-xs leading-relaxed text-ink-muted">
+                  Sign in with your local <code class="font-mono text-ink">gh</code> CLI session or
                   enter a GitHub Personal Access Token (PAT) with
-                  <code class="text-slate-200">repo</code> and
-                  <code class="text-slate-200">read:user</code> scopes.
+                  <code class="font-mono text-ink">repo</code> and
+                  <code class="font-mono text-ink">read:user</code> scopes.
                 </p>
 
                 <div v-if="isTauriRuntime()">
                   <button
-                    class="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-2 text-xs font-semibold text-blue-300 hover:bg-blue-500/20 disabled:opacity-50"
+                    class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-terra-border bg-terra-soft px-3 py-2 text-xs font-semibold text-terra-text transition-colors hover:bg-terra hover:text-white disabled:opacity-50"
                     :disabled="auth.isLoading"
                     @click="handleSignInWithGh"
                   >
@@ -519,7 +591,7 @@ async function handleResetDefaults() {
                     <Terminal v-else class="h-3.5 w-3.5" />
                     <span>Use GitHub CLI (gh auth token)</span>
                   </button>
-                  <div class="mt-3 flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500">
+                  <div class="mt-3 flex items-center gap-2 text-[10px] uppercase tracking-wider text-ink-faint">
                     <span class="h-px flex-1 bg-border-muted" />
                     <span>or paste PAT</span>
                     <span class="h-px flex-1 bg-border-muted" />
@@ -527,7 +599,7 @@ async function handleResetDefaults() {
                 </div>
 
                 <div class="space-y-1.5">
-                  <label class="block text-xs font-medium text-slate-300">
+                  <label class="block text-xs font-medium text-ink-secondary">
                     Personal Access Token
                   </label>
                   <div class="relative">
@@ -535,12 +607,12 @@ async function handleResetDefaults() {
                       v-model="tokenInput"
                       :type="showToken ? 'text' : 'password'"
                       placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                      class="w-full rounded-lg border border-border bg-canvas-inset py-2 pr-9 pl-3 font-mono text-xs text-slate-100 placeholder-slate-600 focus:border-blue-500 focus:outline-none"
+                      class="w-full rounded-xl border border-border bg-canvas-inset py-2 pr-9 pl-3 font-mono text-xs text-ink placeholder-ink-faint focus:border-terra focus:outline-none"
                       @keydown.enter="handleSavePat"
                     />
                     <button
                       type="button"
-                      class="absolute top-1/2 right-2.5 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                      class="absolute top-1/2 right-2.5 -translate-y-1/2 text-ink-faint hover:text-ink"
                       :title="showToken ? 'Hide token' : 'Show token'"
                       @click="showToken = !showToken"
                     >
@@ -552,21 +624,21 @@ async function handleResetDefaults() {
 
                 <div
                   v-if="auth.error"
-                  class="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300"
+                  class="rounded-xl border border-crimson-border bg-crimson-soft px-3 py-2 text-xs text-crimson-text"
                 >
                   {{ auth.error }}
                 </div>
 
                 <div
                   v-if="auth.viewer"
-                  class="flex items-center justify-between rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300"
+                  class="flex items-center justify-between rounded-xl border border-pine-border bg-pine-soft px-3 py-2 text-xs text-pine-text"
                 >
                   <span class="flex items-center gap-2">
                     <CheckCircle2 class="h-4 w-4" />
                     Signed in as <strong class="font-mono">@{{ auth.viewer.login }}</strong>
                   </span>
                   <button
-                    class="inline-flex items-center gap-1 text-slate-400 hover:text-rose-300"
+                    class="inline-flex items-center gap-1 text-ink-muted hover:text-crimson-text"
                     @click="auth.clearPat()"
                   >
                     <LogOut class="h-3.5 w-3.5" />
@@ -576,7 +648,7 @@ async function handleResetDefaults() {
 
                 <div class="flex justify-end pt-1">
                   <button
-                    class="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-40"
+                    class="inline-flex items-center gap-1.5 rounded-xl bg-terra px-4 py-1.5 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-terra-hover disabled:opacity-40"
                     :disabled="auth.isLoading || !tokenInput.trim()"
                     @click="handleSavePat"
                   >
@@ -592,16 +664,16 @@ async function handleResetDefaults() {
               <div class="space-y-4">
                 <div class="flex items-start justify-between gap-3">
                   <div>
-                    <p class="text-xs font-medium text-slate-200">Local Repository Checkouts</p>
-                    <p class="mt-0.5 text-[11px] leading-relaxed text-slate-400">
-                      Map <code class="text-slate-300">owner/repo</code> to a local git checkout for
+                    <p class="text-xs font-medium text-ink">Local Repository Checkouts</p>
+                    <p class="mt-0.5 text-[11px] leading-relaxed text-ink-muted">
+                      Map <code class="font-mono text-ink">owner/repo</code> to a local git checkout for
                       Tree-sitter unchanged-file symbol resolution and
-                      <code class="text-slate-300">git blame</code> on hover.
+                      <code class="font-mono text-ink">git blame</code> on hover.
                     </p>
                   </div>
                   <span
                     v-if="!isTauriRuntime()"
-                    class="shrink-0 rounded border border-slate-700 bg-canvas px-1.5 py-0.5 text-[10px] text-slate-400"
+                    class="shrink-0 rounded-md border border-border bg-canvas px-1.5 py-0.5 text-[10px] text-ink-muted"
                   >
                     Desktop-only
                   </span>
@@ -611,14 +683,14 @@ async function handleResetDefaults() {
                   <div
                     v-for="[ownerRepo, localPath] in linkedRepos"
                     :key="ownerRepo"
-                    class="flex items-center justify-between gap-2 rounded-lg border border-border-muted bg-canvas px-3 py-2 text-[11px]"
+                    class="flex items-center justify-between gap-2 rounded-xl border border-border-muted bg-canvas px-3 py-2 text-[11px]"
                   >
                     <div class="min-w-0">
-                      <div class="font-mono font-semibold text-slate-200">{{ ownerRepo }}</div>
-                      <div class="truncate font-mono text-[10px] text-slate-400">{{ localPath }}</div>
+                      <div class="font-mono font-semibold text-ink">{{ ownerRepo }}</div>
+                      <div class="truncate font-mono text-[10px] text-ink-muted">{{ localPath }}</div>
                     </div>
                     <button
-                      class="shrink-0 rounded p-1 text-slate-500 hover:bg-canvas-elevated hover:text-rose-400"
+                      class="shrink-0 rounded-lg p-1 text-ink-faint hover:bg-canvas-elevated hover:text-crimson-text"
                       title="Unlink repository"
                       @click="review.unlinkRepoPath(ownerRepo)"
                     >
@@ -629,38 +701,38 @@ async function handleResetDefaults() {
 
                 <div
                   v-else
-                  class="rounded-lg border border-dashed border-border bg-canvas/40 p-4 text-center text-[11px] text-slate-500"
+                  class="rounded-xl border border-dashed border-border bg-canvas/50 p-4 text-center text-[11px] text-ink-faint"
                 >
                   No local checkouts linked yet.
                 </div>
 
-                <div class="space-y-2 rounded-lg border border-border bg-canvas/60 p-3.5">
+                <div class="space-y-2 rounded-xl border border-border bg-canvas/60 p-3.5">
                   <div class="flex flex-col gap-2 sm:flex-row">
                     <input
                       v-model="repoInput"
                       type="text"
                       placeholder="owner/repo"
-                      class="rounded-lg border border-border bg-canvas-inset px-2.5 py-1.5 font-mono text-xs text-slate-100 placeholder-slate-600 focus:border-blue-500 focus:outline-none sm:w-40"
+                      class="rounded-xl border border-border bg-canvas-inset px-2.5 py-1.5 font-mono text-xs text-ink placeholder-ink-faint focus:border-terra focus:outline-none sm:w-40"
                     />
                     <input
                       v-model="pathInput"
                       type="text"
                       placeholder="/path/to/local/checkout"
-                      class="flex-1 rounded-lg border border-border bg-canvas-inset px-2.5 py-1.5 font-mono text-xs text-slate-100 placeholder-slate-600 focus:border-blue-500 focus:outline-none"
+                      class="flex-1 rounded-xl border border-border bg-canvas-inset px-2.5 py-1.5 font-mono text-xs text-ink placeholder-ink-faint focus:border-terra focus:outline-none"
                       @keydown.enter="handleLinkRepo"
                     />
                   </div>
                   <div class="flex items-center justify-between">
                     <button
                       v-if="activePRRepo"
-                      class="text-[11px] text-blue-400 hover:text-blue-300"
+                      class="text-[11px] text-terra-text hover:underline"
                       @click="repoInput = activePRRepo"
                     >
                       Use current PR ({{ activePRRepo }})
                     </button>
                     <span v-else />
                     <button
-                      class="inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2.5 py-1 text-xs font-medium text-slate-200 hover:bg-canvas-elevated disabled:opacity-40"
+                      class="inline-flex items-center gap-1 rounded-xl border border-border bg-canvas-subtle px-2.5 py-1 text-xs font-medium text-ink-secondary hover:bg-canvas-elevated disabled:opacity-40"
                       :disabled="!repoInput.trim() || !pathInput.trim()"
                       @click="handleLinkRepo"
                     >
@@ -675,26 +747,26 @@ async function handleResetDefaults() {
             <!-- UPDATES -->
             <template v-else-if="settings.activeSection === 'updates'">
               <div class="space-y-4">
-                <div class="rounded-lg border border-border bg-canvas/60 p-4">
+                <div class="rounded-xl border border-border bg-canvas/60 p-4">
                   <div class="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <p class="text-xs font-medium text-slate-200">Stroll v{{ appVersion }}</p>
-                      <p v-if="updateState === 'up-to-date'" class="mt-0.5 text-[11px] text-emerald-400">
+                      <p class="text-xs font-medium text-ink">Stroll v{{ appVersion }}</p>
+                      <p v-if="updateState === 'up-to-date'" class="mt-0.5 text-[11px] text-pine-text">
                         You're on the latest version.
                       </p>
                       <p
                         v-else-if="updateState === 'available' && availableUpdate"
-                        class="mt-0.5 text-[11px] text-blue-400"
+                        class="mt-0.5 text-[11px] text-terra-text"
                       >
                         Version v{{ availableUpdate.version }} is available.
                       </p>
-                      <p v-else-if="updateState === 'installing'" class="mt-0.5 text-[11px] text-slate-400">
+                      <p v-else-if="updateState === 'installing'" class="mt-0.5 text-[11px] text-ink-muted">
                         {{ updateMessage }}
                       </p>
-                      <p v-else-if="updateState === 'error'" class="mt-0.5 text-[11px] text-amber-400">
+                      <p v-else-if="updateState === 'error'" class="mt-0.5 text-[11px] text-ochre-text">
                         {{ updateMessage }}
                       </p>
-                      <p v-else class="mt-0.5 text-[11px] text-slate-400">
+                      <p v-else class="mt-0.5 text-[11px] text-ink-muted">
                         Check for new desktop releases and install updates automatically.
                       </p>
                     </div>
@@ -702,7 +774,7 @@ async function handleResetDefaults() {
                     <button
                       v-if="updateState === 'available'"
                       type="button"
-                      class="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/40 bg-blue-500/15 px-3 py-1.5 text-xs font-medium text-blue-300 hover:bg-blue-500/25"
+                      class="inline-flex items-center gap-1.5 rounded-xl bg-terra px-3 py-1.5 text-xs font-semibold text-white hover:bg-terra-hover"
                       @click="handleInstallUpdate"
                     >
                       <Download class="h-3.5 w-3.5" />
@@ -711,7 +783,7 @@ async function handleResetDefaults() {
                     <button
                       v-else
                       type="button"
-                      class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-canvas px-3 py-1.5 text-xs text-slate-300 hover:bg-canvas-elevated disabled:opacity-50"
+                      class="inline-flex items-center gap-1.5 rounded-xl border border-border bg-canvas-subtle px-3 py-1.5 text-xs text-ink-secondary hover:bg-canvas-elevated disabled:opacity-50"
                       :disabled="updateState === 'checking' || updateState === 'installing'"
                       @click="handleCheckForUpdates"
                     >
@@ -729,18 +801,18 @@ async function handleResetDefaults() {
 
             <!-- SHORTCUTS -->
             <template v-else-if="settings.activeSection === 'shortcuts'">
-              <div class="divide-y divide-border-muted rounded-lg border border-border bg-canvas/60">
+              <div class="divide-y divide-border-muted rounded-xl border border-border bg-canvas/60">
                 <div
                   v-for="row in shortcutRows"
                   :key="row.description"
                   class="flex items-center justify-between gap-4 px-4 py-2.5 text-xs"
                 >
-                  <span class="text-slate-300">{{ row.description }}</span>
+                  <span class="text-ink-secondary">{{ row.description }}</span>
                   <div class="flex shrink-0 items-center gap-1.5">
                     <kbd
                       v-for="k in row.keys"
                       :key="k"
-                      class="rounded border border-border bg-canvas-inset px-1.5 py-0.5 font-mono text-[11px] text-slate-200"
+                      class="rounded-md border border-border bg-canvas-subtle px-1.5 py-0.5 font-mono text-[11px] text-ink"
                     >
                       {{ k }}
                     </kbd>
