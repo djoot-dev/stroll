@@ -17,7 +17,8 @@
   --stroll-canvas-subtle: #fffdf8;
   --stroll-canvas-elevated: #efe6d6;
   --stroll-canvas-inset: #f2eadb;
-  --stroll-code: #fcf9f2;
+  --stroll-code: #fffefb;
+  --stroll-code-gutter-text: #586b61;
 
   /* Borders */
   --stroll-border: #ddd2be;
@@ -65,14 +66,14 @@
   --stroll-plum-text: #5f3c78;
 
   /* Diff Surfaces */
-  --stroll-diff-add: rgba(39, 99, 77, 0.11);
-  --stroll-diff-add-hover: rgba(39, 99, 77, 0.18);
-  --stroll-diff-del: rgba(184, 58, 58, 0.095);
-  --stroll-diff-del-hover: rgba(184, 58, 58, 0.16);
-  --stroll-diff-hover: rgba(23, 62, 47, 0.045);
-  --stroll-diff-select: rgba(200, 97, 48, 0.13);
+  --stroll-diff-add: rgba(26, 127, 86, 0.15);
+  --stroll-diff-add-hover: rgba(26, 127, 86, 0.22);
+  --stroll-diff-del: rgba(204, 46, 58, 0.13);
+  --stroll-diff-del-hover: rgba(204, 46, 58, 0.20);
+  --stroll-diff-hover: rgba(22, 48, 37, 0.06);
+  --stroll-diff-select: rgba(200, 97, 48, 0.15);
   --stroll-diff-select-bar: #c86130;
-  --stroll-diff-select-edge: rgba(200, 97, 48, 0.48);
+  --stroll-diff-select-edge: rgba(200, 97, 48, 0.52);
 
   /* Tactile Shadows */
   --stroll-shadow-card: 0 1px 2px rgba(23, 62, 47, 0.05), 0 4px 12px rgba(124, 56, 23, 0.04);
@@ -80,19 +81,19 @@
   --stroll-backdrop: rgba(22, 48, 37, 0.42);
 
   /* Syntax Highlighting (Warm Parchment Light) */
-  --syn-keyword: #9e4320;
-  --syn-string: #236348;
-  --syn-number: #a65d1e;
-  --syn-comment: #7c8d84;
-  --syn-type: #694382;
-  --syn-function: #1f5c6b;
-  --syn-variable: #1a352a;
-  --syn-property: #2f5b4a;
-  --syn-operator: #8c4a27;
-  --syn-tag: #b04632;
-  --syn-meta: #6e5a3e;
-  --syn-punctuation: #5e7067;
-  --syn-invalid: #b83a3a;
+  --syn-keyword: #a83214;
+  --syn-string: #145c3e;
+  --syn-number: #8c4a08;
+  --syn-comment: #566960;
+  --syn-type: #5d2e82;
+  --syn-function: #0f4f73;
+  --syn-variable: #12261e;
+  --syn-property: #1d5444;
+  --syn-operator: #853816;
+  --syn-tag: #a62b2b;
+  --syn-meta: #634c2c;
+  --syn-punctuation: #465950;
+  --syn-invalid: #b3202a;
 }
 
 html.dark {
@@ -103,11 +104,12 @@ html.dark {
   --stroll-canvas-subtle: #15231d;
   --stroll-canvas-elevated: #1e3129;
   --stroll-canvas-inset: #0b1310;
-  --stroll-code: #0c1612;
+  --stroll-code: #09110e;
+  --stroll-code-gutter-text: #859e91;
 
   /* Borders */
   --stroll-border: #2a4036;
-  --stroll-border-muted: #1e3028;
+  --stroll-border-muted: #243930;
 
   /* Ink (Warm Cream) */
   --stroll-ink: #f3ede0;
@@ -130,9 +132,9 @@ html.dark {
   --stroll-pine-text: #7fd4ae;
 
   /* Organic Sage */
-  --stroll-sage-soft: rgba(198, 219, 196, 0.10);
-  --stroll-sage-border: rgba(198, 219, 196, 0.24);
-  --stroll-sage-text: #c6dbc4;
+  --stroll-sage-soft: rgba(198, 219, 196, 0.13);
+  --stroll-sage-border: rgba(198, 219, 196, 0.28);
+  --stroll-sage-text: #d7ead5;
 
   /* Warm Sandstone / Ochre */
   --stroll-ochre-soft: rgba(231, 185, 146, 0.13);
@@ -151,34 +153,34 @@ html.dark {
   --stroll-plum-text: #d5b8ec;
 
   /* Diff Surfaces */
-  --stroll-diff-add: rgba(56, 152, 112, 0.14);
-  --stroll-diff-add-hover: rgba(56, 152, 112, 0.21);
-  --stroll-diff-del: rgba(217, 100, 108, 0.13);
-  --stroll-diff-del-hover: rgba(217, 100, 108, 0.20);
-  --stroll-diff-hover: rgba(198, 219, 196, 0.05);
-  --stroll-diff-select: rgba(222, 123, 71, 0.17);
+  --stroll-diff-add: rgba(46, 168, 114, 0.21);
+  --stroll-diff-add-hover: rgba(46, 168, 114, 0.29);
+  --stroll-diff-del: rgba(235, 87, 97, 0.21);
+  --stroll-diff-del-hover: rgba(235, 87, 97, 0.29);
+  --stroll-diff-hover: rgba(198, 219, 196, 0.08);
+  --stroll-diff-select: rgba(222, 123, 71, 0.22);
   --stroll-diff-select-bar: #de7b47;
-  --stroll-diff-select-edge: rgba(222, 123, 71, 0.50);
+  --stroll-diff-select-edge: rgba(222, 123, 71, 0.56);
 
   /* Tactile Shadows */
   --stroll-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.28);
   --stroll-shadow-elevated: 0 16px 40px rgba(0, 0, 0, 0.55);
-  --stroll-backdrop: rgba(5, 12, 9, 0.72);
+  --stroll-backdrop: rgba(5, 12, 9, 0.40);
 
   /* Syntax Highlighting (Deep Night Pine Dark) */
-  --syn-keyword: #f09567;
-  --syn-string: #8ad4a5;
-  --syn-number: #e9bf82;
-  --syn-comment: #6d8578;
-  --syn-type: #cfb2ea;
-  --syn-function: #7ec8c9;
-  --syn-variable: #eae2d3;
-  --syn-property: #b7d7c5;
-  --syn-operator: #e89c72;
-  --syn-tag: #eb847c;
-  --syn-meta: #c7b194;
-  --syn-punctuation: #8aa094;
-  --syn-invalid: #f28b92;
+  --syn-keyword: #ff9e64;
+  --syn-string: #7ee7a8;
+  --syn-number: #ffd17a;
+  --syn-comment: #8ea89a;
+  --syn-type: #dbb7ff;
+  --syn-function: #6cd4ff;
+  --syn-variable: #f5f2ea;
+  --syn-property: #b8e6cf;
+  --syn-operator: #ffa87a;
+  --syn-tag: #ff8c8c;
+  --syn-meta: #e0c8a4;
+  --syn-punctuation: #b0c4b9;
+  --syn-invalid: #ff7b86;
 }
 
 @theme {
@@ -190,6 +192,7 @@ html.dark {
   --color-canvas-elevated: var(--stroll-canvas-elevated);
   --color-canvas-inset: var(--stroll-canvas-inset);
   --color-code: var(--stroll-code);
+  --color-code-gutter-text: var(--stroll-code-gutter-text);
 
   --color-border: var(--stroll-border);
   --color-border-muted: var(--stroll-border-muted);
