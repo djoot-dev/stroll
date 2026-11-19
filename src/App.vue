@@ -102,21 +102,24 @@ function scrollPreviewBy(delta: number) {
   startScrollAnimation()
 }
 
+function resetPreviewScroll() {
+  cancelSmoothScroll()
+  if (previewScrollRef.value) {
+    previewScrollRef.value.scrollTop = 0
+  }
+}
+
 watch(
   () => review.currentStepIndex,
   (nextIdx, prevIdx) => {
-    cancelSmoothScroll()
     stepTransitionName.value = nextIdx >= prevIdx ? 'step-next' : 'step-prev'
   },
 )
 
 watch(
-  () => review.activeView,
+  () => [review.activeView, review.currentStep?.file.path] as const,
   () => {
-    cancelSmoothScroll()
-    if (previewScrollRef.value) {
-      previewScrollRef.value.scrollTop = 0
-    }
+    resetPreviewScroll()
   },
 )
 
