@@ -1,9 +1,9 @@
 [package]
 name = "stroll"
-version = "0.3.1"
+version = "0.3.2"
 description = "Guided, step-by-step GitHub Pull Request review desktop app"
 authors = ["Daniel"]
-edition = "2021"
+edition = "2026"
 
 [lib]
 name = "stroll_lib"
