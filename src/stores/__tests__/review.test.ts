@@ -373,4 +373,51 @@ describe('useReviewStore refreshCurrentPR and PR overview comments', () => {
     expect(store.activeView).toBe('step')
     expect(store.currentStepIndex).toBe(3)
   })
+
+  it('tracks isLoadingPR and loadingPRKey while opening a PR and prevents concurrent loads', async () => {
+    let resolveFetch!: (value: PullRequestData) => void
+    fetchPullRequestMock.mockImplementationOnce(
+      () =>
+        new Promise<PullRequestData>((resolve) => {
+          resolveFetch = resolve
+        }),
+    )
+
+    const auth = useAuthStore()
+    auth.pat = 'ghp_test_token'
+
+    const store = useReviewStore()
+    const pending = store.loadPRByRepo('acme', 'stroll', 77)
+
+    expect(store.isLoadingPR).toBe(true)
+    expect(store.loadingPRKey).toBe('acme/stroll#77')
+
+    // Concurrent load is ignored while one is already in progress
+    const concurrentResult = await store.loadPRByRepo('acme', 'other', 88)
+    expect(concurrentResult).toBe(false)
+    expect(fetchPullRequestMock).toHaveBeenCalledTimes(1)
+    expect(store.loadingPRKey).toBe('acme/stroll#77')
+
+    resolveFetch(makePR({ owner: 'acme', repo: 'stroll', number: 77 }))
+    const ok = await pending
+
+    expect(ok).toBe(true)
+    expect(store.isLoadingPR).toBe(false)
+    expect(store.loadingPRKey).toBeNull()
+  })
+
+  it('clears isLoadingPR and loadingPRKey when loading a PR fails', async () => {
+    fetchPullRequestMock.mockRejectedValueOnce(new Error('Network timeout'))
+
+    const auth = useAuthStore()
+    auth.pat = 'ghp_test_token'
+
+    const store = useReviewStore()
+    const ok = await store.loadPRByRepo('acme', 'stroll', 999)
+
+    expect(ok).toBe(false)
+    expect(store.isLoadingPR).toBe(false)
+    expect(store.loadingPRKey).toBeNull()
+    expect(store.prError).toBe('Network timeout')
+  })
 })
