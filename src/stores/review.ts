@@ -79,6 +79,7 @@ export const useReviewStore = defineStore('review', () => {
   const lastSubmitted = ref<SubmittedReviewSummary | null>(null)
 
   const isLoadingPR = ref(false)
+  const loadingPRKey = ref<string | null>(null)
   const isRefreshingPR = ref(false)
   const prHasRemoteUpdates = ref(false)
   const remoteUpdateSummary = ref<string | null>(null)
@@ -266,6 +267,7 @@ export const useReviewStore = defineStore('review', () => {
   }
 
   async function loadPRByRepo(owner: string, repo: string, number: number): Promise<boolean> {
+    if (isLoadingPR.value) return false
     const auth = useAuthStore()
     const settings = useSettingsStore()
     if (!auth.pat) {
@@ -275,6 +277,7 @@ export const useReviewStore = defineStore('review', () => {
     }
 
     isLoadingPR.value = true
+    loadingPRKey.value = `${owner}/${repo}#${number}`
     prError.value = null
     try {
       const localRepoPath = repoPaths.value[`${owner}/${repo}`] ?? null
@@ -287,6 +290,7 @@ export const useReviewStore = defineStore('review', () => {
       return false
     } finally {
       isLoadingPR.value = false
+      loadingPRKey.value = null
     }
   }
 
@@ -1137,6 +1141,7 @@ export const useReviewStore = defineStore('review', () => {
     repoPaths,
     currentRepoPath,
     isLoadingPR,
+    loadingPRKey,
     isRefreshingPR,
     prHasRemoteUpdates,
     remoteUpdateSummary,
