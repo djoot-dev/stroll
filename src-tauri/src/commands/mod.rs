@@ -1,6 +1,7 @@
 pub mod ast;
 pub mod gh;
 pub mod git;
+pub mod keychain;
 
 use serde::Serialize;
 

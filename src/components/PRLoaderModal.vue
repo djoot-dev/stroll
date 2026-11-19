@@ -55,7 +55,7 @@ async function handleLoadDemo() {
               <input
                 v-model="urlInput"
                 type="url"
-                placeholder="https://github.com/owner/repo/pull/123"
+                :placeholder="`https://${settings.githubHost}/owner/repo/pull/123`"
                 class="flex-1 rounded-xl border border-border bg-canvas-inset px-3 py-2 font-mono text-xs text-ink placeholder-ink-faint focus:border-terra focus:outline-none"
                 @keydown.enter="handleLoadUrl"
               />
