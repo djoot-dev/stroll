@@ -30,6 +30,8 @@ export interface PRFile {
   status: FileChangeStatus
   additions: number
   deletions: number
+  /** Git blob SHA from GitHub REST API (when available) */
+  sha?: string
   /** Unified diff patch from GitHub */
   patch: string
   /** Full file content at base commit (null for newly added files) */
