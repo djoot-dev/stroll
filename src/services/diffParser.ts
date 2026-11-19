@@ -166,11 +166,54 @@ export function isPureRename(file: PRFile): boolean {
   )
 }
 
+export interface BuildDiffOptions {
+  ignoreWhitespace?: boolean
+}
+
+function normalizeWs(text: string): string {
+  return text.replace(/\s+/g, '')
+}
+
+function collapseWhitespaceOnlyLines(lines: DiffLine[]): DiffLine[] {
+  const out: DiffLine[] = []
+  let i = 0
+  while (i < lines.length) {
+    if (lines[i].type === 'del') {
+      const delStart = i
+      while (i < lines.length && lines[i].type === 'del') i += 1
+      const addStart = i
+      while (i < lines.length && lines[i].type === 'add') i += 1
+      const dels = lines.slice(delStart, addStart)
+      const adds = lines.slice(addStart, i)
+
+      if (
+        dels.length > 0 &&
+        dels.length === adds.length &&
+        dels.every((d, idx) => normalizeWs(d.content) === normalizeWs(adds[idx].content))
+      ) {
+        for (let k = 0; k < adds.length; k += 1) {
+          out.push({
+            ...adds[k],
+            type: 'context',
+            oldLineNumber: dels[k].oldLineNumber,
+          })
+        }
+        continue
+      }
+      out.push(...dels, ...adds)
+      continue
+    }
+    out.push(lines[i])
+    i += 1
+  }
+  return out
+}
+
 /**
  * Converts a PRFile's unified patch + full file content into an ordered list of
  * expandable unchanged `DiffGap` segments and `DiffHunkBlock` segments.
  */
-export function buildDiffSegments(file: PRFile): DiffSegment[] {
+export function buildDiffSegments(file: PRFile, options?: BuildDiffOptions): DiffSegment[] {
   if (isPureRename(file)) return []
   if (file.isBinary && !file.patch.trim()) return []
 
@@ -220,13 +263,17 @@ export function buildDiffSegments(file: PRFile): DiffSegment[] {
       if (gap) segments.push(gap)
     }
 
-    applyInlineDiffsToHunk(hunk.lines)
+    const hunkLines = options?.ignoreWhitespace
+      ? collapseWhitespaceOnlyLines(hunk.lines)
+      : hunk.lines
+
+    applyInlineDiffsToHunk(hunkLines)
 
     segments.push({
       id: `hunk-${idx}`,
       kind: 'hunk',
       header: hunk.header,
-      lines: hunk.lines,
+      lines: hunkLines,
     })
 
     prevNewEnd = isDeleted

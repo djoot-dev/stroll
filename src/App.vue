@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ChevronLeft, ChevronRight, FolderGit2 } from '@lucide/vue'
+import { ChevronLeft, ChevronRight, FolderGit2, RefreshCw, X } from '@lucide/vue'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import CommandPaletteModal from '@/components/CommandPaletteModal.vue'
 import DiffViewer from '@/components/DiffViewer.vue'
 import FinishReviewModal from '@/components/FinishReviewModal.vue'
 import KeyboardShortcutsBar from '@/components/KeyboardShortcutsBar.vue'
@@ -26,6 +27,7 @@ const SCROLL_HOLD_DELAY_MS = 160
 const SCROLL_SMOOTHING = 10
 const stepTransitionName = ref<'step-next' | 'step-prev'>('step-next')
 const previewScrollRef = ref<HTMLElement | null>(null)
+const showCommandPalette = ref(false)
 
 let currentScrollTop: number | null = null
 let targetScrollTop: number | null = null
@@ -130,6 +132,14 @@ function isEditableElement(target: EventTarget | null): boolean {
 }
 
 function handleKeydown(e: KeyboardEvent) {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    if (review.screen === 'review' && review.pr) {
+      e.preventDefault()
+      showCommandPalette.value = !showCommandPalette.value
+    }
+    return
+  }
+
   if ((e.metaKey || e.ctrlKey) && e.key === ',') {
     e.preventDefault()
     if (settings.isOpen) {
@@ -141,6 +151,11 @@ function handleKeydown(e: KeyboardEvent) {
   }
 
   if (e.key === 'Escape') {
+    if (showCommandPalette.value) {
+      e.preventDefault()
+      showCommandPalette.value = false
+      return
+    }
     if (settings.isOpen) {
       e.preventDefault()
       settings.closeSettings()
@@ -158,7 +173,7 @@ function handleKeydown(e: KeyboardEvent) {
     }
   }
 
-  if (settings.isOpen || review.showFinishModal || review.showLoaderModal) return
+  if (settings.isOpen || review.showFinishModal || review.showLoaderModal || showCommandPalette.value) return
   if (review.screen !== 'review') return
   if (isEditableElement(e.target)) return
   if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -211,16 +226,22 @@ function handleWindowBlur() {
   heldScrollDirection = 0
 }
 
+let pulseTimerId: ReturnType<typeof setInterval> | null = null
+
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('keyup', handleKeyup)
   window.addEventListener('blur', handleWindowBlur)
+  pulseTimerId = setInterval(() => {
+    void review.checkForRemotePRUpdates()
+  }, 60_000)
   const minSplashDelay = new Promise((resolve) => setTimeout(resolve, 750))
   await Promise.all([auth.init(), review.init(), minSplashDelay])
   review.screen = 'inbox'
 })
 
 onBeforeUnmount(() => {
+  if (pulseTimerId !== null) clearInterval(pulseTimerId)
   cancelSmoothScroll()
   window.removeEventListener('keydown', handleKeydown)
   window.removeEventListener('keyup', handleKeyup)
@@ -242,6 +263,35 @@ onBeforeUnmount(() => {
     <!-- 3. Guided PR Review Screen -->
     <div v-else key="review" class="flex h-screen flex-col overflow-hidden bg-canvas text-ink">
       <TopBar />
+
+      <!-- Live PR Update Banner -->
+      <div
+        v-if="review.prHasRemoteUpdates"
+        class="flex items-center justify-between gap-3 border-b border-terra-border bg-terra-soft px-4 py-1.5 text-xs text-terra-text"
+      >
+        <span class="font-medium">
+          {{ review.remoteUpdateSummary ?? 'This Pull Request has new updates on GitHub.' }}
+        </span>
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 rounded-lg bg-terra px-2.5 py-0.5 text-[11px] font-semibold text-white transition-colors hover:bg-terra-hover disabled:opacity-50"
+            :disabled="review.isRefreshingPR"
+            @click="review.refreshCurrentPR()"
+          >
+            <RefreshCw class="h-3 w-3" :class="{ 'animate-spin': review.isRefreshingPR }" />
+            <span>Refresh now</span>
+          </button>
+          <button
+            type="button"
+            class="rounded p-0.5 text-terra-text/70 transition-colors hover:bg-terra/15 hover:text-terra-text"
+            title="Dismiss"
+            @click="review.dismissRemoteUpdates()"
+          >
+            <X class="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
 
       <div class="flex min-h-0 flex-1 overflow-hidden">
         <TourSidebar />
@@ -313,6 +363,7 @@ onBeforeUnmount(() => {
   </Transition>
 
   <!-- Global Modals -->
+  <CommandPaletteModal :open="showCommandPalette" @close="showCommandPalette = false" />
   <SettingsModal />
   <PRLoaderModal />
   <FinishReviewModal />

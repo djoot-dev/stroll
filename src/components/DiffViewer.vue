@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import {
+  ArrowDown,
   ArrowRight,
   ArrowRightLeft,
+  ArrowUp,
   CheckCircle2,
   ChevronsUpDown,
   ChevronRight,
@@ -13,10 +15,12 @@ import {
   Image as ImageIcon,
   Loader2,
   MessageSquarePlus,
+  Search,
   Sparkles,
   Trash2,
+  X,
 } from '@lucide/vue'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   buildPRSymbolIndex,
   extractImportedSymbolNames,
@@ -300,7 +304,74 @@ const hoverableSymbols = computed<ReadonlyMap<string, unknown>>(() => {
   return merged
 })
 
-const segments = computed(() => buildDiffSegments(props.step.file))
+const segments = computed(() =>
+  buildDiffSegments(props.step.file, { ignoreWhitespace: review.ignoreWhitespace }),
+)
+
+const searchOpen = ref(false)
+const searchQuery = ref('')
+const activeMatchIdx = ref(0)
+const searchInputRef = ref<HTMLInputElement | null>(null)
+
+const searchMatches = computed<string[]>(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return []
+  const keys: string[] = []
+  for (const seg of segments.value) {
+    if (seg.kind === 'gap' && !expandedGaps.value.has(seg.id)) continue
+    for (const line of seg.lines) {
+      if (line.content.toLowerCase().includes(q)) {
+        keys.push(line.key)
+      }
+    }
+  }
+  return keys
+})
+
+const searchMatchSet = computed(() => new Set(searchMatches.value))
+const activeMatchKey = computed(() => searchMatches.value[activeMatchIdx.value] ?? null)
+
+function scrollToMatch(key: string | null) {
+  if (!key) return
+  nextTick(() => {
+    const el = document.querySelector(`[data-diff-line-key="${CSS.escape(key)}"]`)
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  })
+}
+
+watch(searchMatches, (matches) => {
+  activeMatchIdx.value = 0
+  if (matches.length > 0) scrollToMatch(matches[0])
+})
+
+function stepSearchMatch(delta: -1 | 1) {
+  if (searchMatches.value.length === 0) return
+  activeMatchIdx.value =
+    (activeMatchIdx.value + delta + searchMatches.value.length) % searchMatches.value.length
+  scrollToMatch(activeMatchKey.value)
+}
+
+async function openDiffSearch() {
+  searchOpen.value = true
+  await nextTick()
+  searchInputRef.value?.focus()
+  searchInputRef.value?.select()
+}
+
+function handleDiffKeydown(e: KeyboardEvent) {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+    e.preventDefault()
+    void openDiffSearch()
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleDiffKeydown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleDiffKeydown)
+})
 
 const showImagePreview = computed(
   () => isImageFile.value && (!isSvgFile.value || !showSvgSource.value),
@@ -567,6 +638,29 @@ function handleJumpFromPopover(path: string) {
   review.goToFile(path)
 }
 
+function getOriginalLinesForRange(
+  line: number,
+  side: DiffSide,
+  startLine?: number,
+): string[] | undefined {
+  const content = side === 'LEFT' ? props.step.file.baseContent : props.step.file.headContent
+  if (!content) return undefined
+  const all = content.split('\n')
+  const start = Math.max(1, startLine ?? line)
+  const end = Math.min(all.length, line)
+  if (start > end) return undefined
+  return all.slice(start - 1, end)
+}
+
+function getOriginalCodeForRange(
+  line: number,
+  side: DiffSide,
+  startLine?: number,
+): string | undefined {
+  const lines = getOriginalLinesForRange(line, side, startLine)
+  return lines ? lines.join('\n') : undefined
+}
+
 async function handleCreateDraft(body: string) {
   if (!activeComposer.value) return
   await review.addDraftComment(
@@ -640,12 +734,41 @@ function statusBadgeClass(status: string): string {
           </p>
         </div>
 
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2.5">
           <div class="font-mono text-xs">
             <span class="text-pine-text">+{{ step.file.additions }}</span>
             <span class="mx-1 text-ink-faint">/</span>
             <span class="text-crimson-text">-{{ step.file.deletions }}</span>
           </div>
+
+          <button
+            type="button"
+            title="Search in diff (Cmd+F)"
+            class="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors"
+            :class="
+              searchOpen
+                ? 'border-terra-border bg-terra-soft text-terra-text'
+                : 'border-border bg-canvas text-ink-muted hover:bg-canvas-elevated hover:text-ink'
+            "
+            @click="searchOpen ? (searchOpen = false) : openDiffSearch()"
+          >
+            <Search class="h-3 w-3" />
+          </button>
+
+          <button
+            type="button"
+            title="Hide whitespace-only changes"
+            class="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors"
+            :class="
+              review.ignoreWhitespace
+                ? 'border-terra-border bg-terra-soft text-terra-text'
+                : 'border-border bg-canvas text-ink-muted hover:bg-canvas-elevated hover:text-ink'
+            "
+            @click="review.toggleIgnoreWhitespace()"
+          >
+            <span class="font-mono text-[10px]">-w</span>
+            <span class="hidden sm:inline">Ignore WS</span>
+          </button>
 
           <button
             class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors"
@@ -674,7 +797,51 @@ function statusBadgeClass(status: string): string {
     </div>
 
     <!-- Isolated Diff Surface -->
-    <div class="stroll-card overflow-hidden rounded-2xl border border-border bg-code">
+    <div class="stroll-card relative overflow-hidden rounded-2xl border border-border bg-code">
+      <!-- Floating In-Diff Search Bar -->
+      <div
+        v-if="searchOpen"
+        class="animate-pop-in sticky top-2 z-20 mx-3 mt-2 flex items-center gap-2 rounded-xl border border-terra-border bg-canvas-subtle px-3 py-1.5 shadow-lg"
+      >
+        <Search class="h-3.5 w-3.5 shrink-0 text-ink-muted" />
+        <input
+          ref="searchInputRef"
+          v-model="searchQuery"
+          type="text"
+          placeholder="Find in diff…"
+          class="min-w-0 flex-1 bg-transparent text-xs text-ink placeholder-ink-faint focus:outline-none"
+          @keydown.enter.exact.prevent="stepSearchMatch(1)"
+          @keydown.shift.enter.prevent="stepSearchMatch(-1)"
+          @keydown.esc.prevent="searchOpen = false; searchQuery = ''"
+        />
+        <span v-if="searchQuery.trim()" class="font-mono text-[10.5px] text-ink-muted">
+          {{ searchMatches.length > 0 ? `${activeMatchIdx + 1}/${searchMatches.length}` : '0/0' }}
+        </span>
+        <button
+          type="button"
+          class="rounded p-0.5 text-ink-muted hover:bg-canvas-elevated hover:text-ink"
+          title="Previous match"
+          @click="stepSearchMatch(-1)"
+        >
+          <ArrowUp class="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          class="rounded p-0.5 text-ink-muted hover:bg-canvas-elevated hover:text-ink"
+          title="Next match"
+          @click="stepSearchMatch(1)"
+        >
+          <ArrowDown class="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          class="rounded p-0.5 text-ink-muted hover:bg-canvas-elevated hover:text-ink"
+          title="Close search"
+          @click="searchOpen = false; searchQuery = ''"
+        >
+          <X class="h-3.5 w-3.5" />
+        </button>
+      </div>
       <!-- Collapsed Generated / Lockfile Banner -->
       <div
         v-if="isCollapsedGenerated"
@@ -1053,6 +1220,13 @@ function statusBadgeClass(status: string): string {
                   :side="activeComposer.side"
                   :start-line="activeComposer.startLine"
                   :start-side="activeComposer.startSide"
+                  :original-code="
+                    getOriginalCodeForRange(
+                      activeComposer.line,
+                      activeComposer.side,
+                      activeComposer.startLine,
+                    )
+                  "
                   @submit="handleCreateDraft"
                   @cancel="activeComposer = null"
                 />
@@ -1070,16 +1244,22 @@ function statusBadgeClass(status: string): string {
 
             <template v-for="(line, lIdx) in seg.lines" :key="line.key">
               <div
+                :data-diff-line-key="line.key"
                 class="group flex cursor-pointer items-stretch border-l-2"
-                :class="
+                :class="[
                   selectedRange.keys.has(line.key)
                     ? ['border-l-transparent', selectionRowClass(line.key)]
                     : {
                         'border-l-pine bg-diff-add hover:bg-diff-add-hover': line.type === 'add',
                         'border-l-crimson bg-diff-del hover:bg-diff-del-hover': line.type === 'del',
                         'border-l-transparent hover:bg-diff-hover': line.type === 'context',
-                      }
-                "
+                      },
+                  activeMatchKey === line.key
+                    ? 'ring-1 ring-inset ring-terra bg-terra-soft/30'
+                    : searchMatchSet.has(line.key)
+                      ? 'bg-ochre-soft/20'
+                      : '',
+                ]"
                 @mousedown.left="startLineDrag(line)"
                 @mouseenter="handleLineMouseEnter(line, seg.lines, lIdx)"
               >
@@ -1152,6 +1332,9 @@ function statusBadgeClass(status: string): string {
                 </div>
                 <MarkdownContent
                   :content="draft.body"
+                  :original-lines="
+                    getOriginalLinesForRange(draft.line, draft.side, draft.startLine)
+                  "
                   class="mt-1 text-xs leading-relaxed text-ink"
                 />
               </div>
@@ -1163,6 +1346,13 @@ function statusBadgeClass(status: string): string {
                 :side="activeComposer.side"
                 :start-line="activeComposer.startLine"
                 :start-side="activeComposer.startSide"
+                :original-code="
+                  getOriginalCodeForRange(
+                    activeComposer.line,
+                    activeComposer.side,
+                    activeComposer.startLine,
+                  )
+                "
                 @submit="handleCreateDraft"
                 @cancel="activeComposer = null"
               />

@@ -5,9 +5,12 @@ import { openExternalUrl } from '@/services/native'
 
 const props = defineProps<{
   content: string
+  originalLines?: string[]
 }>()
 
-const renderedHtml = computed(() => renderSafeMarkdown(props.content))
+const renderedHtml = computed(() =>
+  renderSafeMarkdown(props.content, { originalLines: props.originalLines }),
+)
 
 function handleClick(event: MouseEvent): void {
   const target = event.target as HTMLElement | null

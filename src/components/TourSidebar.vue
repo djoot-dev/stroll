@@ -1,5 +1,16 @@
 <script setup lang="ts">
-import { Check, FileText, MessageSquare } from '@lucide/vue'
+import {
+  ArrowDown,
+  ArrowUp,
+  Check,
+  EyeOff,
+  FileText,
+  GitCommitHorizontal,
+  Loader2,
+  MessageSquare,
+  Pin,
+  RotateCcw,
+} from '@lucide/vue'
 import { computed } from 'vue'
 import { isLockfile, LAYER_META } from '@/services/readingOrder'
 import { useReviewStore } from '@/stores/review'
@@ -57,6 +68,33 @@ function dirOnly(path: string): string {
                 ? `${Math.round((review.reviewedCount / review.tourSteps.length) * 100)}%`
                 : '0%',
             }"
+          />
+        </div>
+
+        <!-- Commit / Scope Filter -->
+        <div v-if="review.pr.commits.length > 0" class="mt-2.5 flex items-center gap-1.5">
+          <GitCommitHorizontal class="h-3.5 w-3.5 shrink-0 text-ink-faint" />
+          <select
+            :value="review.commitFilter"
+            :disabled="review.isLoadingCommitFilter"
+            class="min-w-0 flex-1 rounded-lg border border-border bg-canvas px-2 py-1 text-[11px] text-ink-secondary focus:border-terra-border focus:outline-none disabled:opacity-50"
+            @change="review.setCommitFilter(($event.target as HTMLSelectElement).value)"
+          >
+            <option value="all">All commits ({{ review.pr.commits.length }})</option>
+            <option v-if="review.lastReviewedCommitOid" value="since-last-review">
+              Since my last review
+            </option>
+            <option
+              v-for="commit in review.pr.commits"
+              :key="commit.oid"
+              :value="commit.oid"
+            >
+              {{ commit.shortOid }} · {{ commit.messageHeadline }}
+            </option>
+          </select>
+          <Loader2
+            v-if="review.isLoadingCommitFilter"
+            class="h-3.5 w-3.5 shrink-0 animate-spin text-terra-text"
           />
         </div>
       </div>
@@ -188,15 +226,82 @@ function dirOnly(path: string): string {
 
               <div class="flex items-center justify-between gap-2 text-[10px] text-ink-faint">
                 <span class="truncate">{{ dirOnly(step.file.path) || '.' }}</span>
-                <span class="shrink-0 font-mono">
-                  <span class="text-pine-text">+{{ step.file.additions }}</span>
-                  <span class="mx-0.5 text-ink-faint">/</span>
-                  <span class="text-crimson-text">-{{ step.file.deletions }}</span>
-                </span>
+                <div class="flex shrink-0 items-center gap-1">
+                  <div
+                    class="hidden items-center gap-0.5 group-hover:flex"
+                    @click.stop
+                  >
+                    <button
+                      type="button"
+                      :title="review.pinnedPaths.has(step.file.path) ? 'Unpin step' : 'Pin step to top'"
+                      class="rounded p-0.5 transition-colors hover:bg-canvas-elevated"
+                      :class="review.pinnedPaths.has(step.file.path) ? 'text-terra-text' : 'text-ink-faint hover:text-ink'"
+                      @click.stop="review.togglePinStep(step.file.path)"
+                    >
+                      <Pin class="h-2.5 w-2.5" />
+                    </button>
+                    <button
+                      v-if="step.stepIndex > 0"
+                      type="button"
+                      title="Move up"
+                      class="rounded p-0.5 text-ink-faint transition-colors hover:bg-canvas-elevated hover:text-ink"
+                      @click.stop="review.moveStep(step.file.path, -1)"
+                    >
+                      <ArrowUp class="h-2.5 w-2.5" />
+                    </button>
+                    <button
+                      v-if="step.stepIndex < review.tourSteps.length - 1"
+                      type="button"
+                      title="Move down"
+                      class="rounded p-0.5 text-ink-faint transition-colors hover:bg-canvas-elevated hover:text-ink"
+                      @click.stop="review.moveStep(step.file.path, 1)"
+                    >
+                      <ArrowDown class="h-2.5 w-2.5" />
+                    </button>
+                    <button
+                      type="button"
+                      title="Hide file from tour"
+                      class="rounded p-0.5 text-ink-faint transition-colors hover:bg-canvas-elevated hover:text-crimson-text"
+                      @click.stop="review.toggleHideStep(step.file.path)"
+                    >
+                      <EyeOff class="h-2.5 w-2.5" />
+                    </button>
+                  </div>
+                  <Pin
+                    v-if="review.pinnedPaths.has(step.file.path)"
+                    class="h-2.5 w-2.5 text-terra-text group-hover:hidden"
+                  />
+                  <span class="font-mono">
+                    <span class="text-pine-text">+{{ step.file.additions }}</span>
+                    <span class="mx-0.5 text-ink-faint">/</span>
+                    <span class="text-crimson-text">-{{ step.file.deletions }}</span>
+                  </span>
+                </div>
               </div>
             </div>
           </button>
         </div>
+      </div>
+
+      <!-- Tour Customization Reset Footer -->
+      <div
+        v-if="review.hiddenPaths.size > 0 || review.customOrderPaths.length > 0 || review.pinnedPaths.size > 0"
+        class="flex items-center justify-between border-t border-border-muted bg-canvas px-3 py-2 text-[11px] text-ink-muted"
+      >
+        <span>
+          <template v-if="review.hiddenPaths.size > 0">
+            {{ review.hiddenPaths.size }} hidden
+          </template>
+          <template v-else>Custom tour order</template>
+        </span>
+        <button
+          type="button"
+          class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium text-terra-text transition-colors hover:bg-terra-soft"
+          @click="review.resetTourCustomization()"
+        >
+          <RotateCcw class="h-2.5 w-2.5" />
+          <span>Reset</span>
+        </button>
       </div>
     </aside>
   </Transition>
