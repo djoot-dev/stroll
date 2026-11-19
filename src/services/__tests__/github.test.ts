@@ -8,6 +8,7 @@ import {
   isImageFilePath,
   normalizeGitHubHost,
   parsePRUrl,
+  setFileViewedState,
   setGitHubHost,
 } from '@/services/github'
 import { highlightLinesWithCodeMirror } from '@/services/highlighter'
@@ -239,5 +240,58 @@ describe('github host & URL parsing', () => {
     expect(parsePRUrl('https://gitlab.com/acme/stroll/pull/42')).toBeNull()
     expect(parsePRUrl('https://github.com/acme/stroll/issues/42')).toBeNull()
     expect(parsePRUrl('not-a-url')).toBeNull()
+  })
+
+  it('calls markFileAsViewed and unmarkFileAsViewed GraphQL mutations', async () => {
+    const fetchSpy = vi
+      .spyOn(httpModule, 'httpFetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ data: { markFileAsViewed: { pullRequest: { id: 'pr_1' } } } }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ data: { unmarkFileAsViewed: { pullRequest: { id: 'pr_1' } } } }),
+          { status: 200 },
+        ),
+      )
+
+    expect(await setFileViewedState('fake-pat', 'pr_1', 'src/app.ts', true)).toBe('VIEWED')
+    expect(await setFileViewedState('fake-pat', 'pr_1', 'src/app.ts', false)).toBe('UNVIEWED')
+
+    const firstBody = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body))
+    expect(firstBody.query).toContain('markFileAsViewed')
+    expect(firstBody.variables).toEqual({ pullRequestId: 'pr_1', path: 'src/app.ts' })
+
+    const secondBody = JSON.parse(String(fetchSpy.mock.calls[1]?.[1]?.body))
+    expect(secondBody.query).toContain('unmarkFileAsViewed')
+    expect(secondBody.variables).toEqual({ pullRequestId: 'pr_1', path: 'src/app.ts' })
+  })
+
+  it('collapses whitespace-only changes when ignoreWhitespace is enabled', () => {
+    const file: PRFile = {
+      path: 'src/ws.ts',
+      status: 'modified',
+      additions: 1,
+      deletions: 1,
+      language: 'typescript',
+      baseContent: 'const x=1\nconst y = 2\n',
+      headContent: 'const x = 1\nconst y = 2\n',
+      patch: '@@ -1,2 +1,2 @@\n-const x=1\n+const x = 1\n const y = 2',
+    }
+    const defaultSegs = buildDiffSegments(file)
+    expect(defaultSegs[0]?.kind).toBe('hunk')
+    if (defaultSegs[0]?.kind === 'hunk') {
+      expect(defaultSegs[0].lines.some((l) => l.type === 'del')).toBe(true)
+      expect(defaultSegs[0].lines.some((l) => l.type === 'add')).toBe(true)
+    }
+
+    const wsSegs = buildDiffSegments(file, { ignoreWhitespace: true })
+    expect(wsSegs[0]?.kind).toBe('hunk')
+    if (wsSegs[0]?.kind === 'hunk') {
+      expect(wsSegs[0].lines.every((l) => l.type === 'context')).toBe(true)
+    }
   })
 })

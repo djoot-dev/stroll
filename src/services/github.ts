@@ -5,6 +5,7 @@ import type {
   CheckRollupState,
   DiffSide,
   FileChangeStatus,
+  FileViewedState,
   GitHubUser,
   PRCommit,
   PRFile,
@@ -12,6 +13,7 @@ import type {
   PRIssueComment,
   PRLabel,
   PRMergeableState,
+  PRMergeMethod,
   PRRequestedReviewer,
   PRReview,
   PRReviewDecision,
@@ -20,6 +22,8 @@ import type {
   PRStatusCheckRollup,
   PRSummary,
   PullRequestData,
+  ReactionContent,
+  ReactionGroup,
   ReviewComment,
   ReviewEvent,
   ReviewThread,
@@ -28,6 +32,7 @@ import type {
 const MAX_PR_FILES = 3000
 const MAX_COMMIT_PAGES = 10
 const MAX_THREAD_PAGES = 20
+const MAX_FILE_VIEWED_PAGES = 30
 const DEFAULT_GITHUB_HOST = 'github.com'
 let configuredGitHubHost = DEFAULT_GITHUB_HOST
 
@@ -657,6 +662,26 @@ interface RawCommitNode {
   }
 }
 
+interface RawReactionGroup {
+  content: ReactionContent
+  viewerHasReacted: boolean
+  reactors: {
+    totalCount: number
+  }
+}
+
+function mapReactionGroups(groups?: RawReactionGroup[] | null): ReactionGroup[] | undefined {
+  if (!groups || groups.length === 0) return undefined
+  const mapped = groups
+    .filter((g) => g.reactors.totalCount > 0)
+    .map((g) => ({
+      content: g.content,
+      count: g.reactors.totalCount,
+      viewerHasReacted: g.viewerHasReacted,
+    }))
+  return mapped.length > 0 ? mapped : undefined
+}
+
 interface RawThreadNode {
   id: string
   path: string
@@ -673,6 +698,7 @@ interface RawThreadNode {
       createdAt: string
       state: string
       author: GitHubUser | null
+      reactionGroups?: RawReactionGroup[]
     }>
   }
 }
@@ -680,6 +706,59 @@ interface RawThreadNode {
 interface PageInfo {
   hasNextPage: boolean
   endCursor: string | null
+}
+
+interface RawFileViewedNode {
+  path: string
+  viewerViewedState: FileViewedState
+}
+
+async function fetchRemainingFileViewedStates(
+  pat: string,
+  owner: string,
+  repo: string,
+  number: number,
+  initialCursor: string,
+): Promise<RawFileViewedNode[]> {
+  const extra: RawFileViewedNode[] = []
+  let cursor: string | null = initialCursor
+  let pages = 0
+
+  const query = `
+    query PullRequestFilesViewedPage($owner: String!, $repo: String!, $number: Int!, $after: String!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $number) {
+          files(first: 100, after: $after) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            nodes {
+              path
+              viewerViewedState
+            }
+          }
+        }
+      }
+    }
+  `
+
+  while (cursor && pages < MAX_FILE_VIEWED_PAGES) {
+    pages += 1
+    const resp: {
+      repository: {
+        pullRequest: {
+          files: { pageInfo: PageInfo; nodes: RawFileViewedNode[] }
+        } | null
+      } | null
+    } = await graphql(pat, query, { owner, repo, number, after: cursor })
+    const conn = resp.repository?.pullRequest?.files
+    if (!conn) break
+    extra.push(...conn.nodes)
+    cursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null
+  }
+
+  return extra
 }
 
 async function fetchRemainingCommits(
@@ -782,6 +861,13 @@ async function fetchRemainingReviewThreads(
                   author {
                     login
                     avatarUrl
+                  }
+                  reactionGroups {
+                    content
+                    viewerHasReacted
+                    reactors {
+                      totalCount
+                    }
                   }
                 }
               }
@@ -934,6 +1020,13 @@ export async function fetchPullRequest(
                 login
                 avatarUrl
               }
+              reactionGroups {
+                content
+                viewerHasReacted
+                reactors {
+                  totalCount
+                }
+              }
             }
           }
           comments(first: 50) {
@@ -944,6 +1037,13 @@ export async function fetchPullRequest(
               author {
                 login
                 avatarUrl
+              }
+              reactionGroups {
+                content
+                viewerHasReacted
+                reactors {
+                  totalCount
+                }
               }
             }
           }
@@ -971,8 +1071,25 @@ export async function fetchPullRequest(
                     login
                     avatarUrl
                   }
+                  reactionGroups {
+                    content
+                    viewerHasReacted
+                    reactors {
+                      totalCount
+                    }
+                  }
                 }
               }
+            }
+          }
+          files(first: 100) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            nodes {
+              path
+              viewerViewedState
             }
           }
         }
@@ -1056,6 +1173,7 @@ export async function fetchPullRequest(
             body: string
             submittedAt: string | null
             author: GitHubUser | null
+            reactionGroups?: RawReactionGroup[]
           } | null>
         }
         comments: {
@@ -1064,11 +1182,16 @@ export async function fetchPullRequest(
             body: string
             createdAt: string
             author: GitHubUser | null
+            reactionGroups?: RawReactionGroup[]
           } | null>
         }
         reviewThreads: {
           pageInfo?: PageInfo
           nodes: RawThreadNode[]
+        }
+        files?: {
+          pageInfo?: PageInfo
+          nodes: RawFileViewedNode[]
         }
       } | null
     } | null
@@ -1084,15 +1207,25 @@ export async function fetchPullRequest(
     throw new Error(`Pull Request ${owner}/${repo}#${number} not found`)
   }
 
-  // Paginate remaining commits & reviewThreads if truncated
-  const [extraCommits, extraThreads] = await Promise.all([
+  // Paginate remaining commits, reviewThreads & file viewed states if truncated
+  const [extraCommits, extraThreads, extraFileViewed] = await Promise.all([
     pr.commits.pageInfo?.hasNextPage && pr.commits.pageInfo.endCursor
       ? fetchRemainingCommits(pat, owner, repo, number, pr.commits.pageInfo.endCursor)
       : Promise.resolve([] as RawCommitNode[]),
     pr.reviewThreads.pageInfo?.hasNextPage && pr.reviewThreads.pageInfo.endCursor
       ? fetchRemainingReviewThreads(pat, owner, repo, number, pr.reviewThreads.pageInfo.endCursor)
       : Promise.resolve([] as RawThreadNode[]),
+    pr.files?.pageInfo?.hasNextPage && pr.files.pageInfo.endCursor
+      ? fetchRemainingFileViewedStates(pat, owner, repo, number, pr.files.pageInfo.endCursor)
+      : Promise.resolve([] as RawFileViewedNode[]),
   ])
+
+  const viewedStateMap = new Map<string, FileViewedState>()
+  for (const node of [...(pr.files?.nodes ?? []), ...extraFileViewed]) {
+    if (node?.path && node.viewerViewedState) {
+      viewedStateMap.set(node.path, node.viewerViewedState)
+    }
+  }
 
   // Avoid fetching full text blobs for binary or generated/lockfiles where unnecessary
   const blobEligibleFiles = restFiles.filter(
@@ -1188,6 +1321,7 @@ export async function fetchPullRequest(
       isBinary: isBinary || undefined,
       isImage: isImage || undefined,
       isGenerated: isGenerated || undefined,
+      viewerViewedState: viewedStateMap.get(rf.filename),
     }
   })
 
@@ -1218,6 +1352,7 @@ export async function fetchPullRequest(
         createdAt: c.createdAt,
         isPending: c.state === 'PENDING',
         author: c.author ?? { login: 'ghost', avatarUrl: '' },
+        reactions: mapReactionGroups(c.reactionGroups),
       })),
     }))
 
@@ -1254,6 +1389,7 @@ export async function fetchPullRequest(
       state: r.state,
       body: r.body ?? '',
       submittedAt: r.submittedAt,
+      reactions: mapReactionGroups(r.reactionGroups),
     }))
 
   const issueComments: PRIssueComment[] = (pr.comments?.nodes ?? [])
@@ -1263,6 +1399,7 @@ export async function fetchPullRequest(
       author: c.author ?? { login: 'ghost', avatarUrl: '' },
       body: c.body,
       createdAt: c.createdAt,
+      reactions: mapReactionGroups(c.reactionGroups),
     }))
 
   const rawRollup = pr.headCommit?.nodes?.[0]?.commit?.statusCheckRollup ?? null
@@ -1551,5 +1688,465 @@ export async function addPRComment(
     body: node.body,
     createdAt: node.createdAt,
     author: node.author ?? { login: 'ghost', avatarUrl: '' },
+  }
+}
+
+export async function setFileViewedState(
+  pat: string,
+  pullRequestId: string,
+  path: string,
+  viewed: boolean,
+): Promise<FileViewedState> {
+  const mutation = viewed
+    ? `
+      mutation MarkFileAsViewed($pullRequestId: ID!, $path: String!) {
+        markFileAsViewed(input: { pullRequestId: $pullRequestId, path: $path }) {
+          pullRequest { id }
+        }
+      }
+    `
+    : `
+      mutation UnmarkFileAsViewed($pullRequestId: ID!, $path: String!) {
+        unmarkFileAsViewed(input: { pullRequestId: $pullRequestId, path: $path }) {
+          pullRequest { id }
+        }
+      }
+    `
+  await graphql(pat, mutation, { pullRequestId, path })
+  return viewed ? 'VIEWED' : 'UNVIEWED'
+}
+
+export async function updateReviewComment(
+  pat: string,
+  commentId: string,
+  body: string,
+): Promise<string> {
+  const mutation = `
+    mutation UpdateReviewComment($commentId: ID!, $body: String!) {
+      updatePullRequestReviewComment(
+        input: { pullRequestReviewCommentId: $commentId, body: $body }
+      ) {
+        pullRequestReviewComment {
+          id
+          body
+        }
+      }
+    }
+  `
+  const data = await graphql<{
+    updatePullRequestReviewComment: {
+      pullRequestReviewComment: { id: string; body: string }
+    }
+  }>(pat, mutation, { commentId, body })
+  return data.updatePullRequestReviewComment.pullRequestReviewComment.body
+}
+
+export async function deleteReviewComment(pat: string, commentId: string): Promise<void> {
+  const mutation = `
+    mutation DeleteReviewComment($commentId: ID!) {
+      deletePullRequestReviewComment(input: { id: $commentId }) {
+        pullRequestReview {
+          id
+        }
+      }
+    }
+  `
+  await graphql(pat, mutation, { commentId })
+}
+
+export async function updateIssueComment(
+  pat: string,
+  commentId: string,
+  body: string,
+): Promise<string> {
+  const mutation = `
+    mutation UpdateIssueComment($commentId: ID!, $body: String!) {
+      updateIssueComment(input: { id: $commentId, body: $body }) {
+        issueComment {
+          id
+          body
+        }
+      }
+    }
+  `
+  const data = await graphql<{
+    updateIssueComment: {
+      issueComment: { id: string; body: string }
+    }
+  }>(pat, mutation, { commentId, body })
+  return data.updateIssueComment.issueComment.body
+}
+
+export async function deleteIssueComment(pat: string, commentId: string): Promise<void> {
+  const mutation = `
+    mutation DeleteIssueComment($commentId: ID!) {
+      deleteIssueComment(input: { id: $commentId }) {
+        clientMutationId
+      }
+    }
+  `
+  await graphql(pat, mutation, { commentId })
+}
+
+export async function toggleReaction(
+  pat: string,
+  subjectId: string,
+  content: ReactionContent,
+  add: boolean,
+): Promise<void> {
+  const mutation = add
+    ? `
+      mutation AddReaction($subjectId: ID!, $content: ReactionContent!) {
+        addReaction(input: { subjectId: $subjectId, content: $content }) {
+          subject { id }
+        }
+      }
+    `
+    : `
+      mutation RemoveReaction($subjectId: ID!, $content: ReactionContent!) {
+        removeReaction(input: { subjectId: $subjectId, content: $content }) {
+          subject { id }
+        }
+      }
+    `
+  await graphql(pat, mutation, { subjectId, content })
+}
+
+export async function mergePullRequest(
+  pat: string,
+  pullRequestId: string,
+  mergeMethod: PRMergeMethod,
+  commitHeadline?: string,
+): Promise<'MERGED'> {
+  const mutation = `
+    mutation MergePullRequest(
+      $pullRequestId: ID!
+      $mergeMethod: PullRequestMergeMethod!
+      $commitHeadline: String
+    ) {
+      mergePullRequest(
+        input: {
+          pullRequestId: $pullRequestId
+          mergeMethod: $mergeMethod
+          commitHeadline: $commitHeadline
+        }
+      ) {
+        pullRequest {
+          state
+        }
+      }
+    }
+  `
+  const data = await graphql<{ mergePullRequest: { pullRequest: { state: 'MERGED' } } }>(
+    pat,
+    mutation,
+    {
+      pullRequestId,
+      mergeMethod,
+      ...(commitHeadline?.trim() ? { commitHeadline: commitHeadline.trim() } : {}),
+    },
+  )
+  return data.mergePullRequest.pullRequest.state
+}
+
+export async function closePullRequest(pat: string, pullRequestId: string): Promise<'CLOSED'> {
+  const mutation = `
+    mutation ClosePullRequest($pullRequestId: ID!) {
+      closePullRequest(input: { pullRequestId: $pullRequestId }) {
+        pullRequest { state }
+      }
+    }
+  `
+  const data = await graphql<{ closePullRequest: { pullRequest: { state: 'CLOSED' } } }>(
+    pat,
+    mutation,
+    { pullRequestId },
+  )
+  return data.closePullRequest.pullRequest.state
+}
+
+export async function reopenPullRequest(pat: string, pullRequestId: string): Promise<'OPEN'> {
+  const mutation = `
+    mutation ReopenPullRequest($pullRequestId: ID!) {
+      reopenPullRequest(input: { pullRequestId: $pullRequestId }) {
+        pullRequest { state }
+      }
+    }
+  `
+  const data = await graphql<{ reopenPullRequest: { pullRequest: { state: 'OPEN' } } }>(
+    pat,
+    mutation,
+    { pullRequestId },
+  )
+  return data.reopenPullRequest.pullRequest.state
+}
+
+export async function setPullRequestDraft(
+  pat: string,
+  pullRequestId: string,
+  isDraft: boolean,
+): Promise<boolean> {
+  const mutation = isDraft
+    ? `
+      mutation ConvertPullRequestToDraft($pullRequestId: ID!) {
+        convertPullRequestToDraft(input: { pullRequestId: $pullRequestId }) {
+          pullRequest { isDraft }
+        }
+      }
+    `
+    : `
+      mutation MarkPullRequestReadyForReview($pullRequestId: ID!) {
+        markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) {
+          pullRequest { isDraft }
+        }
+      }
+    `
+  const data = await graphql<Record<string, { pullRequest: { isDraft: boolean } }>>(
+    pat,
+    mutation,
+    { pullRequestId },
+  )
+  const key = isDraft ? 'convertPullRequestToDraft' : 'markPullRequestReadyForReview'
+  return data[key].pullRequest.isDraft
+}
+
+async function restJsonRequest<T>(
+  pat: string,
+  method: 'POST' | 'DELETE',
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const { restUrl } = getGitHubEndpoints()
+  const res = await httpFetch(`${restUrl}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${pat}`,
+      Accept: 'application/vnd.github.v3+json',
+      'Content-Type': 'application/json',
+      'User-Agent': 'Stroll-Desktop',
+    },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`GitHub REST ${method} ${path} failed (${res.status}): ${text}`)
+  }
+  if (res.status === 204) return undefined as T
+  return (await res.json()) as T
+}
+
+export async function requestPullRequestReviewers(
+  pat: string,
+  owner: string,
+  repo: string,
+  number: number,
+  reviewers: string[],
+): Promise<PRRequestedReviewer[]> {
+  interface Resp {
+    requested_reviewers?: Array<{ login: string; avatar_url?: string }>
+  }
+  const data = await restJsonRequest<Resp>(
+    pat,
+    'POST',
+    `/repos/${owner}/${repo}/pulls/${number}/requested_reviewers`,
+    { reviewers },
+  )
+  return (data.requested_reviewers ?? []).map((u) => ({
+    type: 'user',
+    login: u.login,
+    avatarUrl: u.avatar_url ?? '',
+  }))
+}
+
+export async function removePullRequestReviewers(
+  pat: string,
+  owner: string,
+  repo: string,
+  number: number,
+  reviewers: string[],
+): Promise<void> {
+  await restJsonRequest(
+    pat,
+    'DELETE',
+    `/repos/${owner}/${repo}/pulls/${number}/requested_reviewers`,
+    { reviewers },
+  )
+}
+
+export async function addPullRequestLabels(
+  pat: string,
+  owner: string,
+  repo: string,
+  number: number,
+  labels: string[],
+): Promise<PRLabel[]> {
+  const data = await restJsonRequest<Array<{ name: string; color: string }>>(
+    pat,
+    'POST',
+    `/repos/${owner}/${repo}/issues/${number}/labels`,
+    { labels },
+  )
+  return data.map((l) => ({ name: l.name, color: l.color }))
+}
+
+export async function removePullRequestLabel(
+  pat: string,
+  owner: string,
+  repo: string,
+  number: number,
+  labelName: string,
+): Promise<void> {
+  await restJsonRequest(
+    pat,
+    'DELETE',
+    `/repos/${owner}/${repo}/issues/${number}/labels/${encodeURIComponent(labelName)}`,
+  )
+}
+
+async function hydrateRestFiles(
+  pat: string,
+  owner: string,
+  repo: string,
+  baseOid: string,
+  headOid: string,
+  restFiles: RestPRFile[],
+): Promise<PRFile[]> {
+  const blobEligible = restFiles.filter(
+    (rf) => !isBinaryFilePath(rf.filename) && !isGeneratedOrLockfile(rf.filename),
+  )
+  const contentsMap =
+    blobEligible.length > 0 && baseOid && headOid
+      ? await fetchFileContentsBatch(pat, owner, repo, baseOid, headOid, blobEligible)
+      : new Map<string, { base: string | null; head: string | null; isBinary: boolean }>()
+
+  return restFiles.map((rf) => {
+    const content = contentsMap.get(rf.filename) ?? { base: null, head: null, isBinary: false }
+    const status = mapFileStatus(rf.status)
+    const patch = rf.patch ?? ''
+    const isImage = isImageFilePath(rf.filename)
+    const isGenerated = isGeneratedOrLockfile(rf.filename)
+    const isPureMove =
+      status === 'renamed' && !patch.trim() && rf.additions === 0 && rf.deletions === 0
+    const isBinary =
+      content.isBinary ||
+      isBinaryFilePath(rf.filename) ||
+      (!patch.trim() &&
+        !isPureMove &&
+        !isGenerated &&
+        content.base === null &&
+        content.head === null &&
+        rf.additions === 0 &&
+        rf.deletions === 0)
+
+    return {
+      path: rf.filename,
+      previousPath: rf.previous_filename,
+      status,
+      additions: rf.additions,
+      deletions: rf.deletions,
+      sha: rf.sha,
+      patch,
+      baseContent: content.base,
+      headContent: content.head,
+      language: detectLanguage(rf.filename),
+      isBinary: isBinary || undefined,
+      isImage: isImage || undefined,
+      isGenerated: isGenerated || undefined,
+    }
+  })
+}
+
+export async function fetchCommitDiffFiles(
+  pat: string,
+  owner: string,
+  repo: string,
+  commitOid: string,
+): Promise<PRFile[]> {
+  const { restUrl } = getGitHubEndpoints()
+  const res = await httpFetch(`${restUrl}/repos/${owner}/${repo}/commits/${commitOid}`, {
+    headers: {
+      Authorization: `Bearer ${pat}`,
+      Accept: 'application/vnd.github.v3+json',
+      'User-Agent': 'Stroll-Desktop',
+    },
+  })
+  if (!res.ok) {
+    throw new Error(`Failed to fetch commit ${commitOid.slice(0, 7)} (${res.status})`)
+  }
+  const data = (await res.json()) as {
+    parents?: Array<{ sha: string }>
+    files?: RestPRFile[]
+  }
+  const baseOid = data.parents?.[0]?.sha ?? ''
+  return hydrateRestFiles(pat, owner, repo, baseOid, commitOid, data.files ?? [])
+}
+
+export async function fetchCompareDiffFiles(
+  pat: string,
+  owner: string,
+  repo: string,
+  baseOid: string,
+  headOid: string,
+): Promise<PRFile[]> {
+  const { restUrl } = getGitHubEndpoints()
+  const res = await httpFetch(
+    `${restUrl}/repos/${owner}/${repo}/compare/${encodeURIComponent(baseOid)}...${encodeURIComponent(headOid)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${pat}`,
+        Accept: 'application/vnd.github.v3+json',
+        'User-Agent': 'Stroll-Desktop',
+      },
+    },
+  )
+  if (!res.ok) {
+    throw new Error(`Failed to compare ${baseOid.slice(0, 7)}...${headOid.slice(0, 7)} (${res.status})`)
+  }
+  const data = (await res.json()) as { files?: RestPRFile[] }
+  return hydrateRestFiles(pat, owner, repo, baseOid, headOid, data.files ?? [])
+}
+
+export interface PRHeadPulse {
+  headRefOid: string
+  updatedAt: string
+  commentCount: number
+  threadCount: number
+}
+
+export async function fetchPRHeadPulse(
+  pat: string,
+  owner: string,
+  repo: string,
+  number: number,
+): Promise<PRHeadPulse | null> {
+  const query = `
+    query PRHeadPulse($owner: String!, $repo: String!, $number: Int!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $number) {
+          headRefOid
+          updatedAt
+          comments { totalCount }
+          reviewThreads { totalCount }
+        }
+      }
+    }
+  `
+  const resp = await graphql<{
+    repository: {
+      pullRequest: {
+        headRefOid: string
+        updatedAt: string
+        comments: { totalCount: number }
+        reviewThreads: { totalCount: number }
+      } | null
+    } | null
+  }>(pat, query, { owner, repo, number })
+  const pr = resp.repository?.pullRequest
+  if (!pr) return null
+  return {
+    headRefOid: pr.headRefOid,
+    updatedAt: pr.updatedAt,
+    commentCount: pr.comments.totalCount,
+    threadCount: pr.reviewThreads.totalCount,
   }
 }
