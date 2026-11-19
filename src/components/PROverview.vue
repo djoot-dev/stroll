@@ -32,7 +32,6 @@ import MarkdownContent from './MarkdownContent.vue'
 const review = useReviewStore()
 const pr = computed(() => review.pr)
 
-const checksExpanded = ref(true)
 const commitsExpanded = ref(true)
 const commentDraft = ref('')
 const isPostingComment = ref(false)
@@ -456,12 +455,9 @@ const tourCtaLabel = computed(() =>
 
     <!-- CI Checks & Reviewers Grid -->
     <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
-      <!-- CI / Checks Card (Collapsible) -->
+      <!-- CI / Checks Card -->
       <section class="stroll-card overflow-hidden rounded-2xl border border-border bg-canvas-subtle">
-        <button
-          class="flex w-full items-center justify-between gap-3 px-5 py-3.5 text-left transition-colors hover:bg-canvas-elevated/40"
-          @click="checksExpanded = !checksExpanded"
-        >
+        <div class="flex items-center justify-between gap-3 border-b border-border-muted px-5 py-3.5">
           <div class="flex min-w-0 items-center gap-2.5">
             <XCircle
               v-if="checksSummary.failed > 0 || checksSummary.state === 'FAILURE' || checksSummary.state === 'ERROR'"
@@ -486,55 +482,50 @@ const tourCtaLabel = computed(() =>
               </p>
             </div>
           </div>
+        </div>
 
-          <ChevronDown v-if="checksExpanded" class="h-4 w-4 shrink-0 text-ink-muted" />
-          <ChevronRight v-else class="h-4 w-4 shrink-0 text-ink-muted" />
-        </button>
+        <div v-if="checksSummary.checks.length === 0" class="px-5 py-4 text-xs text-ink-faint">
+          No status checks found on the latest commit.
+        </div>
+        <ul v-else class="divide-y divide-border-muted">
+          <li
+            v-for="check in checksSummary.checks"
+            :key="check.id"
+            class="flex items-center justify-between gap-3 px-5 py-2.5 text-xs"
+          >
+            <div class="flex min-w-0 items-center gap-2.5">
+              <CheckCircle2
+                v-if="isCheckPassed(check)"
+                class="h-3.5 w-3.5 shrink-0 text-pine"
+              />
+              <XCircle
+                v-else-if="isCheckFailed(check)"
+                class="h-3.5 w-3.5 shrink-0 text-crimson"
+              />
+              <Loader2
+                v-else
+                class="h-3.5 w-3.5 shrink-0 animate-spin text-ochre-text"
+              />
 
-        <div v-if="checksExpanded" class="border-t border-border-muted">
-          <div v-if="checksSummary.checks.length === 0" class="px-5 py-4 text-xs text-ink-faint">
-            No status checks found on the latest commit.
-          </div>
-          <ul v-else class="divide-y divide-border-muted">
-            <li
-              v-for="check in checksSummary.checks"
-              :key="check.id"
-              class="flex items-center justify-between gap-3 px-5 py-2.5 text-xs"
-            >
-              <div class="flex min-w-0 items-center gap-2.5">
-                <CheckCircle2
-                  v-if="isCheckPassed(check)"
-                  class="h-3.5 w-3.5 shrink-0 text-pine"
-                />
-                <XCircle
-                  v-else-if="isCheckFailed(check)"
-                  class="h-3.5 w-3.5 shrink-0 text-crimson"
-                />
-                <Loader2
-                  v-else
-                  class="h-3.5 w-3.5 shrink-0 animate-spin text-ochre-text"
-                />
-
-                <div class="min-w-0">
-                  <div class="truncate font-medium text-ink">{{ check.name }}</div>
-                  <div class="truncate text-[11px] text-ink-faint">
-                    {{ check.description || checkStatusLabel(check) }}
-                  </div>
+              <div class="min-w-0">
+                <div class="truncate font-medium text-ink">{{ check.name }}</div>
+                <div class="truncate text-[11px] text-ink-faint">
+                  {{ check.description || checkStatusLabel(check) }}
                 </div>
               </div>
+            </div>
 
-              <button
-                v-if="check.url"
-                class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-1 text-[11px] text-ink-secondary transition-colors hover:border-terra-border hover:text-terra-text"
-                title="Open check details in browser"
-                @click="openExternalUrl(check.url)"
-              >
-                <span>Details</span>
-                <ExternalLink class="h-3 w-3" />
-              </button>
-            </li>
-          </ul>
-        </div>
+            <button
+              v-if="check.url"
+              class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-1 text-[11px] text-ink-secondary transition-colors hover:border-terra-border hover:text-terra-text"
+              title="Open check details in browser"
+              @click="openExternalUrl(check.url)"
+            >
+              <span>Details</span>
+              <ExternalLink class="h-3 w-3" />
+            </button>
+          </li>
+        </ul>
       </section>
 
       <!-- Reviewers & Activity Card -->
