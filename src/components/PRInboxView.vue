@@ -345,8 +345,19 @@ onBeforeUnmount(() => {
               </div>
             </button>
 
-            <!-- Demo PR Quick Access -->
-            <div class="flex justify-end pt-2">
+            <!-- Load More Pagination & Demo PR Quick Access -->
+            <div class="flex flex-wrap items-center justify-between gap-2 pt-2">
+              <div>
+                <button
+                  v-if="auth.hasMorePRs"
+                  class="inline-flex items-center gap-1.5 rounded-xl border border-border bg-canvas-subtle px-3.5 py-1.5 text-xs font-medium text-ink-secondary transition-colors hover:border-terra-border hover:bg-canvas-elevated hover:text-ink disabled:opacity-50"
+                  :disabled="auth.isLoadingMore"
+                  @click="auth.loadMorePRs()"
+                >
+                  <Loader2 v-if="auth.isLoadingMore" class="h-3.5 w-3.5 animate-spin" />
+                  <span>{{ auth.isLoadingMore ? 'Loading more…' : 'Load more PRs' }}</span>
+                </button>
+              </div>
               <button
                 class="inline-flex items-center gap-1.5 text-xs text-ink-muted transition-colors hover:text-terra-text"
                 @click="review.loadMockPR()"

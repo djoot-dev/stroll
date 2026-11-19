@@ -1,6 +1,57 @@
 import { describe, expect, it } from 'vitest'
 import { MOCK_PR } from '@/data/mockPR'
-import { buildReadingOrder, classifyLayer } from '@/services/readingOrder'
+import {
+  buildReadingOrder,
+  classifyLayer,
+  isGeneratedOrLockfile,
+  isLockfile,
+} from '@/services/readingOrder'
+import type { PRFile } from '@/types/pr'
+
+function makeFile(overrides: Partial<PRFile> & { path: string }): PRFile {
+  return {
+    status: 'modified',
+    additions: 10,
+    deletions: 2,
+    patch: '@@ -1,1 +1,2 @@\n+line',
+    baseContent: '',
+    headContent: '',
+    language: 'text',
+    ...overrides,
+  }
+}
+
+describe('isGeneratedOrLockfile', () => {
+  it('identifies common lockfiles and generated assets', () => {
+    expect(isLockfile('package-lock.json')).toBe(true)
+    expect(isLockfile('bun.lock')).toBe(true)
+    expect(isLockfile('Cargo.lock')).toBe(true)
+    expect(isLockfile('src/App.csproj')).toBe(false)
+
+    expect(isGeneratedOrLockfile('package-lock.json')).toBe(true)
+    expect(isGeneratedOrLockfile('bun.lockb')).toBe(true)
+    expect(isGeneratedOrLockfile('yarn.lock')).toBe(true)
+    expect(isGeneratedOrLockfile('pnpm-lock.yaml')).toBe(true)
+    expect(isGeneratedOrLockfile('poetry.lock')).toBe(true)
+    expect(isGeneratedOrLockfile('uv.lock')).toBe(true)
+    expect(isGeneratedOrLockfile('Gemfile.lock')).toBe(true)
+    expect(isGeneratedOrLockfile('go.sum')).toBe(true)
+    expect(isGeneratedOrLockfile('composer.lock')).toBe(true)
+    expect(isGeneratedOrLockfile('packages.lock.json')).toBe(true)
+    expect(isGeneratedOrLockfile('Forms/MainForm.Designer.cs')).toBe(true)
+    expect(isGeneratedOrLockfile('obj/Views/Home.g.cs')).toBe(true)
+    expect(isGeneratedOrLockfile('public/vendor/app.min.js')).toBe(true)
+    expect(isGeneratedOrLockfile('public/vendor/app.min.css')).toBe(true)
+    expect(isGeneratedOrLockfile('dist/bundle.js')).toBe(true)
+    expect(isGeneratedOrLockfile('assets/app.js.map')).toBe(true)
+    expect(isGeneratedOrLockfile('src/__snapshots__/App.test.ts.snap')).toBe(true)
+    expect(isGeneratedOrLockfile('proto/orders.pb.go')).toBe(true)
+    expect(isGeneratedOrLockfile('src/schema_generated.ts')).toBe(true)
+
+    expect(isGeneratedOrLockfile('src/Services/OrderService.cs')).toBe(false)
+    expect(isGeneratedOrLockfile('src/App.vue')).toBe(false)
+  })
+})
 
 describe('classifyLayer', () => {
   it('categorizes files into the 5 architectural layers', () => {
@@ -9,6 +60,26 @@ describe('classifyLayer', () => {
     expect(classifyLayer('src/services/rateLimiter.ts')).toBe('core')
     expect(classifyLayer('src/components/WebhookEndpointCard.vue')).toBe('ui')
     expect(classifyLayer('src/tests/webhookDispatcher.test.ts')).toBe('tests')
+  })
+
+  it('categorizes C# files into the appropriate architectural layers', () => {
+    expect(classifyLayer('src/Orders/Orders.csproj')).toBe('config')
+    expect(classifyLayer('Orders.sln')).toBe('config')
+    expect(classifyLayer('src/Orders/appsettings.Production.json')).toBe('config')
+
+    expect(classifyLayer('src/Orders/IOrderRepository.cs')).toBe('types')
+    expect(classifyLayer('src/Orders/Models/Order.cs')).toBe('types')
+    expect(classifyLayer('src/Orders/Dtos/CreateOrderDto.cs')).toBe('types')
+
+    expect(classifyLayer('src/Orders/Services/OrderService.cs')).toBe('core')
+
+    expect(classifyLayer('src/Orders/OrdersController.cs')).toBe('ui')
+    expect(classifyLayer('src/Orders/Controllers/BillingController.cs')).toBe('ui')
+    expect(classifyLayer('src/Orders/Program.cs')).toBe('ui')
+
+    expect(classifyLayer('tests/Orders.Tests/OrderServiceTests.cs')).toBe('tests')
+    expect(classifyLayer('src/Orders/OrderValidatorTest.cs')).toBe('tests')
+    expect(classifyLayer('Orders.Tests/Fixtures/OrderFixture.cs')).toBe('tests')
   })
 })
 
@@ -42,5 +113,95 @@ describe('buildReadingOrder', () => {
     expect(paths.indexOf('src/tests/webhookDispatcher.test.ts')).toBe(
       paths.indexOf('src/services/webhookDispatcher.ts') + 1,
     )
+  })
+
+  it('deprioritizes generated files and lockfiles to the very end of the tour', () => {
+    const files: PRFile[] = [
+      ...MOCK_PR.files,
+      makeFile({ path: 'bun.lock', additions: 420, deletions: 180 }),
+      makeFile({ path: 'src/Forms/MainForm.Designer.cs', language: 'csharp', additions: 90 }),
+    ]
+
+    const steps = buildReadingOrder(files, 'bottom-up')
+    const lastTwo = steps.slice(-2)
+    expect(lastTwo.map((s) => s.file.path)).toEqual([
+      'bun.lock',
+      'src/Forms/MainForm.Designer.cs',
+    ])
+    expect(lastTwo.every((s) => s.isGenerated === true)).toBe(true)
+  })
+
+  it('orders C# files by using/namespace dependencies, extracts ReferencedContext, and pairs *Tests.cs', () => {
+    const csFiles: PRFile[] = [
+      makeFile({
+        path: 'src/Orders/Controllers/OrdersController.cs',
+        language: 'csharp',
+        headContent: `using MyApp.Orders.Services;
+using MyApp.Orders.Models;
+
+namespace MyApp.Orders.Controllers;
+
+public class OrdersController
+{
+    private readonly OrderService _service;
+    public OrderSummary Get(string id) => _service.Get(id);
+}`,
+      }),
+      makeFile({
+        path: 'tests/Orders.Tests/OrderServiceTests.cs',
+        language: 'csharp',
+        headContent: `using MyApp.Orders.Services;
+
+namespace MyApp.Orders.Tests;
+
+public class OrderServiceTests
+{
+    public void CreatesOrder() { var svc = new OrderService(); }
+}`,
+      }),
+      makeFile({
+        path: 'src/Orders/Services/OrderService.cs',
+        language: 'csharp',
+        headContent: `using MyApp.Orders.Models;
+
+namespace MyApp.Orders.Services;
+
+public class OrderService
+{
+    public OrderSummary Get(string id) => new OrderSummary(id);
+}`,
+      }),
+      makeFile({
+        path: 'src/Orders/Models/OrderSummary.cs',
+        language: 'csharp',
+        headContent: `namespace MyApp.Orders.Models;
+
+public sealed record OrderSummary(string Id);`,
+      }),
+      makeFile({
+        path: 'src/Orders/Orders.csproj',
+        language: 'xml',
+        headContent: `<Project Sdk="Microsoft.NET.Sdk.Web"></Project>`,
+      }),
+    ]
+
+    const steps = buildReadingOrder(csFiles, 'bottom-up')
+    const paths = steps.map((s) => s.file.path)
+
+    expect(paths).toEqual([
+      'src/Orders/Orders.csproj',
+      'src/Orders/Models/OrderSummary.cs',
+      'src/Orders/Services/OrderService.cs',
+      'tests/Orders.Tests/OrderServiceTests.cs',
+      'src/Orders/Controllers/OrdersController.cs',
+    ])
+
+    const serviceStep = steps.find((s) => s.file.path === 'src/Orders/Services/OrderService.cs')!
+    expect(serviceStep.dependencies).toContain('src/Orders/Models/OrderSummary.cs')
+    expect(serviceStep.referencedContexts.length).toBe(1)
+    expect(serviceStep.referencedContexts[0].symbolNames).toContain('OrderSummary')
+
+    const testStep = steps.find((s) => s.file.path === 'tests/Orders.Tests/OrderServiceTests.cs')!
+    expect(testStep.pairedWith).toBe('src/Orders/Services/OrderService.cs')
   })
 })

@@ -88,4 +88,79 @@ describe('codeContext', () => {
     )
     expect(miss).toBeNull()
   })
+
+  it('indexes C# declarations with XML doc comments, computes C# scopes, and parses using directives', () => {
+    const csModelFile = {
+      path: 'src/Models/OrderSummary.cs',
+      status: 'added' as const,
+      additions: 15,
+      deletions: 0,
+      patch: '',
+      baseContent: null,
+      headContent: `namespace MyApp.Models;
+
+/// <summary>
+/// Immutable order summary DTO.
+/// </summary>
+public sealed record OrderSummary(string Id, decimal Total);
+
+/// <summary>
+/// Order status lifecycle.
+/// </summary>
+public enum OrderStatus
+{
+    Pending,
+    Shipped
+}`,
+      language: 'csharp',
+    }
+
+    const csServiceFile = {
+      path: 'src/Services/OrderService.cs',
+      status: 'modified' as const,
+      additions: 12,
+      deletions: 1,
+      patch: '',
+      baseContent: '',
+      headContent: `using System;
+using MyApp.Models;
+
+namespace MyApp.Services
+{
+    public sealed partial class OrderService
+    {
+        public async Task<OrderSummary> CreateOrderAsync(string id)
+        {
+            var summary = new OrderSummary(id, 10m);
+            return summary;
+        }
+    }
+}`,
+      language: 'csharp',
+    }
+
+    const files = [csModelFile, csServiceFile]
+    const index = buildPRSymbolIndex(files)
+
+    const resolved = resolveHoverSymbol('OrderSummary', csServiceFile, files, index)
+    expect(resolved).not.toBeNull()
+    expect(resolved?.declaration.path).toBe('src/Models/OrderSummary.cs')
+    expect(resolved?.declaration.kind).toBe('class')
+    expect(resolved?.declaration.docComment).toContain('Immutable order summary DTO.')
+
+    const enumResolved = resolveHoverSymbol('OrderStatus', csServiceFile, files, index)
+    expect(enumResolved?.declaration.kind).toBe('enum')
+
+    // Line 10 is inside CreateOrderAsync inside OrderService inside namespace MyApp.Services
+    const scopes = getEnclosingScope(csServiceFile, 10)
+    expect(scopes).toEqual(['namespace MyApp.Services', 'class OrderService', 'CreateOrderAsync()'])
+
+    // C# `using` import specifier resolution
+    expect(findImportSpecifierForSymbol(csServiceFile.headContent, 'OrderSummary')).toBe(
+      'MyApp.Models',
+    )
+    expect(
+      findImportSpecifierForSymbol('using static MyApp.Utils.HashHelper;', 'HashHelper'),
+    ).toBe('MyApp.Utils.HashHelper')
+  })
 })

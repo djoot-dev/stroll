@@ -1,15 +1,40 @@
+import { cpp } from '@codemirror/lang-cpp'
 import { css } from '@codemirror/lang-css'
+import { go } from '@codemirror/lang-go'
 import { html } from '@codemirror/lang-html'
+import { java } from '@codemirror/lang-java'
 import { javascript } from '@codemirror/lang-javascript'
 import { json } from '@codemirror/lang-json'
 import { markdown } from '@codemirror/lang-markdown'
+import { php } from '@codemirror/lang-php'
 import { python } from '@codemirror/lang-python'
 import { rust } from '@codemirror/lang-rust'
+import { sass } from '@codemirror/lang-sass'
 import { sql } from '@codemirror/lang-sql'
+import { xml } from '@codemirror/lang-xml'
 import { yaml } from '@codemirror/lang-yaml'
-import { HighlightStyle, syntaxHighlighting, type LanguageSupport } from '@codemirror/language'
+import {
+  HighlightStyle,
+  LanguageSupport,
+  StreamLanguage,
+  syntaxHighlighting,
+} from '@codemirror/language'
+import { csharp, kotlin } from '@codemirror/legacy-modes/mode/clike'
+import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile'
+import { ruby } from '@codemirror/legacy-modes/mode/ruby'
+import { shell } from '@codemirror/legacy-modes/mode/shell'
+import { swift } from '@codemirror/legacy-modes/mode/swift'
+import { toml } from '@codemirror/legacy-modes/mode/toml'
 import { EditorView } from '@codemirror/view'
 import { highlightTree, tags } from '@lezer/highlight'
+
+const csharpSupport = new LanguageSupport(StreamLanguage.define(csharp))
+const kotlinSupport = new LanguageSupport(StreamLanguage.define(kotlin))
+const shellSupport = new LanguageSupport(StreamLanguage.define(shell))
+const rubySupport = new LanguageSupport(StreamLanguage.define(ruby))
+const swiftSupport = new LanguageSupport(StreamLanguage.define(swift))
+const tomlSupport = new LanguageSupport(StreamLanguage.define(toml))
+const dockerfileSupport = new LanguageSupport(StreamLanguage.define(dockerFile))
 
 /**
  * Brand-aligned Stroll syntax highlight style using CSS custom properties
@@ -96,10 +121,38 @@ export function getLanguageSupport(language: string): LanguageSupport | null {
       return json()
     case 'css':
       return css()
+    case 'scss':
+      return sass({ indented: false })
+    case 'sass':
+      return sass({ indented: true })
     case 'markdown':
       return markdown()
     case 'yaml':
       return yaml()
+    case 'go':
+      return go()
+    case 'java':
+      return java()
+    case 'cpp':
+      return cpp()
+    case 'php':
+      return php()
+    case 'xml':
+      return xml()
+    case 'csharp':
+      return csharpSupport
+    case 'kotlin':
+      return kotlinSupport
+    case 'shell':
+      return shellSupport
+    case 'ruby':
+      return rubySupport
+    case 'swift':
+      return swiftSupport
+    case 'toml':
+      return tomlSupport
+    case 'dockerfile':
+      return dockerfileSupport
     default:
       return null
   }
