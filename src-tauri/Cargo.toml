@@ -1,6 +1,6 @@
 [package]
 name = "stroll"
-version = "0.1.3"
+version = "0.1.4"
 description = "Guided, step-by-step GitHub Pull Request review desktop app"
 authors = ["Daniel"]
 edition = "2021"
