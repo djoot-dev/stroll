@@ -1,5 +1,5 @@
 <h1>
-  <img src="public/logo.png" alt="Stroll logo" width="36" align="center" />
+  <img src="public/logo.png" alt="Stroll logo" width="36" align="top" />
   Stroll — Guided Code Review
 </h1>
 
