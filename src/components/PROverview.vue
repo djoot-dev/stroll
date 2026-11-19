@@ -24,10 +24,10 @@ import {
   XCircle,
 } from '@lucide/vue'
 import { computed, ref } from 'vue'
-import { renderSafeMarkdown } from '@/services/markdown'
 import { openExternalUrl } from '@/services/native'
 import { useReviewStore } from '@/stores/review'
 import type { PRReviewState, PRStatusCheck } from '@/types/pr'
+import MarkdownContent from './MarkdownContent.vue'
 
 const review = useReviewStore()
 const pr = computed(() => review.pr)
@@ -51,17 +51,6 @@ function formatRelativeTime(iso: string | null | undefined): string {
   const days = Math.floor(hrs / 24)
   if (days < 30) return `${days}d ago`
   return new Date(ts).toLocaleDateString()
-}
-
-function handleMarkdownClick(event: MouseEvent): void {
-  const target = event.target as HTMLElement | null
-  const anchor = target?.closest('a[data-external-url]') as HTMLAnchorElement | null
-  if (!anchor) return
-  event.preventDefault()
-  const url = anchor.getAttribute('data-external-url')
-  if (url) {
-    void openExternalUrl(url)
-  }
 }
 
 const stateBadge = computed(() => {
@@ -114,7 +103,7 @@ const diffTotals = computed(() => {
   return { additions, deletions, fileCount: files.length }
 })
 
-const renderedDescription = computed(() => renderSafeMarkdown(pr.value?.body ?? ''))
+const hasDescription = computed(() => Boolean(pr.value?.body?.trim()))
 
 function isCheckPassed(check: PRStatusCheck): boolean {
   const c = (check.conclusion ?? check.status).toUpperCase()
@@ -455,11 +444,10 @@ const tourCtaLabel = computed(() =>
       <h2 class="mb-3 text-xs font-semibold uppercase tracking-wider text-ink-muted">
         Description
       </h2>
-      <div
-        v-if="renderedDescription"
+      <MarkdownContent
+        v-if="hasDescription && pr"
+        :content="pr.body"
         class="text-[13px] leading-relaxed text-ink-secondary"
-        @click="handleMarkdownClick"
-        v-html="renderedDescription"
       />
       <p v-else class="text-xs italic text-ink-faint">
         No description provided.
@@ -697,10 +685,9 @@ const tourCtaLabel = computed(() =>
             </span>
           </div>
 
-          <div
+          <MarkdownContent
+            :content="item.body"
             class="text-xs leading-relaxed text-ink-secondary"
-            @click="handleMarkdownClick"
-            v-html="renderSafeMarkdown(item.body)"
           />
         </article>
       </div>
