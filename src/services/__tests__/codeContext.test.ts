@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { MOCK_PR } from '@/data/mockPR'
 import {
   buildPRSymbolIndex,
+  extractImportedSymbolNames,
+  findImportBindingForSymbol,
   findImportSpecifierForSymbol,
   getEnclosingScope,
   getReplacedLinesForAddedLine,
@@ -162,5 +164,45 @@ namespace MyApp.Services
     expect(
       findImportSpecifierForSymbol('using static MyApp.Utils.HashHelper;', 'HashHelper'),
     ).toBe('MyApp.Utils.HashHelper')
+  })
+
+  it('extracts imported symbol names, resolves aliased import bindings, and indexes Vue components', () => {
+    const vueSrc = `<script setup lang="ts">
+import ActionCard from '@ui/ActionCard.vue'
+import {
+  useSession,
+  type UserProfile as ProfileDTO,
+} from '~/composables/useSession'
+</script>`
+
+    const imported = extractImportedSymbolNames(vueSrc)
+    expect(imported.has('ActionCard')).toBe(true)
+    expect(imported.has('useSession')).toBe(true)
+    expect(imported.has('ProfileDTO')).toBe(true)
+
+    expect(findImportBindingForSymbol(vueSrc, 'ActionCard')).toEqual({
+      specifier: '@ui/ActionCard.vue',
+      importedName: 'ActionCard',
+    })
+    expect(findImportBindingForSymbol(vueSrc, 'ProfileDTO')).toEqual({
+      specifier: '~/composables/useSession',
+      importedName: 'UserProfile',
+    })
+
+    const index = buildPRSymbolIndex(MOCK_PR.files)
+    const appFile = {
+      path: 'src/App.vue',
+      status: 'modified' as const,
+      additions: 1,
+      deletions: 0,
+      patch: '',
+      baseContent: '',
+      headContent: `<script setup lang="ts">\nimport WebhookEndpointCard from '@/components/WebhookEndpointCard.vue'\n</script>`,
+      language: 'vue',
+    }
+    const vueHit = resolveHoverSymbol('WebhookEndpointCard', appFile, MOCK_PR.files, index)
+    expect(vueHit).not.toBeNull()
+    expect(vueHit?.declaration.kind).toBe('component')
+    expect(vueHit?.declaration.path).toBe('src/components/WebhookEndpointCard.vue')
   })
 })

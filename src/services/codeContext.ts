@@ -9,6 +9,7 @@ export type SymbolKind =
   | 'enum'
   | 'function'
   | 'const'
+  | 'component'
   | 'other'
 
 export interface SymbolDeclaration {
@@ -60,6 +61,8 @@ function normalizeKind(raw: string): SymbolKind {
       return 'function'
     case 'const':
       return 'const'
+    case 'component':
+      return 'component'
     default:
       return 'other'
   }
@@ -125,6 +128,14 @@ function extractDeclarationSnippet(lines: string[], startIdx: number, maxLines =
   return slice.join('\n').trimEnd()
 }
 
+function toPascalCase(name: string): string {
+  return name
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join('')
+}
+
 function extractDeclarationsFromContent(
   content: string,
   path: string,
@@ -152,6 +163,25 @@ function extractDeclarationsFromContent(
       snippet: extractDeclarationSnippet(lines, idx),
     })
   })
+
+  if (path.toLowerCase().endsWith('.vue')) {
+    const baseName = path.split('/').pop() ?? ''
+    const stem = baseName.replace(/\.vue$/i, '')
+    const componentName =
+      stem.toLowerCase() === 'index'
+        ? toPascalCase(path.split('/').slice(-2, -1)[0] ?? '')
+        : toPascalCase(stem)
+    if (componentName && !map.has(componentName)) {
+      const scriptIdx = lines.findIndex((l) => /^\s*<script\b/i.test(l))
+      const startIdx = scriptIdx >= 0 ? scriptIdx : 0
+      map.set(componentName, {
+        line: startIdx + 1,
+        kind: 'component',
+        docComment: extractLeadingDocComment(lines, startIdx),
+        snippet: lines.slice(startIdx, startIdx + 14).join('\n').trimEnd(),
+      })
+    }
+  }
 
   return map
 }
@@ -268,41 +298,132 @@ export function resolveHoverSymbol(
   }
 }
 
+export interface ImportBinding {
+  specifier: string
+  importedName: string
+}
+
+function parseEsImportClause(
+  clause: string,
+): Array<{ local: string; imported: string }> {
+  const bindings: Array<{ local: string; imported: string }> = []
+  const cleaned = clause.replace(/\btype\s+/g, '').trim()
+  if (!cleaned) return bindings
+
+  const braceStart = cleaned.indexOf('{')
+  const braceEnd = cleaned.lastIndexOf('}')
+
+  const beforeBrace = (braceStart >= 0 ? cleaned.slice(0, braceStart) : cleaned)
+    .replace(/,\s*$/, '')
+    .trim()
+  if (beforeBrace) {
+    const nsMatch = beforeBrace.match(/^\*\s+as\s+([A-Za-z_$][\w$]*)$/)
+    if (nsMatch) {
+      bindings.push({ local: nsMatch[1], imported: nsMatch[1] })
+    } else if (/^[A-Za-z_$][\w$]*$/.test(beforeBrace)) {
+      bindings.push({ local: beforeBrace, imported: beforeBrace })
+    }
+  }
+
+  if (braceStart >= 0 && braceEnd > braceStart) {
+    const inside = cleaned.slice(braceStart + 1, braceEnd)
+    for (const rawItem of inside.split(',')) {
+      const item = rawItem.trim()
+      if (!item) continue
+      const aliasMatch = item.match(/^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/)
+      if (aliasMatch) {
+        bindings.push({
+          local: aliasMatch[2],
+          imported: aliasMatch[1] === 'default' ? aliasMatch[2] : aliasMatch[1],
+        })
+      } else if (/^[A-Za-z_$][\w$]*$/.test(item)) {
+        bindings.push({ local: item, imported: item })
+      }
+    }
+  }
+
+  return bindings
+}
+
 /**
- * Finds the import specifier (e.g. `'../types/webhook'`, `'@/services/storage'`, `'crate::commands::git'`)
- * that brings `symbolName` into scope in `content`.
+ * Extracts all local symbol names brought into scope by import statements in `content`.
  */
-export function findImportSpecifierForSymbol(
+export function extractImportedSymbolNames(content: string | null | undefined): Set<string> {
+  const names = new Set<string>()
+  if (!content) return names
+
+  const joined = content.replace(/\r\n/g, '\n')
+  const esImportRegex =
+    /^[ \t]*import\s+(?:type\s+)?([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/gm
+  let match: RegExpExecArray | null
+  while ((match = esImportRegex.exec(joined)) !== null) {
+    for (const b of parseEsImportClause(match[1])) {
+      names.add(b.local)
+    }
+  }
+
+  for (const line of joined.split('\n')) {
+    const pyMatch = line.match(/^\s*from\s+[A-Za-z0-9_.]+\s+import\s+(.+)$/)
+    if (pyMatch) {
+      for (const part of pyMatch[1].split(',')) {
+        const cleaned = part.trim().split(/\s+as\s+/).pop()?.trim()
+        if (cleaned && /^[A-Za-z_]\w*$/.test(cleaned)) names.add(cleaned)
+      }
+    }
+
+    const rustMatch = line.match(/^\s*(?:pub\s+)?use\s+([A-Za-z0-9_:{}*,\s]+)\s*;/)
+    if (rustMatch) {
+      const segs = rustMatch[1].match(/[A-Za-z_]\w*/g)
+      if (segs && segs.length > 0) {
+        names.add(segs[segs.length - 1])
+      }
+    }
+  }
+
+  return names
+}
+
+/**
+ * Finds both the import specifier and the original exported symbol name for `symbolName`.
+ */
+export function findImportBindingForSymbol(
   content: string | null | undefined,
   symbolName: string,
-): string | null {
+): ImportBinding | null {
   if (!content || !symbolName) return null
   const escaped = symbolName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const wordRegex = new RegExp(`\\b${escaped}\\b`)
 
-  const lines = content.split('\n')
-  // Join multiline ES imports simply by tracking `import ... from '...'`
   const joined = content.replace(/\r\n/g, '\n')
   const esImportRegex =
-    /import\s+(?:type\s+)?([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g
+    /^[ \t]*import\s+(?:type\s+)?([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/gm
   let match: RegExpExecArray | null
   while ((match = esImportRegex.exec(joined)) !== null) {
+    const bindings = parseEsImportClause(match[1])
+    const hit = bindings.find((b) => b.local === symbolName)
+    if (hit) {
+      return { specifier: match[2], importedName: hit.imported }
+    }
     if (wordRegex.test(match[1])) {
-      return match[2]
+      return { specifier: match[2], importedName: symbolName }
     }
   }
 
+  const lines = joined.split('\n')
   const csharpUsings: string[] = []
   for (const line of lines) {
     const pyMatch = line.match(/^\s*from\s+([A-Za-z0-9_.]+)\s+import\s+(.+)$/)
     if (pyMatch && wordRegex.test(pyMatch[2])) {
-      return pyMatch[1]
+      return { specifier: pyMatch[1], importedName: symbolName }
     }
 
     const rustMatch = line.match(/^\s*(?:pub\s+)?use\s+([A-Za-z0-9_:]+)\s*;/)
     if (rustMatch && wordRegex.test(rustMatch[1])) {
       // Strip trailing `::Symbol` to get module path
-      return rustMatch[1].replace(new RegExp(`::${escaped}$`), '')
+      return {
+        specifier: rustMatch[1].replace(new RegExp(`::${escaped}$`), ''),
+        importedName: symbolName,
+      }
     }
 
     // C# `using Alias = Ns.Type;` or `using static Ns.Type;` or `using Ns.SubNs;`
@@ -310,12 +431,12 @@ export function findImportSpecifierForSymbol(
       /^\s*(?:global\s+)?using\s+([A-Za-z_]\w*)\s*=\s*([A-Za-z_][\w.]*)\s*;/,
     )
     if (csAliasMatch && (csAliasMatch[1] === symbolName || wordRegex.test(csAliasMatch[2]))) {
-      return csAliasMatch[2]
+      return { specifier: csAliasMatch[2], importedName: symbolName }
     }
 
     const csStaticMatch = line.match(/^\s*(?:global\s+)?using\s+static\s+([A-Za-z_][\w.]*)\s*;/)
     if (csStaticMatch && wordRegex.test(csStaticMatch[1])) {
-      return csStaticMatch[1]
+      return { specifier: csStaticMatch[1], importedName: symbolName }
     }
 
     const csUsingMatch = line.match(/^\s*(?:global\s+)?using\s+([A-Za-z_][\w.]*)\s*;/)
@@ -327,10 +448,21 @@ export function findImportSpecifierForSymbol(
   if (csharpUsings.length > 0) {
     const nonSystem = csharpUsings.filter((ns) => ns !== 'System' && !ns.startsWith('System.'))
     const pool = nonSystem.length > 0 ? nonSystem : csharpUsings
-    return pool[0]
+    return { specifier: pool[0], importedName: symbolName }
   }
 
   return null
+}
+
+/**
+ * Finds the import specifier (e.g. `'../types/webhook'`, `'@/services/storage'`, `'crate::commands::git'`)
+ * that brings `symbolName` into scope in `content`.
+ */
+export function findImportSpecifierForSymbol(
+  content: string | null | undefined,
+  symbolName: string,
+): string | null {
+  return findImportBindingForSymbol(content, symbolName)?.specifier ?? null
 }
 
 /**
@@ -350,13 +482,13 @@ export async function resolveHoverSymbolWithRepoFallback(
   if (!repoPath || !isTauriRuntime()) return null
 
   const sourceContent = currentFile.headContent ?? currentFile.baseContent
-  const importSpecifier = findImportSpecifierForSymbol(sourceContent, identifier)
+  const binding = findImportBindingForSymbol(sourceContent, identifier)
 
   const resolved = await resolveRepoSymbol({
     repoPath,
     importerPath: currentFile.path,
-    symbolName: identifier,
-    importSpecifier,
+    symbolName: binding?.importedName ?? identifier,
+    importSpecifier: binding?.specifier ?? null,
   })
 
   if (!resolved) return null
