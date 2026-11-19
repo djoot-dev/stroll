@@ -68,8 +68,10 @@
   /* Diff Surfaces */
   --stroll-diff-add: rgba(26, 127, 86, 0.15);
   --stroll-diff-add-hover: rgba(26, 127, 86, 0.22);
+  --stroll-diff-add-word: rgba(26, 127, 86, 0.30);
   --stroll-diff-del: rgba(204, 46, 58, 0.13);
   --stroll-diff-del-hover: rgba(204, 46, 58, 0.20);
+  --stroll-diff-del-word: rgba(204, 46, 58, 0.26);
   --stroll-diff-hover: rgba(22, 48, 37, 0.06);
   --stroll-diff-select: rgba(200, 97, 48, 0.15);
   --stroll-diff-select-bar: #c86130;
@@ -155,8 +157,10 @@ html.dark {
   /* Diff Surfaces */
   --stroll-diff-add: rgba(46, 168, 114, 0.21);
   --stroll-diff-add-hover: rgba(46, 168, 114, 0.29);
+  --stroll-diff-add-word: rgba(46, 168, 114, 0.42);
   --stroll-diff-del: rgba(235, 87, 97, 0.21);
   --stroll-diff-del-hover: rgba(235, 87, 97, 0.29);
+  --stroll-diff-del-word: rgba(235, 87, 97, 0.42);
   --stroll-diff-hover: rgba(198, 219, 196, 0.08);
   --stroll-diff-select: rgba(222, 123, 71, 0.22);
   --stroll-diff-select-bar: #de7b47;
@@ -233,8 +237,10 @@ html.dark {
 
   --color-diff-add: var(--stroll-diff-add);
   --color-diff-add-hover: var(--stroll-diff-add-hover);
+  --color-diff-add-word: var(--stroll-diff-add-word);
   --color-diff-del: var(--stroll-diff-del);
   --color-diff-del-hover: var(--stroll-diff-del-hover);
+  --color-diff-del-word: var(--stroll-diff-del-word);
   --color-diff-hover: var(--stroll-diff-hover);
   --color-diff-select: var(--stroll-diff-select);
 }
