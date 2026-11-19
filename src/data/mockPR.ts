@@ -296,9 +296,41 @@ export const MOCK_PR: PullRequestData = {
   repo: 'webhook-engine',
   number: 428,
   title: 'feat: add rate-limited webhook dispatcher with exponential retry queue',
-  body: 'Adds per-endpoint token bucket rate limiting, exponential backoff retries, and a delivery tracking migration.',
+  body: `## Summary
+
+Adds per-endpoint token bucket rate limiting, exponential backoff retries, and a \`webhook_deliveries\` table so transient downstream errors don't drop customer events.
+
+### Key Changes
+- **Database:** New migration \`004_webhook_deliveries.sql\` with a partial index on \`(status, next_retry_at)\`.
+- **Rate Limiter:** Added \`EndpointRateLimiter\` using a per-endpoint token bucket keyed by \`endpoint.id\`.
+- **Dispatcher:** Updated \`WebhookDispatcher.dispatch()\` to return a structured \`WebhookDeliveryResult\` with capped backoff via \`computeBackoffMs\`.
+- **UI:** Exposed \`maxRequestsPerMinute\` in \`WebhookEndpointCard.vue\`.
+
+### Backoff Formula
+\`\`\`ts
+const delayMs = computeBackoffMs(attempt, {
+  maxAttempts: 5,
+  baseDelayMs: 1_000,
+  maxDelayMs: 60_000,
+})
+\`\`\`
+
+### Rollout Checklist
+- [x] Unit tests for backoff cap and rate-limit exhaustion
+- [x] Backwards-compatible migration (additive table + index)
+- [ ] Verify staging metrics dashboard at [Grafana Webhook Overview](https://github.com/acme-cloud/webhook-engine/wiki/Webhook-Metrics)`,
   url: 'https://github.com/acme-cloud/webhook-engine/pull/428',
   state: 'OPEN',
+  isDraft: false,
+  mergeable: 'MERGEABLE',
+  reviewDecision: 'REVIEW_REQUIRED',
+  labels: [
+    { name: 'feature', color: '245e48' },
+    { name: 'backend', color: 'c86130' },
+    { name: 'webhooks', color: '5f3c78' },
+  ],
+  createdAt: '2026-11-17T14:20:00Z',
+  updatedAt: '2026-11-18T11:30:00Z',
   author: {
     login: 'elena-rostova',
     avatarUrl: 'https://avatars.githubusercontent.com/u/1?v=4',
@@ -309,6 +341,112 @@ export const MOCK_PR: PullRequestData = {
   headRefOid: 'e4f5a6b',
   isMock: true,
   pendingReviewId: null,
+  requestedReviewers: [
+    {
+      type: 'user',
+      login: 'priya-nair',
+      name: 'Priya Nair',
+      avatarUrl: 'https://avatars.githubusercontent.com/u/3?v=4',
+    },
+    {
+      type: 'team',
+      login: 'platform-reliability',
+      name: 'Platform Reliability',
+      avatarUrl: '',
+    },
+  ],
+  reviews: [
+    {
+      id: 'review-mock-1',
+      author: {
+        login: 'marcus-chen',
+        avatarUrl: 'https://avatars.githubusercontent.com/u/2?v=4',
+      },
+      state: 'COMMENTED',
+      body: 'Overall architecture looks super clean! Left one inline question on `EndpointRateLimiter` memory bounds before approving.',
+      submittedAt: '2026-11-18T11:16:00Z',
+    },
+    {
+      id: 'review-mock-2',
+      author: {
+        login: 'samira-okafor',
+        avatarUrl: 'https://avatars.githubusercontent.com/u/4?v=4',
+      },
+      state: 'APPROVED',
+      body: 'Migration and partial index look great—tested against a 2M-row staging snapshot and query plan stays under 2ms.',
+      submittedAt: '2026-11-18T11:28:00Z',
+    },
+  ],
+  issueComments: [
+    {
+      id: 'issue-comment-mock-1',
+      author: {
+        login: 'elena-rostova',
+        avatarUrl: 'https://avatars.githubusercontent.com/u/1?v=4',
+      },
+      body: 'Heads up for reviewers: start with `src/types/webhook.ts` and `db/migrations/004_webhook_deliveries.sql` — Stroll’s bottom-up reading order already puts them first!',
+      createdAt: '2026-11-17T14:25:00Z',
+    },
+    {
+      id: 'issue-comment-mock-2',
+      author: {
+        login: 'marcus-chen',
+        avatarUrl: 'https://avatars.githubusercontent.com/u/2?v=4',
+      },
+      body: 'Thanks for the context! Once we confirm the bucket map eviction strategy, this looks ready to ship.',
+      createdAt: '2026-11-18T11:20:00Z',
+    },
+  ],
+  statusCheckRollup: {
+    state: 'PENDING',
+    checks: [
+      {
+        id: 'chk-1',
+        name: 'Typecheck & Lint',
+        kind: 'check-run',
+        status: 'COMPLETED',
+        conclusion: 'SUCCESS',
+        url: 'https://github.com/acme-cloud/webhook-engine/actions/runs/1001',
+        description: 'vue-tsc and eslint passed',
+      },
+      {
+        id: 'chk-2',
+        name: 'Unit Tests (Vitest)',
+        kind: 'check-run',
+        status: 'COMPLETED',
+        conclusion: 'SUCCESS',
+        url: 'https://github.com/acme-cloud/webhook-engine/actions/runs/1002',
+        description: '48 passed in 1.4s',
+      },
+      {
+        id: 'chk-3',
+        name: 'SQL Migration Dry-Run',
+        kind: 'check-run',
+        status: 'COMPLETED',
+        conclusion: 'SUCCESS',
+        url: 'https://github.com/acme-cloud/webhook-engine/actions/runs/1003',
+        description: 'Zero lock-timeout warnings',
+      },
+      {
+        id: 'chk-4',
+        name: 'Security & Dependency Audit',
+        kind: 'check-run',
+        status: 'COMPLETED',
+        conclusion: 'SUCCESS',
+        url: 'https://github.com/acme-cloud/webhook-engine/actions/runs/1004',
+        description: 'No vulnerabilities found',
+      },
+      {
+        id: 'chk-5',
+        name: 'Staging E2E Webhook Replay',
+        kind: 'check-run',
+        status: 'IN_PROGRESS',
+        conclusion: null,
+        url: 'https://github.com/acme-cloud/webhook-engine/actions/runs/1005',
+        description: 'Running replay suite...',
+      },
+    ],
+  },
   commits: [
     {
       oid: 'c111111',

@@ -5,15 +5,18 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  ExternalLink,
   FolderGit2,
   KeyRound,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
+  RefreshCw,
   Send,
   Settings,
   Sun,
 } from '@lucide/vue'
+import { openExternalUrl } from '@/services/native'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore } from '@/stores/settings'
@@ -25,6 +28,16 @@ const settings = useSettingsStore()
 function toggleDirection() {
   const next = review.tourDirection === 'bottom-up' ? 'top-down' : 'bottom-up'
   void review.setTourDirection(next)
+}
+
+function handleOpenOnGitHub() {
+  if (!review.pr?.url) return
+  void openExternalUrl(review.pr.url)
+}
+
+function handleRefreshPR() {
+  if (!review.pr || review.pr.isMock || review.isRefreshingPR) return
+  void review.refreshCurrentPR()
 }
 </script>
 
@@ -83,7 +96,7 @@ function toggleDirection() {
       <div v-if="review.tourSteps.length > 0" class="flex shrink-0 items-center gap-2">
         <button
           class="shrink-0 rounded-lg border border-border bg-canvas px-2 py-1 text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated disabled:opacity-40"
-          :disabled="review.currentStepIndex === 0"
+          :disabled="review.activeView === 'overview' || review.currentStepIndex === 0"
           title="Previous step (H or ←)"
           @click="review.prevStep()"
         >
@@ -92,27 +105,28 @@ function toggleDirection() {
 
         <div class="flex shrink-0 items-center gap-2 px-1">
           <span class="whitespace-nowrap font-mono text-xs font-medium text-ink">
-            Step {{ review.currentStepIndex + 1 }} of {{ review.tourSteps.length }}
+            <template v-if="review.activeView === 'overview'">Overview</template>
+            <template v-else>Step {{ review.currentStepIndex + 1 }} of {{ review.tourSteps.length }}</template>
           </span>
           <div class="hidden h-1.5 w-24 overflow-hidden rounded-full bg-canvas-elevated lg:block">
             <div
               class="h-full rounded-full bg-terra transition-all duration-200"
-              :style="{ width: `${review.progressPercent}%` }"
+              :style="{ width: review.activeView === 'overview' ? '0%' : `${review.progressPercent}%` }"
             />
           </div>
         </div>
 
         <button
           class="shrink-0 rounded-lg border border-border bg-canvas px-2 py-1 text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated disabled:opacity-40"
-          :disabled="review.currentStepIndex >= review.tourSteps.length - 1"
-          title="Next step (L or →)"
+          :disabled="review.activeView === 'step' && review.currentStepIndex >= review.tourSteps.length - 1"
+          :title="review.activeView === 'overview' ? 'Enter Guided Tour (L or →)' : 'Next step (L or →)'"
           @click="review.nextStep()"
         >
           <ChevronRight class="h-3.5 w-3.5" />
         </button>
 
         <button
-          v-if="review.currentStep"
+          v-if="review.activeView === 'step' && review.currentStep"
           class="ml-1 inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors"
           :class="
             review.isStepReviewed(review.currentStep.file.path)
@@ -129,8 +143,32 @@ function toggleDirection() {
         </button>
       </div>
 
-      <!-- Right: Reading Order Toggle, Load PR, Theme, Settings, Finish Review -->
+      <!-- Right: Refresh, Open on GitHub, Reading Order Toggle, Load PR, Theme, Settings, Finish Review -->
       <div class="flex shrink-0 items-center gap-1.5">
+        <button
+          v-if="review.pr"
+          class="shrink-0 rounded-lg border border-border bg-canvas p-1.5 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+          :disabled="review.pr.isMock || review.isRefreshingPR"
+          :title="
+            review.pr.isMock
+              ? 'Refresh is disabled in Demo PR mode'
+              : review.isRefreshingPR
+                ? 'Refreshing Pull Request…'
+                : 'Refresh Pull Request'
+          "
+          @click="handleRefreshPR"
+        >
+          <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin text-terra': review.isRefreshingPR }" />
+        </button>
+
+        <button
+          v-if="review.pr"
+          class="shrink-0 rounded-lg border border-border bg-canvas p-1.5 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+          title="Open PR on GitHub"
+          @click="handleOpenOnGitHub"
+        >
+          <ExternalLink class="h-3.5 w-3.5" />
+        </button>
         <button
           class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-border bg-canvas px-2.5 py-1 text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated"
           :title="`Current reading order: ${review.tourDirection}. Click to switch.`"
