@@ -1,4 +1,7 @@
 import type { DiffSide, PRFile } from '@/types/pr'
+import { applyInlineDiffsToHunk, type InlineChangeRange } from './inlineDiff'
+
+export type { InlineChangeRange }
 
 export interface DiffLine {
   key: string
@@ -9,6 +12,8 @@ export interface DiffLine {
   /** Target line number & side for GitHub review comments */
   commentLine: number
   commentSide: DiffSide
+  /** Character ranges within `content` that changed relative to a paired line */
+  inlineChanges?: InlineChangeRange[]
 }
 
 export interface DiffGap {
@@ -199,6 +204,8 @@ export function buildDiffSegments(file: PRFile): DiffSegment[] {
       )
       if (gap) segments.push(gap)
     }
+
+    applyInlineDiffsToHunk(hunk.lines)
 
     segments.push({
       id: `hunk-${idx}`,

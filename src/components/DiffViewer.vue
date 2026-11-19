@@ -18,6 +18,7 @@ import {
 import { gitBlameLine, isTauriRuntime, type GitBlameInfo } from '@/services/native'
 import { buildDiffSegments, type DiffLine } from '@/services/diffParser'
 import { highlightLinesWithCodeMirror, type HighlightSpan } from '@/services/highlighter'
+import { buildLineTokenParts, type DiffTokenPart } from '@/services/inlineDiff'
 import { LAYER_META } from '@/services/readingOrder'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore } from '@/stores/settings'
@@ -26,12 +27,6 @@ import CodeHoverPopover from './CodeHoverPopover.vue'
 import CommentComposer from './CommentComposer.vue'
 import ReferencedContextCard from './ReferencedContextCard.vue'
 import ReviewThreadCard from './ReviewThreadCard.vue'
-
-interface TokenPart {
-  text: string
-  className: string
-  ident: string | null
-}
 
 const props = defineProps<{
   step: TourStep
@@ -165,8 +160,8 @@ function selectionRowClass(key: string): string {
 }
 
 /**
- * Pre-computes CodeMirror 6 highlight spans + resolvable PR identifier parts
- * for every DiffLine key in the current file.
+ * Pre-computes CodeMirror 6 highlight spans, intra-line word diff ranges,
+ * and resolvable PR identifier parts for every DiffLine key in the current file.
  */
 const tokenizedByKey = computed(() => {
   const allLines: DiffLine[] = []
@@ -174,7 +169,7 @@ const tokenizedByKey = computed(() => {
     allLines.push(...seg.lines)
   }
 
-  const partMap = new Map<string, TokenPart[]>()
+  const partMap = new Map<string, DiffTokenPart[]>()
   const tokenized = highlightLinesWithCodeMirror(
     allLines.map((l) => l.content),
     props.step.file.language,
@@ -184,26 +179,19 @@ const tokenizedByKey = computed(() => {
 
   allLines.forEach((line, idx) => {
     const spans: HighlightSpan[] = tokenized[idx] ?? [{ text: line.content || ' ', className: '' }]
-    const parts: TokenPart[] = []
-
-    for (const sp of spans) {
-      const pieces = sp.text.split(/([A-Za-z_$][\w$]*)/g)
-      for (const piece of pieces) {
-        if (!piece) continue
-        const isIdent = piece.length >= 2 && /^[A-Za-z_$][\w$]*$/.test(piece) && index.has(piece)
-        parts.push({
-          text: piece,
-          className: sp.className,
-          ident: isIdent ? piece : null,
-        })
-      }
-    }
-
-    partMap.set(line.key, parts)
+    partMap.set(line.key, buildLineTokenParts(spans, index, line.inlineChanges))
   })
 
   return partMap
 })
+
+function inlineChangeClass(pt: DiffTokenPart, lineType: DiffLine['type']): string {
+  if (!pt.changed) return ''
+  const classes = [lineType === 'add' ? 'bg-diff-add-word' : 'bg-diff-del-word']
+  if (pt.changeStart) classes.push('rounded-l-[3px]')
+  if (pt.changeEnd) classes.push('rounded-r-[3px]')
+  return classes.join(' ')
+}
 
 const fileThreads = computed<ReviewThread[]>(() =>
   (review.pr?.threads ?? []).filter((t) => t.path === props.step.file.path),
@@ -630,10 +618,17 @@ function statusBadgeClass(status: string): string {
                   :key="pIdx"
                 ><span
                   v-if="pt.ident"
-                  :class="[pt.className, 'cursor-help hover:underline hover:decoration-terra hover:decoration-dotted']"
+                  :class="[
+                    pt.className,
+                    inlineChangeClass(pt, line.type),
+                    'cursor-help hover:underline hover:decoration-terra hover:decoration-dotted',
+                  ]"
                   @mouseenter="handleIdentMouseEnter($event, pt.ident, seg.lines, lIdx, line)"
                   @mouseleave="handleIdentMouseLeave"
-                >{{ pt.text }}</span><span v-else :class="pt.className">{{ pt.text }}</span></template></pre>
+                >{{ pt.text }}</span><span
+                  v-else
+                  :class="[pt.className, inlineChangeClass(pt, line.type)]"
+                >{{ pt.text }}</span></template></pre>
               </div>
 
               <!-- Existing GitHub Review Threads -->
