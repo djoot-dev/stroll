@@ -42,3 +42,4 @@ cargo check --manifest-path src-tauri/Cargo.toml   # Verify Rust backend compile
 
 - **Feature Branches Only:** Do all development on dedicated feature branches created from `main` (never commit directly to `main`).
 - **Pull Requests:** All changes must be merged into `main` via a Pull Request.
+- **Release Tags:** Only create and push release tags (`v*`) from `main` after the version bump PR has been merged.
