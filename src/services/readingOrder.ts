@@ -21,27 +21,27 @@ export const LAYER_META: Record<
   config: {
     label: 'Config & Schemas',
     shortLabel: 'CONFIG',
-    badgeClass: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+    badgeClass: 'bg-ochre-soft text-ochre-text border-ochre-border',
   },
   types: {
     label: 'Types & Models',
     shortLabel: 'TYPES',
-    badgeClass: 'bg-purple-500/15 text-purple-300 border-purple-500/30',
+    badgeClass: 'bg-plum-soft text-plum-text border-plum-border',
   },
   core: {
     label: 'Core Logic',
     shortLabel: 'CORE',
-    badgeClass: 'bg-blue-500/15 text-blue-300 border-blue-500/30',
+    badgeClass: 'bg-terra-soft text-terra-text border-terra-border',
   },
   ui: {
     label: 'UI & Entry Points',
     shortLabel: 'UI',
-    badgeClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+    badgeClass: 'bg-pine-soft text-pine-text border-pine-border',
   },
   tests: {
     label: 'Tests',
     shortLabel: 'TEST',
-    badgeClass: 'bg-slate-500/20 text-slate-300 border-slate-500/30',
+    badgeClass: 'bg-sage-soft text-sage-text border-sage-border',
   },
 }
 

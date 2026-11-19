@@ -206,7 +206,7 @@ onBeforeUnmount(() => {
     <ReviewSubmittedView v-else-if="review.screen === 'submitted'" key="submitted" />
 
     <!-- 3. Guided PR Review Screen -->
-    <div v-else key="review" class="flex h-screen flex-col overflow-hidden bg-canvas text-slate-100">
+    <div v-else key="review" class="flex h-screen flex-col overflow-hidden bg-canvas text-ink">
       <TopBar />
 
       <div class="flex min-h-0 flex-1 overflow-hidden">
@@ -228,7 +228,7 @@ onBeforeUnmount(() => {
               class="mx-auto mb-10 flex max-w-6xl items-center justify-between border-t border-border-muted px-5 pt-4"
             >
               <button
-                class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-canvas-subtle px-3.5 py-2 text-xs font-medium text-slate-300 transition-all hover:bg-canvas-elevated active:scale-[0.98] disabled:opacity-40"
+                class="stroll-card inline-flex items-center gap-1.5 rounded-xl border border-border bg-canvas-subtle px-4 py-2 text-xs font-medium text-ink-secondary transition-all hover:bg-canvas-elevated active:scale-[0.98] disabled:opacity-40"
                 :disabled="review.currentStepIndex === 0"
                 @click="review.prevStep()"
               >
@@ -238,7 +238,7 @@ onBeforeUnmount(() => {
 
               <button
                 v-if="review.currentStepIndex < review.tourSteps.length - 1"
-                class="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition-all hover:bg-blue-500 active:scale-[0.98]"
+                class="inline-flex items-center gap-1.5 rounded-xl bg-terra px-4 py-2 text-xs font-semibold text-white shadow-xs transition-all hover:bg-terra-hover active:scale-[0.98]"
                 @click="review.nextStep()"
               >
                 <span>Next Step</span>
@@ -247,7 +247,7 @@ onBeforeUnmount(() => {
 
               <button
                 v-else
-                class="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white transition-all hover:bg-emerald-500 active:scale-[0.98]"
+                class="inline-flex items-center gap-1.5 rounded-xl bg-pine px-4 py-2 text-xs font-semibold text-white shadow-xs transition-all hover:bg-pine-hover active:scale-[0.98]"
                 @click="review.showFinishModal = true"
               >
                 <span>Complete Tour & Finish Review</span>
@@ -260,10 +260,10 @@ onBeforeUnmount(() => {
             v-else
             class="flex h-full flex-col items-center justify-center gap-3 p-8 text-center"
           >
-            <FolderGit2 class="h-10 w-10 text-slate-600" />
-            <p class="text-sm font-medium text-slate-300">No Pull Request loaded</p>
+            <FolderGit2 class="h-10 w-10 text-ink-faint" />
+            <p class="text-sm font-medium text-ink-secondary">No Pull Request loaded</p>
             <button
-              class="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition-all hover:bg-blue-500 active:scale-[0.98]"
+              class="rounded-xl bg-terra px-4 py-2 text-xs font-semibold text-white shadow-xs transition-all hover:bg-terra-hover active:scale-[0.98]"
               @click="review.backToInbox()"
             >
               Back to PR Inbox

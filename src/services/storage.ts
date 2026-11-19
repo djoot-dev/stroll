@@ -72,7 +72,10 @@ export async function saveDraftComments(prKey: string, drafts: DraftComment[]): 
   await setItem('draft_comments', all)
 }
 
+export type ThemeMode = 'light' | 'dark' | 'system'
+
 export interface PersistedAppSettings {
+  theme: ThemeMode
   autoAdvanceOnReview: boolean
   sidebarDefaultOpen: boolean
   codeFontSize: number

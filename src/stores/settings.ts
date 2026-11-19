@@ -1,13 +1,16 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import {
   loadAppSettings,
   loadTourDirection,
   saveAppSettings,
   saveTourDirection,
   type PersistedAppSettings,
+  type ThemeMode,
 } from '@/services/storage'
 import type { TourDirection } from '@/types/pr'
+
+export type { ThemeMode }
 
 export type SettingsSection =
   | 'general'
@@ -23,6 +26,7 @@ export interface AppSettings extends PersistedAppSettings {
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
+  theme: 'light',
   defaultTourDirection: 'bottom-up',
   autoAdvanceOnReview: false,
   sidebarDefaultOpen: true,
@@ -32,11 +36,18 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   inboxAutoRefreshSeconds: 60,
 }
 
+function getSystemPrefersDark(): boolean {
+  if (typeof window === 'undefined' || !window.matchMedia) return false
+  return window.matchMedia('(prefers-color-scheme: dark)').matches
+}
+
 export const useSettingsStore = defineStore('settings', () => {
   const isOpen = ref(false)
   const activeSection = ref<SettingsSection>('general')
   const initialized = ref(false)
 
+  const theme = ref<ThemeMode>(DEFAULT_APP_SETTINGS.theme)
+  const systemPrefersDark = ref<boolean>(getSystemPrefersDark())
   const defaultTourDirection = ref<TourDirection>(DEFAULT_APP_SETTINGS.defaultTourDirection)
   const autoAdvanceOnReview = ref<boolean>(DEFAULT_APP_SETTINGS.autoAdvanceOnReview)
   const sidebarDefaultOpen = ref<boolean>(DEFAULT_APP_SETTINGS.sidebarDefaultOpen)
@@ -45,13 +56,45 @@ export const useSettingsStore = defineStore('settings', () => {
   const showShortcutsBar = ref<boolean>(DEFAULT_APP_SETTINGS.showShortcutsBar)
   const inboxAutoRefreshSeconds = ref<number>(DEFAULT_APP_SETTINGS.inboxAutoRefreshSeconds)
 
+  const resolvedTheme = computed<'light' | 'dark'>(() => {
+    if (theme.value === 'system') {
+      return systemPrefersDark.value ? 'dark' : 'light'
+    }
+    return theme.value
+  })
+
+  function applyThemeToDom(): void {
+    if (typeof document === 'undefined') return
+    document.documentElement.classList.toggle('dark', resolvedTheme.value === 'dark')
+  }
+
+  let mediaQueryBound = false
+  function bindSystemThemeListener(): void {
+    if (mediaQueryBound || typeof window === 'undefined' || !window.matchMedia) return
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    systemPrefersDark.value = mq.matches
+    mq.addEventListener?.('change', (e) => {
+      systemPrefersDark.value = e.matches
+      applyThemeToDom()
+    })
+    mediaQueryBound = true
+  }
+
   async function init(): Promise<void> {
     if (initialized.value) return
+    bindSystemThemeListener()
     const [savedDirection, savedSettings] = await Promise.all([
       loadTourDirection(),
       loadAppSettings(),
     ])
     defaultTourDirection.value = savedDirection
+    if (
+      savedSettings.theme === 'light' ||
+      savedSettings.theme === 'dark' ||
+      savedSettings.theme === 'system'
+    ) {
+      theme.value = savedSettings.theme
+    }
     if (typeof savedSettings.autoAdvanceOnReview === 'boolean') {
       autoAdvanceOnReview.value = savedSettings.autoAdvanceOnReview
     }
@@ -70,6 +113,7 @@ export const useSettingsStore = defineStore('settings', () => {
     if (typeof savedSettings.inboxAutoRefreshSeconds === 'number') {
       inboxAutoRefreshSeconds.value = savedSettings.inboxAutoRefreshSeconds
     }
+    applyThemeToDom()
     initialized.value = true
   }
 
@@ -77,6 +121,7 @@ export const useSettingsStore = defineStore('settings', () => {
     await Promise.all([
       saveTourDirection(defaultTourDirection.value),
       saveAppSettings({
+        theme: theme.value,
         autoAdvanceOnReview: autoAdvanceOnReview.value,
         sidebarDefaultOpen: sidebarDefaultOpen.value,
         codeFontSize: codeFontSize.value,
@@ -94,6 +139,17 @@ export const useSettingsStore = defineStore('settings', () => {
 
   function closeSettings(): void {
     isOpen.value = false
+  }
+
+  async function setTheme(mode: ThemeMode): Promise<void> {
+    theme.value = mode
+    applyThemeToDom()
+    await persist()
+  }
+
+  async function toggleTheme(): Promise<void> {
+    const next: ThemeMode = resolvedTheme.value === 'dark' ? 'light' : 'dark'
+    await setTheme(next)
   }
 
   async function setDefaultTourDirection(direction: TourDirection): Promise<void> {
@@ -132,6 +188,7 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   async function resetToDefaults(): Promise<void> {
+    theme.value = DEFAULT_APP_SETTINGS.theme
     defaultTourDirection.value = DEFAULT_APP_SETTINGS.defaultTourDirection
     autoAdvanceOnReview.value = DEFAULT_APP_SETTINGS.autoAdvanceOnReview
     sidebarDefaultOpen.value = DEFAULT_APP_SETTINGS.sidebarDefaultOpen
@@ -139,12 +196,15 @@ export const useSettingsStore = defineStore('settings', () => {
     requireAltForHover.value = DEFAULT_APP_SETTINGS.requireAltForHover
     showShortcutsBar.value = DEFAULT_APP_SETTINGS.showShortcutsBar
     inboxAutoRefreshSeconds.value = DEFAULT_APP_SETTINGS.inboxAutoRefreshSeconds
+    applyThemeToDom()
     await persist()
   }
 
   return {
     isOpen,
     activeSection,
+    theme,
+    resolvedTheme,
     defaultTourDirection,
     autoAdvanceOnReview,
     sidebarDefaultOpen,
@@ -155,6 +215,8 @@ export const useSettingsStore = defineStore('settings', () => {
     init,
     openSettings,
     closeSettings,
+    setTheme,
+    toggleTheme,
     setDefaultTourDirection,
     setAutoAdvanceOnReview,
     setSidebarDefaultOpen,
