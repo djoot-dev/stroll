@@ -28,6 +28,8 @@ describe('useSettingsStore', () => {
     const store = useSettingsStore()
     await store.init()
 
+    expect(store.theme).toBe('light')
+    expect(store.resolvedTheme).toBe('light')
     expect(store.defaultTourDirection).toBe(DEFAULT_APP_SETTINGS.defaultTourDirection)
     expect(store.autoAdvanceOnReview).toBe(false)
     expect(store.sidebarDefaultOpen).toBe(true)
@@ -41,6 +43,7 @@ describe('useSettingsStore', () => {
     const store = useSettingsStore()
     await store.init()
 
+    await store.setTheme('dark')
     await store.setDefaultTourDirection('top-down')
     await store.setAutoAdvanceOnReview(true)
     await store.setSidebarDefaultOpen(false)
@@ -53,6 +56,8 @@ describe('useSettingsStore', () => {
     const reloaded = useSettingsStore()
     await reloaded.init()
 
+    expect(reloaded.theme).toBe('dark')
+    expect(reloaded.resolvedTheme).toBe('dark')
     expect(reloaded.defaultTourDirection).toBe('top-down')
     expect(reloaded.autoAdvanceOnReview).toBe(true)
     expect(reloaded.sidebarDefaultOpen).toBe(false)
@@ -70,10 +75,13 @@ describe('useSettingsStore', () => {
     expect(store.isOpen).toBe(true)
     expect(store.activeSection).toBe('github')
 
+    await store.toggleTheme()
+    expect(store.theme).toBe('dark')
     await store.setCodeFontSize(11.5)
     await store.setAutoAdvanceOnReview(true)
     await store.resetToDefaults()
 
+    expect(store.theme).toBe(DEFAULT_APP_SETTINGS.theme)
     expect(store.codeFontSize).toBe(DEFAULT_APP_SETTINGS.codeFontSize)
     expect(store.autoAdvanceOnReview).toBe(DEFAULT_APP_SETTINGS.autoAdvanceOnReview)
 

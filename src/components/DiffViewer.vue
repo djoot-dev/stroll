@@ -158,12 +158,9 @@ const selectedRange = computed<{
 function selectionRowClass(key: string): string {
   const { keys, startKey, endKey } = selectedRange.value
   if (!keys.has(key)) return ''
-  const classes = [
-    'bg-blue-500/15',
-    'shadow-[inset_2px_0_0_#60a5fa,inset_-1px_0_0_rgba(96,165,250,0.45)]',
-  ]
-  if (key === startKey) classes.push('border-t border-t-blue-400/50')
-  if (key === endKey) classes.push('border-b border-b-blue-400/50')
+  const classes = ['stroll-diff-selected']
+  if (key === startKey) classes.push('border-t border-t-terra-border')
+  if (key === endKey) classes.push('border-b border-b-terra-border')
   return classes.join(' ')
 }
 
@@ -389,13 +386,13 @@ async function handleCreateDraft(body: string) {
 function statusBadgeClass(status: string): string {
   switch (status) {
     case 'added':
-      return 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300'
+      return 'border-pine-border bg-pine-soft text-pine-text'
     case 'deleted':
-      return 'border-rose-500/30 bg-rose-500/15 text-rose-300'
+      return 'border-crimson-border bg-crimson-soft text-crimson-text'
     case 'renamed':
-      return 'border-amber-500/30 bg-amber-500/15 text-amber-300'
+      return 'border-ochre-border bg-ochre-soft text-ochre-text'
     default:
-      return 'border-blue-500/30 bg-blue-500/15 text-blue-300'
+      return 'border-terra-border bg-terra-soft text-terra-text'
   }
 }
 </script>
@@ -403,45 +400,45 @@ function statusBadgeClass(status: string): string {
 <template>
   <div class="mx-auto max-w-6xl space-y-4 p-5 pb-16">
     <!-- Step Header -->
-    <div class="rounded-lg border border-border bg-canvas-subtle p-4">
+    <div class="stroll-card rounded-2xl border border-border bg-canvas-subtle p-4">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0 space-y-1">
           <div class="flex flex-wrap items-center gap-2">
             <span
-              class="rounded border px-1.5 py-0.5 font-mono text-[10px] font-semibold"
+              class="rounded-md border px-1.5 py-0.5 font-mono text-[10px] font-semibold"
               :class="LAYER_META[step.layer].badgeClass"
             >
               {{ LAYER_META[step.layer].shortLabel }}
             </span>
             <span
-              class="rounded border px-1.5 py-0.5 font-mono text-[10px] uppercase"
+              class="rounded-md border px-1.5 py-0.5 font-mono text-[10px] uppercase"
               :class="statusBadgeClass(step.file.status)"
             >
               {{ step.file.status }}
             </span>
-            <h1 class="truncate font-mono text-sm font-semibold text-slate-100">
+            <h1 class="truncate font-mono text-sm font-semibold text-ink">
               {{ step.file.path }}
             </h1>
           </div>
 
-          <p class="text-xs text-slate-400">
+          <p class="text-xs text-ink-muted">
             {{ step.reason }}
           </p>
         </div>
 
         <div class="flex items-center gap-3">
           <div class="font-mono text-xs">
-            <span class="text-emerald-400">+{{ step.file.additions }}</span>
-            <span class="mx-1 text-slate-600">/</span>
-            <span class="text-rose-400">-{{ step.file.deletions }}</span>
+            <span class="text-pine-text">+{{ step.file.additions }}</span>
+            <span class="mx-1 text-ink-faint">/</span>
+            <span class="text-crimson-text">-{{ step.file.deletions }}</span>
           </div>
 
           <button
-            class="inline-flex items-center gap-1.5 rounded border px-2.5 py-1 text-xs font-medium transition-colors"
+            class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors"
             :class="
               review.isStepReviewed(step.file.path)
-                ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
-                : 'border-border bg-canvas text-slate-300 hover:bg-canvas-elevated'
+                ? 'border-pine-border bg-pine-soft text-pine-text'
+                : 'border-border bg-canvas text-ink-secondary hover:bg-canvas-elevated'
             "
             @click="review.toggleReviewed(step.file.path)"
           >
@@ -463,33 +460,37 @@ function statusBadgeClass(status: string): string {
     </div>
 
     <!-- Isolated Diff Surface -->
-    <div class="overflow-hidden rounded-lg border border-border bg-canvas-inset">
+    <div class="stroll-card overflow-hidden rounded-2xl border border-border bg-code">
       <!-- Sticky Diff Context Toolbar (Enclosing Scope Breadcrumb + Hover Guardrail Toggle) -->
       <div
-        class="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b border-border bg-canvas-subtle/95 px-3 py-1.5 text-[11px] text-slate-400 backdrop-blur-sm"
+        class="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b border-border bg-canvas-subtle/95 px-3.5 py-1.5 text-[11px] text-ink-muted backdrop-blur-sm"
       >
         <div class="flex min-w-0 items-center gap-2">
-          <span class="shrink-0 text-slate-500">Click or drag lines to comment</span>
+          <span class="shrink-0 text-ink-faint">Click or drag lines to comment</span>
           <template v-if="activeScopes.length > 0">
-            <span class="text-slate-600">·</span>
-            <div class="flex min-w-0 items-center gap-1 font-mono text-[11px] text-blue-300">
+            <span class="text-ink-faint">·</span>
+            <div class="flex min-w-0 items-center gap-1 font-mono text-[11px] text-terra-text">
               <template v-for="(sc, idx) in activeScopes" :key="sc">
-                <ChevronRight v-if="idx > 0" class="h-3 w-3 shrink-0 text-slate-600" />
+                <ChevronRight v-if="idx > 0" class="h-3 w-3 shrink-0 text-ink-faint" />
                 <span class="truncate">{{ sc }}</span>
               </template>
             </div>
           </template>
           <span
             v-if="activeReplacedCount > 0"
-            class="shrink-0 rounded border border-rose-500/30 bg-rose-500/10 px-1.5 py-0.2 font-mono text-[10px] text-rose-300"
+            class="shrink-0 rounded border border-crimson-border bg-crimson-soft px-1.5 py-0.2 font-mono text-[10px] text-crimson-text"
           >
             Replaces -{{ activeReplacedCount }}
           </span>
         </div>
 
         <button
-          class="inline-flex shrink-0 items-center gap-1 rounded border border-border bg-canvas px-2 py-0.5 text-[10.5px] text-slate-300 hover:bg-canvas-elevated"
-          :class="{ 'border-blue-500/40 text-blue-300': !settings.requireAltForHover }"
+          class="inline-flex shrink-0 items-center gap-1 rounded-lg border px-2 py-0.5 text-[10.5px] transition-colors"
+          :class="
+            !settings.requireAltForHover
+              ? 'border-terra-border bg-terra-soft text-terra-text'
+              : 'border-border bg-canvas text-ink-secondary hover:bg-canvas-elevated'
+          "
           title="Toggle whether symbol hover popovers open automatically (250ms delay) or only when holding Option/Alt"
           @click="settings.setRequireAltForHover(!settings.requireAltForHover)"
         >
@@ -498,7 +499,7 @@ function statusBadgeClass(status: string): string {
         </button>
       </div>
 
-      <div v-if="segments.length === 0" class="p-8 text-center text-xs text-slate-500">
+      <div v-if="segments.length === 0" class="p-8 text-center text-xs text-ink-muted">
         No textual diff available for this file (binary or empty change).
       </div>
 
@@ -513,7 +514,7 @@ function statusBadgeClass(status: string): string {
           <template v-if="seg.kind === 'gap'">
             <button
               v-if="!expandedGaps.has(seg.id)"
-              class="flex w-full items-center gap-2 border-y border-border-muted bg-canvas-subtle/70 px-4 py-1 text-left font-sans text-[11px] text-slate-400 hover:bg-blue-500/10 hover:text-blue-300"
+              class="flex w-full items-center gap-2 border-y border-border-muted bg-canvas-subtle/80 px-4 py-1 text-left font-sans text-[11px] text-ink-muted transition-colors hover:bg-terra-soft hover:text-terra-text"
               @click="toggleGap(seg.id)"
             >
               <ChevronsUpDown class="h-3.5 w-3.5 shrink-0" />
@@ -525,10 +526,10 @@ function statusBadgeClass(status: string): string {
 
             <template v-else>
               <div
-                class="flex items-center justify-between border-y border-border-muted bg-canvas-subtle/50 px-4 py-0.5 font-sans text-[10px] text-slate-500"
+                class="flex items-center justify-between border-y border-border-muted bg-canvas-subtle/60 px-4 py-0.5 font-sans text-[10px] text-ink-faint"
               >
                 <span>Expanded unchanged context ({{ seg.lineCount }} lines)</span>
-                <button class="hover:text-slate-300" @click="toggleGap(seg.id)">Collapse</button>
+                <button class="hover:text-ink" @click="toggleGap(seg.id)">Collapse</button>
               </div>
               <template v-for="(line, lIdx) in seg.lines" :key="line.key">
                 <div
@@ -536,26 +537,26 @@ function statusBadgeClass(status: string): string {
                   :class="
                     selectedRange.keys.has(line.key)
                       ? selectionRowClass(line.key)
-                      : 'hover:bg-slate-800/40'
+                      : 'hover:bg-diff-hover'
                   "
                   @mousedown.left="startLineDrag(line)"
                   @mouseenter="handleLineMouseEnter(line, seg.lines, lIdx)"
                 >
-                  <span class="w-12 shrink-0 select-none px-2 text-right text-[11px] text-slate-600">
+                  <span class="w-12 shrink-0 select-none px-2 text-right text-[11px] text-ink-faint">
                     {{ line.oldLineNumber ?? '' }}
                   </span>
-                  <span class="w-12 shrink-0 select-none border-r border-border-muted px-2 text-right text-[11px] text-slate-600">
+                  <span class="w-12 shrink-0 select-none border-r border-border-muted px-2 text-right text-[11px] text-ink-faint">
                     {{ line.newLineNumber ?? '' }}
                   </span>
-                  <span class="w-6 shrink-0 select-none text-center text-slate-600">
-                    <MessageSquarePlus class="mx-auto mt-1 hidden h-3 w-3 text-blue-400 group-hover:block" />
+                  <span class="w-6 shrink-0 select-none text-center text-ink-faint">
+                    <MessageSquarePlus class="mx-auto mt-1 hidden h-3 w-3 text-terra group-hover:block" />
                   </span>
-                  <pre class="flex-1 whitespace-pre pr-4 text-slate-300"><template
+                  <pre class="flex-1 whitespace-pre pr-4 text-ink-secondary"><template
                     v-for="(pt, pIdx) in tokenizedByKey.get(line.key)"
                     :key="pIdx"
                   ><span
                     v-if="pt.ident"
-                    :class="[pt.className, 'cursor-help hover:underline hover:decoration-blue-400/70 hover:decoration-dotted']"
+                    :class="[pt.className, 'cursor-help hover:underline hover:decoration-terra hover:decoration-dotted']"
                     @mouseenter="handleIdentMouseEnter($event, pt.ident, seg.lines, lIdx, line)"
                     @mouseleave="handleIdentMouseLeave"
                   >{{ pt.text }}</span><span v-else :class="pt.className">{{ pt.text }}</span></template></pre>
@@ -585,7 +586,7 @@ function statusBadgeClass(status: string): string {
           <!-- Diff Hunk Block -->
           <template v-else>
             <div
-              class="border-y border-border-muted bg-blue-950/20 px-4 py-1 text-[11px] text-blue-300/80"
+              class="border-y border-border-muted bg-sage-soft px-4 py-1 text-[11px] font-medium text-sage-text"
             >
               {{ seg.header }}
             </div>
@@ -597,39 +598,39 @@ function statusBadgeClass(status: string): string {
                   selectedRange.keys.has(line.key)
                     ? selectionRowClass(line.key)
                     : {
-                        'bg-emerald-500/10 hover:bg-emerald-500/15': line.type === 'add',
-                        'bg-rose-500/10 hover:bg-rose-500/15': line.type === 'del',
-                        'hover:bg-slate-800/40': line.type === 'context',
+                        'bg-diff-add hover:bg-diff-add-hover': line.type === 'add',
+                        'bg-diff-del hover:bg-diff-del-hover': line.type === 'del',
+                        'hover:bg-diff-hover': line.type === 'context',
                       }
                 "
                 @mousedown.left="startLineDrag(line)"
                 @mouseenter="handleLineMouseEnter(line, seg.lines, lIdx)"
               >
-                <span class="w-12 shrink-0 select-none px-2 text-right text-[11px] text-slate-500">
+                <span class="w-12 shrink-0 select-none px-2 text-right text-[11px] text-ink-faint">
                   {{ line.oldLineNumber ?? '' }}
                 </span>
-                <span class="w-12 shrink-0 select-none border-r border-border-muted px-2 text-right text-[11px] text-slate-500">
+                <span class="w-12 shrink-0 select-none border-r border-border-muted px-2 text-right text-[11px] text-ink-faint">
                   {{ line.newLineNumber ?? '' }}
                 </span>
                 <span
                   class="w-6 shrink-0 select-none text-center font-bold"
                   :class="{
-                    'text-emerald-400': line.type === 'add',
-                    'text-rose-400': line.type === 'del',
-                    'text-slate-600': line.type === 'context',
+                    'text-pine-text': line.type === 'add',
+                    'text-crimson-text': line.type === 'del',
+                    'text-ink-faint': line.type === 'context',
                   }"
                 >
                   <span class="group-hover:hidden">
                     {{ line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' ' }}
                   </span>
-                  <MessageSquarePlus class="mx-auto mt-1 hidden h-3 w-3 text-blue-400 group-hover:block" />
+                  <MessageSquarePlus class="mx-auto mt-1 hidden h-3 w-3 text-terra group-hover:block" />
                 </span>
-                <pre class="flex-1 whitespace-pre pr-4 text-slate-200"><template
+                <pre class="flex-1 whitespace-pre pr-4 text-ink"><template
                   v-for="(pt, pIdx) in tokenizedByKey.get(line.key)"
                   :key="pIdx"
                 ><span
                   v-if="pt.ident"
-                  :class="[pt.className, 'cursor-help hover:underline hover:decoration-blue-400/70 hover:decoration-dotted']"
+                  :class="[pt.className, 'cursor-help hover:underline hover:decoration-terra hover:decoration-dotted']"
                   @mouseenter="handleIdentMouseEnter($event, pt.ident, seg.lines, lIdx, line)"
                   @mouseleave="handleIdentMouseLeave"
                 >{{ pt.text }}</span><span v-else :class="pt.className">{{ pt.text }}</span></template></pre>
@@ -646,10 +647,10 @@ function statusBadgeClass(status: string): string {
               <div
                 v-for="draft in draftsForLine(line)"
                 :key="draft.id"
-                class="animate-pop-in my-1.5 mx-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 font-sans"
+                class="animate-pop-in my-1.5 mx-3 rounded-xl border border-ochre-border bg-ochre-soft p-3 font-sans"
               >
                 <div class="flex items-center justify-between text-[11px]">
-                  <span class="font-semibold text-amber-300">
+                  <span class="font-semibold text-ochre-text">
                     Pending Draft ({{
                       draft.startLine && draft.startLine !== draft.line
                         ? `Lines ${draft.startLine}–${draft.line}`
@@ -657,7 +658,7 @@ function statusBadgeClass(status: string): string {
                     }})
                   </span>
                   <button
-                    class="inline-flex items-center gap-1 text-slate-400 hover:text-rose-400"
+                    class="inline-flex items-center gap-1 text-ink-muted hover:text-crimson-text"
                     title="Delete draft"
                     @click.stop="review.deleteDraftComment(draft.id)"
                   >
@@ -665,7 +666,7 @@ function statusBadgeClass(status: string): string {
                     <span>Discard</span>
                   </button>
                 </div>
-                <p class="mt-1 whitespace-pre-wrap text-xs text-slate-200">{{ draft.body }}</p>
+                <p class="mt-1 whitespace-pre-wrap text-xs text-ink">{{ draft.body }}</p>
               </div>
 
               <!-- Inline Comment Composer -->

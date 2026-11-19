@@ -81,7 +81,7 @@ const hasBeforeAfter = computed(
 <template>
   <Teleport to="body">
     <div
-      class="animate-pop-in fixed z-50 overflow-hidden rounded-xl border border-border bg-canvas-subtle shadow-2xl shadow-black/60"
+      class="animate-pop-in stroll-elevated fixed z-50 overflow-hidden rounded-2xl border border-border bg-canvas-subtle"
       :style="popoverStyle"
       @mouseenter="emit('mouseenter')"
       @mouseleave="emit('mouseleave')"
@@ -90,25 +90,25 @@ const hasBeforeAfter = computed(
       <!-- Header -->
       <div
         v-if="info"
-        class="flex items-center justify-between gap-2 border-b border-border bg-canvas-elevated px-3 py-2"
+        class="flex items-center justify-between gap-2 border-b border-border bg-canvas-elevated/60 px-3 py-2"
       >
         <div class="flex min-w-0 items-center gap-1.5">
-          <FileCode2 class="h-3.5 w-3.5 shrink-0 text-blue-400" />
-          <span class="rounded bg-blue-500/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-blue-300">
+          <FileCode2 class="h-3.5 w-3.5 shrink-0 text-terra" />
+          <span class="rounded-md bg-terra-soft px-1.5 py-0.5 font-mono text-[10px] font-semibold text-terra-text">
             {{ info.declaration.kind }}
           </span>
-          <span class="truncate font-mono text-xs font-semibold text-slate-100">
+          <span class="truncate font-mono text-xs font-semibold text-ink">
             {{ info.declaration.name }}
           </span>
           <span
             v-if="info.declaration.isModifiedInPR"
-            class="shrink-0 rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-300"
+            class="shrink-0 rounded-md border border-ochre-border bg-ochre-soft px-1.5 py-0.5 text-[10px] font-medium text-ochre-text"
           >
             Modified in PR
           </span>
           <span
             v-else-if="info.declaration.source === 'repo'"
-            class="shrink-0 rounded border border-purple-500/30 bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-medium text-purple-300"
+            class="shrink-0 rounded-md border border-plum-border bg-plum-soft px-1.5 py-0.5 text-[10px] font-medium text-plum-text"
           >
             Repo Definition (Unchanged)
           </span>
@@ -117,8 +117,12 @@ const hasBeforeAfter = computed(
         <div class="flex shrink-0 items-center gap-1">
           <button
             v-if="hasBeforeAfter"
-            class="inline-flex items-center gap-1 rounded border border-border bg-canvas px-1.5 py-0.5 text-[10px] text-slate-300 hover:bg-canvas-elevated"
-            :class="{ 'border-amber-500/50 text-amber-300': showBefore }"
+            class="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] transition-colors"
+            :class="
+              showBefore
+                ? 'border-ochre-border bg-ochre-soft text-ochre-text'
+                : 'border-border bg-canvas-subtle text-ink-secondary hover:bg-canvas-elevated'
+            "
             title="Toggle Before / After PR definition"
             @click="showBefore = !showBefore"
           >
@@ -128,7 +132,7 @@ const hasBeforeAfter = computed(
 
           <button
             v-if="!info.isSameFile && info.declaration.source !== 'repo'"
-            class="inline-flex items-center gap-0.5 rounded border border-border bg-canvas px-1.5 py-0.5 text-[10px] text-blue-300 hover:bg-blue-500/15"
+            class="inline-flex items-center gap-0.5 rounded-md border border-terra-border bg-terra-soft px-1.5 py-0.5 text-[10px] font-medium text-terra-text transition-colors hover:bg-terra hover:text-white"
             title="Jump to definition step"
             @click="emit('jumpToFile', info.declaration.path)"
           >
@@ -137,7 +141,7 @@ const hasBeforeAfter = computed(
           </button>
 
           <button
-            class="rounded p-0.5 text-slate-400 hover:bg-canvas hover:text-slate-100"
+            class="rounded-md p-0.5 text-ink-muted hover:bg-canvas-elevated hover:text-ink"
             title="Close (Esc)"
             @click="emit('close')"
           >
@@ -149,7 +153,7 @@ const hasBeforeAfter = computed(
       <!-- Location -->
       <div
         v-if="info"
-        class="border-b border-border-muted bg-canvas px-3 py-1 font-mono text-[10px] text-slate-400"
+        class="border-b border-border-muted bg-canvas px-3 py-1 font-mono text-[10px] text-ink-muted"
       >
         {{ info.declaration.path }}:{{ info.declaration.line }}
       </div>
@@ -157,20 +161,20 @@ const hasBeforeAfter = computed(
       <!-- Leading Doc Comment -->
       <div
         v-if="info?.declaration.docComment"
-        class="border-b border-border-muted bg-canvas-subtle/60 px-3 py-1.5 font-mono text-[11px] text-slate-400 whitespace-pre-wrap"
+        class="border-b border-border-muted bg-canvas-subtle/60 px-3 py-1.5 font-mono text-[11px] text-ink-muted whitespace-pre-wrap"
       >
         {{ info.declaration.docComment }}
       </div>
 
-      <!-- CodeMirror Highlighted Definition Snippet -->
+      <!-- Highlighted Definition Snippet -->
       <div
         v-if="info"
-        class="max-h-48 overflow-auto bg-canvas-inset px-3 py-2 font-mono text-[11.5px] leading-relaxed"
+        class="max-h-48 overflow-auto bg-code px-3 py-2 font-mono text-[11.5px] leading-relaxed"
       >
         <div
           v-for="(spans, lIdx) in highlightedSnippet"
           :key="lIdx"
-          class="whitespace-pre text-slate-200"
+          class="whitespace-pre text-ink"
         >
           <span v-for="(sp, sIdx) in spans" :key="sIdx" :class="sp.className">{{ sp.text }}</span>
         </div>
@@ -181,19 +185,19 @@ const hasBeforeAfter = computed(
         v-if="info && info.usages.length > 0"
         class="border-t border-border-muted bg-canvas-subtle px-3 py-2"
       >
-        <div class="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-          <Layers class="h-3 w-3 text-purple-400" />
+        <div class="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
+          <Layers class="h-3 w-3 text-plum-text" />
           <span>Used in {{ info.usages.length }} PR location{{ info.usages.length === 1 ? '' : 's' }}</span>
         </div>
         <div class="max-h-24 space-y-1 overflow-y-auto">
           <button
             v-for="(u, uIdx) in info.usages"
             :key="`${u.path}:${u.line}:${uIdx}`"
-            class="flex w-full items-center justify-between gap-2 rounded px-1.5 py-0.5 text-left font-mono text-[10.5px] text-slate-300 hover:bg-canvas-elevated"
+            class="flex w-full items-center justify-between gap-2 rounded-md px-1.5 py-0.5 text-left font-mono text-[10.5px] text-ink-secondary hover:bg-canvas-elevated"
             @click="emit('jumpToFile', u.path)"
           >
-            <span class="shrink-0 text-blue-400">{{ u.path.split('/').pop() }}:{{ u.line }}</span>
-            <span class="truncate text-slate-500">{{ u.preview }}</span>
+            <span class="shrink-0 text-terra-text">{{ u.path.split('/').pop() }}:{{ u.line }}</span>
+            <span class="truncate text-ink-faint">{{ u.preview }}</span>
           </button>
         </div>
       </div>
@@ -205,17 +209,17 @@ const hasBeforeAfter = computed(
       >
         <div class="flex items-center justify-between gap-2 text-[10.5px]">
           <div class="flex min-w-0 items-center gap-1.5">
-            <GitCommitHorizontal class="h-3.5 w-3.5 shrink-0 text-emerald-400" />
-            <span class="rounded bg-emerald-500/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-emerald-300">
+            <GitCommitHorizontal class="h-3.5 w-3.5 shrink-0 text-pine" />
+            <span class="rounded bg-pine-soft px-1.5 py-0.5 font-mono text-[10px] font-semibold text-pine-text">
               {{ blame.shortOid }}
             </span>
-            <span class="truncate font-medium text-slate-200">{{ blame.authorName }}</span>
+            <span class="truncate font-medium text-ink">{{ blame.authorName }}</span>
           </div>
           <div class="flex shrink-0 items-center gap-1.5">
-            <span class="text-[10px] text-slate-500">{{ formatBlameDate(blame.timestamp) }}</span>
+            <span class="text-[10px] text-ink-faint">{{ formatBlameDate(blame.timestamp) }}</span>
             <button
               v-if="!info"
-              class="rounded p-0.5 text-slate-400 hover:bg-canvas-elevated hover:text-slate-100"
+              class="rounded p-0.5 text-ink-muted hover:bg-canvas-elevated hover:text-ink"
               title="Close (Esc)"
               @click="emit('close')"
             >
@@ -223,7 +227,7 @@ const hasBeforeAfter = computed(
             </button>
           </div>
         </div>
-        <p v-if="blame.summary" class="mt-1 truncate text-[11px] text-slate-400">
+        <p v-if="blame.summary" class="mt-1 truncate text-[11px] text-ink-muted">
           {{ blame.summary }}
         </p>
       </div>
@@ -231,18 +235,18 @@ const hasBeforeAfter = computed(
       <!-- Replaced '-' Lines Peek (when hovering a '+' line) -->
       <div
         v-if="replacedLines.length > 0"
-        class="border-t border-border-muted bg-rose-950/20 px-3 py-1.5"
+        class="border-t border-border-muted bg-crimson-soft px-3 py-1.5"
       >
         <button
-          class="flex w-full items-center justify-between text-[11px] font-medium text-rose-300 hover:text-rose-200"
+          class="flex w-full items-center justify-between text-[11px] font-medium text-crimson-text"
           @click="showReplaced = !showReplaced"
         >
           <span>Replaces {{ replacedLines.length }} removed line{{ replacedLines.length === 1 ? '' : 's' }}</span>
-          <span class="text-[10px] text-rose-400/80">{{ showReplaced ? 'Hide' : 'Peek' }}</span>
+          <span class="text-[10px] opacity-80">{{ showReplaced ? 'Hide' : 'Peek' }}</span>
         </button>
         <pre
           v-if="showReplaced"
-          class="mt-1.5 max-h-24 overflow-auto rounded bg-canvas-inset p-2 font-mono text-[11px] text-rose-200/90"
+          class="mt-1.5 max-h-24 overflow-auto rounded-lg bg-code p-2 font-mono text-[11px] text-crimson-text"
         >{{ replacedLines.map((l) => `- ${l}`).join('\n') }}</pre>
       </div>
     </div>

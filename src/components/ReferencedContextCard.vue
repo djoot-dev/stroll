@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { EditorState } from '@codemirror/state'
-import { oneDark } from '@codemirror/theme-one-dark'
 import { EditorView } from '@codemirror/view'
 import { ArrowUpRight, BookOpen, ChevronDown, ChevronRight } from '@lucide/vue'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { getLanguageSupport } from '@/services/highlighter'
+import {
+  getLanguageSupport,
+  strollEditorTheme,
+  strollSyntaxExtension,
+} from '@/services/highlighter'
 import type { ReferencedContext } from '@/types/pr'
 
 const props = defineProps<{
@@ -30,20 +33,8 @@ function mountCodeMirror() {
   const extensions = [
     EditorState.readOnly.of(true),
     EditorView.editable.of(false),
-    oneDark,
-    EditorView.theme({
-      '&': {
-        fontSize: '12px',
-        backgroundColor: '#090c10',
-      },
-      '.cm-scroller': {
-        fontFamily: 'JetBrains Mono, Fira Code, SF Mono, Menlo, monospace',
-        lineHeight: '1.5',
-      },
-      '.cm-content': {
-        padding: '8px 12px',
-      },
-    }),
+    strollSyntaxExtension,
+    strollEditorTheme,
   ]
   if (lang) extensions.push(lang)
 
@@ -84,27 +75,27 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="overflow-hidden rounded-lg border border-purple-500/30 bg-canvas-subtle">
-    <div class="flex items-center justify-between gap-2 px-3 py-2">
+  <div class="stroll-card overflow-hidden rounded-xl border border-sage-border bg-canvas-subtle">
+    <div class="flex items-center justify-between gap-2 bg-sage-soft/50 px-3 py-2">
       <button
-        class="flex min-w-0 flex-1 items-center gap-2 text-left text-xs text-slate-200 hover:text-white"
+        class="flex min-w-0 flex-1 items-center gap-2 text-left text-xs text-ink hover:text-pine-text"
         @click="expanded = !expanded"
       >
-        <ChevronDown v-if="expanded" class="h-3.5 w-3.5 shrink-0 text-purple-400" />
-        <ChevronRight v-else class="h-3.5 w-3.5 shrink-0 text-purple-400" />
-        <BookOpen class="h-3.5 w-3.5 shrink-0 text-purple-400" />
-        <span class="font-medium text-purple-300">Referenced PR Context:</span>
-        <span class="truncate font-mono text-slate-300">{{ context.sourcePath }}</span>
+        <ChevronDown v-if="expanded" class="h-3.5 w-3.5 shrink-0 text-pine" />
+        <ChevronRight v-else class="h-3.5 w-3.5 shrink-0 text-pine" />
+        <BookOpen class="h-3.5 w-3.5 shrink-0 text-pine" />
+        <span class="font-medium text-pine-text">Referenced PR Context:</span>
+        <span class="truncate font-mono text-ink-secondary">{{ context.sourcePath }}</span>
         <span
           v-if="context.symbolNames.length > 0"
-          class="hidden truncate font-mono text-[11px] text-slate-400 sm:inline"
+          class="hidden truncate font-mono text-[11px] text-ink-muted sm:inline"
         >
           ({{ context.symbolNames.join(', ') }})
         </span>
       </button>
 
       <button
-        class="inline-flex shrink-0 items-center gap-1 rounded border border-border bg-canvas px-2 py-0.5 text-[11px] text-slate-300 hover:bg-canvas-elevated"
+        class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border bg-canvas-subtle px-2 py-0.5 text-[11px] text-ink-secondary transition-colors hover:bg-canvas-elevated hover:text-ink"
         @click="emit('jumpToFile', context.sourcePath)"
       >
         <span>Jump to file</span>

@@ -7,9 +7,11 @@ import {
   GitPullRequest,
   KeyRound,
   Loader2,
+  Moon,
   RefreshCw,
   Settings,
   Sparkles,
+  Sun,
 } from '@lucide/vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { PR_FILTER_OPTIONS, useAuthStore } from '@/stores/auth'
@@ -93,7 +95,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="flex h-screen flex-col overflow-hidden bg-canvas text-slate-100">
+  <div class="flex h-screen flex-col overflow-hidden bg-canvas text-ink">
     <!-- Top Header -->
     <header class="shrink-0 border-b border-border bg-canvas-subtle">
       <div class="mx-auto flex h-14 max-w-5xl items-center justify-between px-6">
@@ -101,18 +103,18 @@ onBeforeUnmount(() => {
           <img
             src="/logo.svg"
             alt="Stroll"
-            class="h-7 w-7 rounded-lg shadow-sm"
+            class="h-8 w-8 rounded-lg shadow-xs"
           />
           <div>
-            <span class="text-sm font-semibold tracking-tight text-slate-100">Stroll</span>
-            <span class="ml-2 hidden text-xs text-slate-500 sm:inline">Review Inbox</span>
+            <span class="text-sm font-bold tracking-tight text-ink">Stroll</span>
+            <span class="ml-2 hidden text-xs text-ink-muted sm:inline">Review Inbox</span>
           </div>
         </div>
 
-        <div class="flex items-center gap-2.5">
+        <div class="flex items-center gap-2">
           <button
             v-if="auth.isAuthenticated"
-            class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-canvas px-3 py-1.5 text-xs text-slate-300 hover:bg-canvas-elevated disabled:opacity-50"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-canvas px-3 py-1.5 text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated disabled:opacity-50"
             :disabled="auth.isLoading"
             title="Refresh pending PRs"
             @click="handleRefresh"
@@ -122,23 +124,23 @@ onBeforeUnmount(() => {
           </button>
 
           <button
-            class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-canvas px-3 py-1.5 text-xs text-slate-300 hover:bg-canvas-elevated"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-canvas px-3 py-1.5 text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated"
             title="Link local repository checkouts for AST & git blame"
             @click="settings.openSettings('repositories')"
           >
-            <FolderGit2 class="h-3.5 w-3.5 text-purple-400" />
+            <FolderGit2 class="h-3.5 w-3.5 text-pine" />
             <span>Local Repos</span>
             <span
               v-if="Object.keys(review.repoPaths).length > 0"
-              class="rounded-full bg-purple-500/20 px-1.5 py-0.5 font-mono text-[10px] text-purple-300"
+              class="rounded-full bg-pine-soft px-1.5 py-0.5 font-mono text-[10px] font-medium text-pine-text"
             >
               {{ Object.keys(review.repoPaths).length }}
             </span>
           </button>
 
           <button
-            class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-canvas px-3 py-1.5 text-xs hover:bg-canvas-elevated"
-            :class="auth.isAuthenticated ? 'text-emerald-300' : 'text-slate-200'"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-canvas px-3 py-1.5 text-xs transition-colors hover:bg-canvas-elevated"
+            :class="auth.isAuthenticated ? 'text-pine-text' : 'text-ink-secondary'"
             @click="settings.openSettings('github')"
           >
             <KeyRound class="h-3.5 w-3.5" />
@@ -146,7 +148,16 @@ onBeforeUnmount(() => {
           </button>
 
           <button
-            class="rounded-lg border border-border bg-canvas p-1.5 text-slate-400 hover:bg-canvas-elevated hover:text-slate-100"
+            class="rounded-lg border border-border bg-canvas p-1.5 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+            :title="settings.resolvedTheme === 'dark' ? 'Switch to Warm Light theme' : 'Switch to Deep Pine Dark theme'"
+            @click="settings.toggleTheme()"
+          >
+            <Sun v-if="settings.resolvedTheme === 'dark'" class="h-4 w-4 text-terra" />
+            <Moon v-else class="h-4 w-4 text-pine" />
+          </button>
+
+          <button
+            class="rounded-lg border border-border bg-canvas p-1.5 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
             title="Settings (⌘,)"
             @click="settings.openSettings('general')"
           >
@@ -160,8 +171,8 @@ onBeforeUnmount(() => {
     <main class="flex-1 overflow-y-auto px-6 py-8">
       <div class="mx-auto max-w-5xl space-y-8">
         <!-- Quick Load by URL -->
-        <section class="rounded-xl border border-border bg-canvas-subtle p-5">
-          <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+        <section class="stroll-card rounded-2xl border border-border bg-canvas-subtle p-5">
+          <label class="block text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
             Open any Pull Request by URL
           </label>
           <div class="mt-2.5 flex gap-2.5">
@@ -169,11 +180,11 @@ onBeforeUnmount(() => {
               v-model="urlInput"
               type="url"
               placeholder="https://github.com/owner/repo/pull/123"
-              class="flex-1 rounded-lg border border-border bg-canvas-inset px-3.5 py-2 font-mono text-xs text-slate-100 placeholder-slate-600 focus:border-blue-500 focus:outline-none"
+              class="flex-1 rounded-xl border border-border bg-canvas-inset px-3.5 py-2 font-mono text-xs text-ink placeholder-ink-faint transition-colors focus:border-terra focus:outline-none"
               @keydown.enter="handleLoadUrl"
             />
             <button
-              class="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-40"
+              class="inline-flex items-center gap-1.5 rounded-xl bg-terra px-4 py-2 text-xs font-semibold text-white shadow-xs transition-all hover:bg-terra-hover active:scale-[0.98] disabled:opacity-40"
               :disabled="review.isLoadingPR || !urlInput.trim()"
               @click="handleLoadUrl"
             >
@@ -182,18 +193,18 @@ onBeforeUnmount(() => {
               <ArrowRight v-if="!review.isLoadingPR" class="h-3.5 w-3.5" />
             </button>
           </div>
-          <p v-if="review.prError" class="mt-2 text-xs text-rose-400">{{ review.prError }}</p>
+          <p v-if="review.prError" class="mt-2 text-xs text-crimson-text">{{ review.prError }}</p>
         </section>
 
         <!-- Pull Request List -->
         <section class="space-y-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="flex items-center gap-2">
-              <GitPullRequest class="h-4 w-4 text-blue-400" />
-              <h2 class="text-sm font-semibold text-slate-100">{{ activeFilterOption.heading }}</h2>
+              <GitPullRequest class="h-4 w-4 text-terra" />
+              <h2 class="text-sm font-semibold text-ink">{{ activeFilterOption.heading }}</h2>
               <span
                 v-if="auth.isAuthenticated"
-                class="rounded-full bg-canvas-elevated px-2 py-0.5 font-mono text-[11px] text-slate-300"
+                class="rounded-full bg-sage-soft px-2 py-0.5 font-mono text-[11px] font-medium text-sage-text"
               >
                 {{ auth.requestedPRs.length }}
               </span>
@@ -202,7 +213,7 @@ onBeforeUnmount(() => {
             <div class="flex flex-wrap items-center gap-3">
               <div
                 v-if="auth.isAuthenticated"
-                class="inline-flex rounded-lg border border-border bg-canvas-inset p-0.5"
+                class="inline-flex rounded-xl border border-border bg-canvas-inset p-0.5"
                 role="tablist"
                 aria-label="Filter pull requests"
               >
@@ -213,11 +224,11 @@ onBeforeUnmount(() => {
                   role="tab"
                   :aria-selected="auth.prFilter === opt.value"
                   :disabled="auth.isLoading"
-                  class="rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-60"
+                  class="rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-60"
                   :class="
                     auth.prFilter === opt.value
-                      ? 'bg-canvas-elevated text-slate-100 shadow-xs'
-                      : 'text-slate-400 hover:text-slate-200'
+                      ? 'bg-canvas-subtle text-ink shadow-xs'
+                      : 'text-ink-muted hover:text-ink'
                   "
                   @click="auth.setPrFilter(opt.value)"
                 >
@@ -227,7 +238,7 @@ onBeforeUnmount(() => {
 
               <div
                 v-if="auth.isAuthenticated"
-                class="flex items-center gap-2 text-[11px] text-slate-500"
+                class="flex items-center gap-2 text-[11px] text-ink-faint"
               >
                 <Clock class="h-3 w-3" />
                 <span>
@@ -243,26 +254,28 @@ onBeforeUnmount(() => {
           <!-- Unauthenticated Onboarding Card -->
           <div
             v-if="!auth.isAuthenticated"
-            class="rounded-xl border border-dashed border-border bg-canvas-subtle/60 p-8 text-center"
+            class="stroll-card rounded-2xl border border-dashed border-border bg-canvas-subtle/80 p-8 text-center"
           >
-            <KeyRound class="mx-auto h-8 w-8 text-slate-500" />
-            <h3 class="mt-3 text-sm font-semibold text-slate-200">
+            <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-sage-soft text-pine-text">
+              <KeyRound class="h-6 w-6" />
+            </div>
+            <h3 class="mt-3.5 text-sm font-semibold text-ink">
               Connect GitHub to see PRs awaiting your review
             </h3>
-            <p class="mx-auto mt-1 max-w-md text-xs text-slate-400">
+            <p class="mx-auto mt-1 max-w-md text-xs text-ink-muted">
               Add a GitHub Personal Access Token (PAT) to automatically fetch open pull requests
               where you are requested as a reviewer.
             </p>
             <div class="mt-5 flex flex-wrap items-center justify-center gap-3">
               <button
-                class="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-500"
+                class="inline-flex items-center gap-1.5 rounded-xl bg-terra px-4 py-2 text-xs font-semibold text-white shadow-xs transition-all hover:bg-terra-hover active:scale-[0.98]"
                 @click="settings.openSettings('github')"
               >
                 <KeyRound class="h-3.5 w-3.5" />
                 <span>Connect GitHub PAT</span>
               </button>
               <button
-                class="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs font-medium text-amber-300 hover:bg-amber-500/20"
+                class="inline-flex items-center gap-1.5 rounded-xl border border-ochre-border bg-ochre-soft px-4 py-2 text-xs font-medium text-ochre-text transition-colors hover:bg-canvas-elevated"
                 @click="review.loadMockPR()"
               >
                 <Sparkles class="h-3.5 w-3.5" />
@@ -274,14 +287,14 @@ onBeforeUnmount(() => {
           <!-- Empty Inbox -->
           <div
             v-else-if="auth.requestedPRs.length === 0"
-            class="rounded-xl border border-border bg-canvas-subtle/60 p-8 text-center"
+            class="stroll-card rounded-2xl border border-border bg-canvas-subtle/80 p-8 text-center"
           >
-            <p class="text-sm font-medium text-slate-300">{{ activeFilterOption.emptyMessage }}</p>
-            <p class="mt-1 text-xs text-slate-500">
+            <p class="text-sm font-medium text-ink-secondary">{{ activeFilterOption.emptyMessage }}</p>
+            <p class="mt-1 text-xs text-ink-muted">
               Paste any PR URL above or try the offline demo tour.
             </p>
             <button
-              class="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3.5 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-500/20"
+              class="mt-4 inline-flex items-center gap-1.5 rounded-xl border border-ochre-border bg-ochre-soft px-3.5 py-1.5 text-xs font-medium text-ochre-text transition-colors hover:bg-canvas-elevated"
               @click="review.loadMockPR()"
             >
               <Sparkles class="h-3.5 w-3.5" />
@@ -290,41 +303,41 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- PR List -->
-          <div v-else class="space-y-2">
+          <div v-else class="space-y-2.5">
             <button
               v-for="item in auth.requestedPRs"
               :key="item.id"
-              class="group flex w-full items-center justify-between gap-4 rounded-xl border border-border bg-canvas-subtle px-4 py-3.5 text-left transition-colors hover:border-blue-500/50 hover:bg-canvas-elevated"
+              class="stroll-card group flex w-full items-center justify-between gap-4 rounded-2xl border border-border bg-canvas-subtle px-4 py-3.5 text-left transition-all hover:border-terra-border hover:bg-canvas-elevated/50"
               :disabled="review.isLoadingPR"
               @click="review.loadPRByRepo(item.owner, item.repo, item.number)"
             >
               <div class="min-w-0 space-y-1">
                 <div class="flex items-center gap-2">
-                  <span class="font-mono text-xs text-blue-400">
+                  <span class="font-mono text-xs font-medium text-terra-text">
                     {{ item.owner }}/{{ item.repo }}#{{ item.number }}
                   </span>
-                  <span class="text-xs text-slate-600">·</span>
-                  <span class="text-xs text-slate-400">@{{ item.author.login }}</span>
-                  <span class="text-xs text-slate-600">·</span>
-                  <span class="text-xs text-slate-500">{{ formatRelativeTime(item.updatedAt) }}</span>
+                  <span class="text-xs text-ink-faint">·</span>
+                  <span class="text-xs text-ink-muted">@{{ item.author.login }}</span>
+                  <span class="text-xs text-ink-faint">·</span>
+                  <span class="text-xs text-ink-faint">{{ formatRelativeTime(item.updatedAt) }}</span>
                 </div>
-                <div class="truncate text-sm font-medium text-slate-100 group-hover:text-white">
+                <div class="truncate text-sm font-medium text-ink">
                   {{ item.title }}
                 </div>
               </div>
 
               <div class="flex shrink-0 items-center gap-4">
-                <div class="hidden items-center gap-1.5 text-xs text-slate-400 sm:flex">
-                  <FileDiff class="h-3.5 w-3.5 text-slate-500" />
+                <div class="hidden items-center gap-1.5 text-xs text-ink-muted sm:flex">
+                  <FileDiff class="h-3.5 w-3.5 text-ink-faint" />
                   <span>{{ item.changedFiles }} files</span>
                 </div>
                 <div class="font-mono text-xs">
-                  <span class="text-emerald-400">+{{ item.additions }}</span>
-                  <span class="mx-1 text-slate-600">/</span>
-                  <span class="text-rose-400">-{{ item.deletions }}</span>
+                  <span class="text-pine-text">+{{ item.additions }}</span>
+                  <span class="mx-1 text-ink-faint">/</span>
+                  <span class="text-crimson-text">-{{ item.deletions }}</span>
                 </div>
                 <span
-                  class="inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2.5 py-1 text-xs font-medium text-slate-300 group-hover:border-blue-500/40 group-hover:text-blue-300"
+                  class="inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2.5 py-1 text-xs font-medium text-ink-secondary transition-colors group-hover:border-terra-border group-hover:bg-terra-soft group-hover:text-terra-text"
                 >
                   <span>Review</span>
                   <ArrowRight class="h-3 w-3" />
@@ -335,7 +348,7 @@ onBeforeUnmount(() => {
             <!-- Demo PR Quick Access -->
             <div class="flex justify-end pt-2">
               <button
-                class="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-amber-300"
+                class="inline-flex items-center gap-1.5 text-xs text-ink-muted transition-colors hover:text-terra-text"
                 @click="review.loadMockPR()"
               >
                 <Sparkles class="h-3.5 w-3.5" />

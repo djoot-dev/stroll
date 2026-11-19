@@ -52,16 +52,16 @@ onBeforeUnmount(() => {
 <template>
   <div class="flex h-screen flex-col items-center justify-center bg-canvas px-6 text-center">
     <div
-      class="animate-pop-in w-full max-w-md space-y-5 rounded-2xl border border-border bg-canvas-subtle p-8 shadow-2xl"
+      class="animate-pop-in stroll-elevated w-full max-w-md space-y-5 rounded-2xl border border-border bg-canvas-subtle p-8"
     >
       <div
         class="animate-check-pop mx-auto flex h-14 w-14 items-center justify-center rounded-full ring-4"
         :class="
           review.lastSubmitted?.event === 'REQUEST_CHANGES'
-            ? 'bg-rose-500/15 text-rose-400 ring-rose-500/10'
+            ? 'bg-crimson-soft text-crimson-text ring-crimson-soft'
             : review.lastSubmitted?.event === 'APPROVE'
-              ? 'bg-emerald-500/15 text-emerald-400 ring-emerald-500/10'
-              : 'bg-blue-500/15 text-blue-400 ring-blue-500/10'
+              ? 'bg-pine-soft text-pine-text ring-pine-soft'
+              : 'bg-terra-soft text-terra-text ring-terra-soft'
         "
       >
         <AlertTriangle
@@ -76,16 +76,16 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="space-y-1.5">
-        <h1 class="text-lg font-semibold text-slate-100">{{ verdictLabel }}</h1>
-        <p v-if="review.lastSubmitted" class="font-mono text-xs text-blue-400">
+        <h1 class="text-lg font-semibold text-ink">{{ verdictLabel }}</h1>
+        <p v-if="review.lastSubmitted" class="font-mono text-xs font-medium text-terra-text">
           {{ review.lastSubmitted.prRef }}
         </p>
-        <p v-if="review.lastSubmitted" class="line-clamp-2 text-xs text-slate-400">
+        <p v-if="review.lastSubmitted" class="line-clamp-2 text-xs text-ink-muted">
           {{ review.lastSubmitted.prTitle }}
         </p>
       </div>
 
-      <p v-if="review.lastSubmitted" class="text-xs text-slate-300">
+      <p v-if="review.lastSubmitted" class="text-xs text-ink-secondary">
         {{ review.lastSubmitted.commentCount }} inline comment{{
           review.lastSubmitted.commentCount === 1 ? '' : 's'
         }}
@@ -93,13 +93,13 @@ onBeforeUnmount(() => {
       </p>
 
       <div class="space-y-2 pt-2">
-        <div class="h-1 w-full overflow-hidden rounded-full bg-canvas-inset">
+        <div class="h-1.5 w-full overflow-hidden rounded-full bg-canvas-elevated">
           <div
-            class="h-full bg-emerald-500"
+            class="h-full rounded-full bg-pine"
             :style="{ width: `${progress}%` }"
           />
         </div>
-        <p class="text-[11px] text-slate-500">Returning to your PR list…</p>
+        <p class="text-[11px] text-ink-faint">Returning to your PR list…</p>
       </div>
     </div>
   </div>

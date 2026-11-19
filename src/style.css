@@ -1,16 +1,239 @@
 @import "tailwindcss";
 
+/* ==========================================================================
+   Stroll Brand Design System
+   Derived directly from public/logo.svg:
+   - Warm Parchment & Stone (#fdf9f1, #f0e7d6, #fffdf9)
+   - Soft Sage Backdrop (#dce8da, #c6dbc4)
+   - Deep Forest Pine (#27634d, #173e2f)
+   - Warm Terracotta Footpath (#c86130, #de7b47, #eb9663)
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces */
+  --stroll-canvas: #f7f1e5;
+  --stroll-canvas-subtle: #fffdf8;
+  --stroll-canvas-elevated: #efe6d6;
+  --stroll-canvas-inset: #f2eadb;
+  --stroll-code: #fcf9f2;
+
+  /* Borders */
+  --stroll-border: #ddd2be;
+  --stroll-border-muted: #eae1cf;
+
+  /* Ink (Typography) */
+  --stroll-ink: #163025;
+  --stroll-ink-secondary: #374f44;
+  --stroll-ink-muted: #5f746a;
+  --stroll-ink-faint: #899990;
+
+  /* Brand Accent: Terracotta (Active Path / Primary CTA / Selection) */
+  --stroll-terra: #c86130;
+  --stroll-terra-hover: #b25224;
+  --stroll-terra-soft: rgba(200, 97, 48, 0.11);
+  --stroll-terra-border: rgba(200, 97, 48, 0.34);
+  --stroll-terra-text: #a5481d;
+
+  /* Brand Accent: Forest Pine (Foundation / Reviewed / Approve / Success) */
+  --stroll-pine: #245e48;
+  --stroll-pine-hover: #1b4a38;
+  --stroll-pine-soft: rgba(36, 94, 72, 0.11);
+  --stroll-pine-border: rgba(36, 94, 72, 0.32);
+  --stroll-pine-text: #1b4d3a;
+
+  /* Organic Sage (Soft Botanical Highlights / Hunk Headers) */
+  --stroll-sage-soft: #e6efe4;
+  --stroll-sage-border: #c2d7bf;
+  --stroll-sage-text: #275844;
+
+  /* Warm Sandstone / Ochre (Drafts / Demo / Config) */
+  --stroll-ochre-soft: rgba(188, 122, 42, 0.12);
+  --stroll-ochre-border: rgba(188, 122, 42, 0.36);
+  --stroll-ochre-text: #8b5312;
+
+  /* Berry Crimson (Deletions / Request Changes / Errors) */
+  --stroll-crimson: #b83a3a;
+  --stroll-crimson-soft: rgba(184, 58, 58, 0.10);
+  --stroll-crimson-border: rgba(184, 58, 58, 0.30);
+  --stroll-crimson-text: #9f2929;
+
+  /* Botanical Plum (Types / Referenced Context) */
+  --stroll-plum-soft: rgba(114, 78, 138, 0.10);
+  --stroll-plum-border: rgba(114, 78, 138, 0.30);
+  --stroll-plum-text: #5f3c78;
+
+  /* Diff Surfaces */
+  --stroll-diff-add: rgba(39, 99, 77, 0.11);
+  --stroll-diff-add-hover: rgba(39, 99, 77, 0.18);
+  --stroll-diff-del: rgba(184, 58, 58, 0.095);
+  --stroll-diff-del-hover: rgba(184, 58, 58, 0.16);
+  --stroll-diff-hover: rgba(23, 62, 47, 0.045);
+  --stroll-diff-select: rgba(200, 97, 48, 0.13);
+  --stroll-diff-select-bar: #c86130;
+  --stroll-diff-select-edge: rgba(200, 97, 48, 0.48);
+
+  /* Tactile Shadows */
+  --stroll-shadow-card: 0 1px 2px rgba(23, 62, 47, 0.05), 0 4px 12px rgba(124, 56, 23, 0.04);
+  --stroll-shadow-elevated: 0 12px 32px rgba(23, 62, 47, 0.14), 0 2px 6px rgba(124, 56, 23, 0.08);
+  --stroll-backdrop: rgba(22, 48, 37, 0.42);
+
+  /* Syntax Highlighting (Warm Parchment Light) */
+  --syn-keyword: #9e4320;
+  --syn-string: #236348;
+  --syn-number: #a65d1e;
+  --syn-comment: #7c8d84;
+  --syn-type: #694382;
+  --syn-function: #1f5c6b;
+  --syn-variable: #1a352a;
+  --syn-property: #2f5b4a;
+  --syn-operator: #8c4a27;
+  --syn-tag: #b04632;
+  --syn-meta: #6e5a3e;
+  --syn-punctuation: #5e7067;
+  --syn-invalid: #b83a3a;
+}
+
+html.dark {
+  color-scheme: dark;
+
+  /* Surfaces (Deep Night Pine) */
+  --stroll-canvas: #0f1915;
+  --stroll-canvas-subtle: #15231d;
+  --stroll-canvas-elevated: #1e3129;
+  --stroll-canvas-inset: #0b1310;
+  --stroll-code: #0c1612;
+
+  /* Borders */
+  --stroll-border: #2a4036;
+  --stroll-border-muted: #1e3028;
+
+  /* Ink (Warm Cream) */
+  --stroll-ink: #f3ede0;
+  --stroll-ink-secondary: #cad4cb;
+  --stroll-ink-muted: #8da196;
+  --stroll-ink-faint: #5f756a;
+
+  /* Brand Accent: Terracotta */
+  --stroll-terra: #de7b47;
+  --stroll-terra-hover: #ea8e5c;
+  --stroll-terra-soft: rgba(222, 123, 71, 0.15);
+  --stroll-terra-border: rgba(222, 123, 71, 0.40);
+  --stroll-terra-text: #f3a579;
+
+  /* Brand Accent: Forest Pine / Moss */
+  --stroll-pine: #2d7a5b;
+  --stroll-pine-hover: #378f6c;
+  --stroll-pine-soft: rgba(74, 173, 130, 0.14);
+  --stroll-pine-border: rgba(74, 173, 130, 0.36);
+  --stroll-pine-text: #7fd4ae;
+
+  /* Organic Sage */
+  --stroll-sage-soft: rgba(198, 219, 196, 0.10);
+  --stroll-sage-border: rgba(198, 219, 196, 0.24);
+  --stroll-sage-text: #c6dbc4;
+
+  /* Warm Sandstone / Ochre */
+  --stroll-ochre-soft: rgba(231, 185, 146, 0.13);
+  --stroll-ochre-border: rgba(231, 185, 146, 0.36);
+  --stroll-ochre-text: #f0c79b;
+
+  /* Berry Crimson */
+  --stroll-crimson: #d9646c;
+  --stroll-crimson-soft: rgba(217, 100, 108, 0.14);
+  --stroll-crimson-border: rgba(217, 100, 108, 0.35);
+  --stroll-crimson-text: #f29ca2;
+
+  /* Botanical Plum */
+  --stroll-plum-soft: rgba(186, 148, 216, 0.14);
+  --stroll-plum-border: rgba(186, 148, 216, 0.34);
+  --stroll-plum-text: #d5b8ec;
+
+  /* Diff Surfaces */
+  --stroll-diff-add: rgba(56, 152, 112, 0.14);
+  --stroll-diff-add-hover: rgba(56, 152, 112, 0.21);
+  --stroll-diff-del: rgba(217, 100, 108, 0.13);
+  --stroll-diff-del-hover: rgba(217, 100, 108, 0.20);
+  --stroll-diff-hover: rgba(198, 219, 196, 0.05);
+  --stroll-diff-select: rgba(222, 123, 71, 0.17);
+  --stroll-diff-select-bar: #de7b47;
+  --stroll-diff-select-edge: rgba(222, 123, 71, 0.50);
+
+  /* Tactile Shadows */
+  --stroll-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --stroll-shadow-elevated: 0 16px 40px rgba(0, 0, 0, 0.55);
+  --stroll-backdrop: rgba(5, 12, 9, 0.72);
+
+  /* Syntax Highlighting (Deep Night Pine Dark) */
+  --syn-keyword: #f09567;
+  --syn-string: #8ad4a5;
+  --syn-number: #e9bf82;
+  --syn-comment: #6d8578;
+  --syn-type: #cfb2ea;
+  --syn-function: #7ec8c9;
+  --syn-variable: #eae2d3;
+  --syn-property: #b7d7c5;
+  --syn-operator: #e89c72;
+  --syn-tag: #eb847c;
+  --syn-meta: #c7b194;
+  --syn-punctuation: #8aa094;
+  --syn-invalid: #f28b92;
+}
+
 @theme {
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Menlo', monospace;
 
-  --color-canvas: #0d1117;
-  --color-canvas-subtle: #161b22;
-  --color-canvas-elevated: #1c2128;
-  --color-canvas-inset: #090c10;
+  --color-canvas: var(--stroll-canvas);
+  --color-canvas-subtle: var(--stroll-canvas-subtle);
+  --color-canvas-elevated: var(--stroll-canvas-elevated);
+  --color-canvas-inset: var(--stroll-canvas-inset);
+  --color-code: var(--stroll-code);
 
-  --color-border: #30363d;
-  --color-border-muted: #21262d;
+  --color-border: var(--stroll-border);
+  --color-border-muted: var(--stroll-border-muted);
+
+  --color-ink: var(--stroll-ink);
+  --color-ink-secondary: var(--stroll-ink-secondary);
+  --color-ink-muted: var(--stroll-ink-muted);
+  --color-ink-faint: var(--stroll-ink-faint);
+
+  --color-terra: var(--stroll-terra);
+  --color-terra-hover: var(--stroll-terra-hover);
+  --color-terra-soft: var(--stroll-terra-soft);
+  --color-terra-border: var(--stroll-terra-border);
+  --color-terra-text: var(--stroll-terra-text);
+
+  --color-pine: var(--stroll-pine);
+  --color-pine-hover: var(--stroll-pine-hover);
+  --color-pine-soft: var(--stroll-pine-soft);
+  --color-pine-border: var(--stroll-pine-border);
+  --color-pine-text: var(--stroll-pine-text);
+
+  --color-sage-soft: var(--stroll-sage-soft);
+  --color-sage-border: var(--stroll-sage-border);
+  --color-sage-text: var(--stroll-sage-text);
+
+  --color-ochre-soft: var(--stroll-ochre-soft);
+  --color-ochre-border: var(--stroll-ochre-border);
+  --color-ochre-text: var(--stroll-ochre-text);
+
+  --color-crimson: var(--stroll-crimson);
+  --color-crimson-soft: var(--stroll-crimson-soft);
+  --color-crimson-border: var(--stroll-crimson-border);
+  --color-crimson-text: var(--stroll-crimson-text);
+
+  --color-plum-soft: var(--stroll-plum-soft);
+  --color-plum-border: var(--stroll-plum-border);
+  --color-plum-text: var(--stroll-plum-text);
+
+  --color-diff-add: var(--stroll-diff-add);
+  --color-diff-add-hover: var(--stroll-diff-add-hover);
+  --color-diff-del: var(--stroll-diff-del);
+  --color-diff-del-hover: var(--stroll-diff-del-hover);
+  --color-diff-hover: var(--stroll-diff-hover);
+  --color-diff-select: var(--stroll-diff-select);
 }
 
 @layer base {
@@ -18,8 +241,8 @@
   body,
   #app {
     height: 100%;
-    background-color: #0d1117;
-    color: #e6edf3;
+    background-color: var(--stroll-canvas);
+    color: var(--stroll-ink);
     font-family: var(--font-sans);
   }
 
@@ -29,17 +252,37 @@
   }
 
   ::-webkit-scrollbar-track {
-    background: #0d1117;
+    background: var(--stroll-canvas);
   }
 
   ::-webkit-scrollbar-thumb {
-    background: #30363d;
-    border-radius: 4px;
+    background: var(--stroll-border);
+    border-radius: 9999px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: #484f58;
+    background: var(--stroll-ink-faint);
   }
+}
+
+/* Tactile stepping-stone elevation helpers */
+.stroll-card {
+  box-shadow: var(--stroll-shadow-card);
+}
+
+.stroll-elevated {
+  box-shadow: var(--stroll-shadow-elevated);
+}
+
+.stroll-backdrop {
+  background-color: var(--stroll-backdrop);
+}
+
+.stroll-diff-selected {
+  background-color: var(--stroll-diff-select);
+  box-shadow:
+    inset 2.5px 0 0 var(--stroll-diff-select-bar),
+    inset -1px 0 0 var(--stroll-diff-select-edge);
 }
 
 /* --- Tactile UI Transitions & Juice --- */
