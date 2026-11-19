@@ -254,8 +254,79 @@ function parseList(
   }
 }
 
-export function renderSafeMarkdown(markdown: string): string {
-  const normalized = markdown.replace(/\r\n?/g, '\n').trim()
+export interface MarkdownRenderOptions {
+  originalLines?: string[]
+}
+
+function stripHtmlComments(markdown: string): string {
+  const lines = markdown.split('\n')
+  const segments: Array<{ isFence: boolean; text: string }> = []
+  let buffer: string[] = []
+  let inFence = false
+  let closeRe: RegExp | null = null
+
+  const flush = (isFence: boolean) => {
+    if (buffer.length > 0) {
+      segments.push({ isFence, text: buffer.join('\n') })
+      buffer = []
+    }
+  }
+
+  for (const line of lines) {
+    if (!inFence) {
+      const fenceMatch = line.match(/^(`{3,}|~{3,})([\w+-]*)\s*$/)
+      if (fenceMatch) {
+        flush(false)
+        inFence = true
+        closeRe = new RegExp(`^${fenceMatch[1][0]}{${fenceMatch[1].length},}\\s*$`)
+        buffer.push(line)
+        continue
+      }
+      buffer.push(line)
+    } else {
+      buffer.push(line)
+      if (closeRe?.test(line)) {
+        flush(true)
+        inFence = false
+        closeRe = null
+      }
+    }
+  }
+  flush(inFence)
+
+  return segments
+    .map((seg) => {
+      if (seg.isFence) return seg.text
+      const parts = seg.text.split(/(``(?:[^`]|`(?!`))+``|`[^`]+`)/g)
+      return parts
+        .map((part, idx) => (idx % 2 === 1 ? part : part.replace(/<!--[\s\S]*?-->/g, '')))
+        .join('')
+    })
+    .join('\n')
+}
+
+function renderSuggestionBlock(codeLines: string[], originalLines?: string[]): string {
+  const removedHtml = (originalLines ?? [])
+    .map(
+      (l) =>
+        `<div class="flex gap-2 bg-crimson-soft/50 px-3 py-0.5 font-mono text-xs text-crimson-text"><span class="select-none opacity-75">-</span><span class="whitespace-pre-wrap break-all">${escapeHtml(l)}</span></div>`,
+    )
+    .join('')
+  const addedHtml = codeLines
+    .map(
+      (l) =>
+        `<div class="flex gap-2 bg-pine-soft/50 px-3 py-0.5 font-mono text-xs text-pine-text"><span class="select-none opacity-75">+</span><span class="whitespace-pre-wrap break-all">${escapeHtml(l)}</span></div>`,
+    )
+    .join('')
+
+  return `<div class="my-3 overflow-hidden rounded-lg border border-pine-border/60 bg-code"><div class="flex items-center justify-between border-b border-border-muted bg-canvas-elevated/60 px-3 py-1 font-mono text-[10px] font-semibold uppercase tracking-wider text-pine-text">Suggested change</div><div class="overflow-x-auto py-1">${removedHtml}${addedHtml}</div></div>`
+}
+
+export function renderSafeMarkdown(
+  markdown: string,
+  options?: MarkdownRenderOptions,
+): string {
+  const normalized = stripHtmlComments(markdown.replace(/\r\n?/g, '\n')).trim()
   if (!normalized) return ''
 
   const lines = normalized.split('\n')
@@ -279,6 +350,10 @@ export function renderSafeMarkdown(markdown: string): string {
         i += 1
       }
       if (i < lines.length) i += 1 // skip closing fence
+      if (lang.toLowerCase() === 'suggestion') {
+        out.push(renderSuggestionBlock(codeLines, options?.originalLines))
+        continue
+      }
       const langBadge = lang
         ? `<div class="border-b border-border-muted bg-canvas-elevated/50 px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-ink-faint">${lang}</div>`
         : ''

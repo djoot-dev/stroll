@@ -16,6 +16,10 @@ const fetchPullRequestMock = vi.fn<
   ) => Promise<PullRequestData>
 >()
 
+const setFileViewedStateMock = vi.fn<
+  (pat: string, pullRequestId: string, path: string, viewed: boolean) => Promise<'VIEWED' | 'UNVIEWED'>
+>(async (_pat, _prId, _path, viewed) => (viewed ? 'VIEWED' : 'UNVIEWED'))
+
 vi.mock('@/services/github', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/github')>()
   return {
@@ -27,6 +31,12 @@ vi.mock('@/services/github', async (importOriginal) => {
       number: number,
       localRepoPath?: string | null,
     ) => fetchPullRequestMock(pat, owner, repo, number, localRepoPath),
+    setFileViewedState: (
+      pat: string,
+      pullRequestId: string,
+      path: string,
+      viewed: boolean,
+    ) => setFileViewedStateMock(pat, pullRequestId, path, viewed),
   }
 })
 
@@ -183,6 +193,37 @@ describe('useReviewStore viewed files persistence', () => {
     await store.loadPRByRepo('acme', 'stroll', 2)
     expect(store.isStepReviewed(targetPath)).toBe(false)
     expect(store.reviewedCount).toBe(0)
+  })
+
+  it('hydrates viewed state from GitHub viewerViewedState and syncs/reverts toggles', async () => {
+    const pr = makePR({ owner: 'acme', repo: 'stroll', number: 12 })
+    pr.files[0].viewerViewedState = 'VIEWED'
+    pr.files[1].viewerViewedState = 'UNVIEWED'
+    fetchPullRequestMock.mockResolvedValueOnce(pr)
+    setFileViewedStateMock.mockClear()
+
+    const auth = useAuthStore()
+    auth.pat = 'ghp_test_token'
+
+    const store = useReviewStore()
+    await store.loadPRByRepo('acme', 'stroll', 12)
+
+    expect(store.isStepReviewed(pr.files[0].path)).toBe(true)
+    expect(store.isStepReviewed(pr.files[1].path)).toBe(false)
+
+    await store.toggleReviewed(pr.files[1].path)
+    expect(setFileViewedStateMock).toHaveBeenCalledWith(
+      'ghp_test_token',
+      pr.id,
+      pr.files[1].path,
+      true,
+    )
+    expect(store.isStepReviewed(pr.files[1].path)).toBe(true)
+
+    setFileViewedStateMock.mockRejectedValueOnce(new Error('Network failed'))
+    await store.toggleReviewed(pr.files[1].path)
+    expect(store.isStepReviewed(pr.files[1].path)).toBe(true)
+    expect(store.refreshError).toContain('Network failed')
   })
 })
 

@@ -109,4 +109,35 @@ describe('renderSafeMarkdown', () => {
     expect(html).toContain('Warning</div>')
     expect(html).toContain('Watch out for <strong class="font-semibold text-ink">edge cases</strong>')
   })
+
+  it('renders GitHub suggestion blocks with optional original lines', () => {
+    const md = ['Consider:', '```suggestion', 'const total = count * 2', '```'].join('\n')
+    const html = renderSafeMarkdown(md, { originalLines: ['const total = count'] })
+    expect(html).toContain('Suggested change')
+    expect(html).toContain('const total = count')
+    expect(html).toContain('const total = count * 2')
+  })
+
+  it('strips GitHub HTML comments outside code blocks while preserving comments inside code', () => {
+    const md = [
+      '## Summary',
+      '<!-- PR template hint',
+      'multi-line comment -->',
+      'Visible text <!-- inline hidden --> continues.',
+      '',
+      'Inline `<!-- kept in backticks -->` stays visible.',
+      '',
+      '```html',
+      '<!-- kept in fenced block -->',
+      '```',
+    ].join('\n')
+
+    const html = renderSafeMarkdown(md)
+    expect(html).toContain('Summary')
+    expect(html).toContain('Visible text  continues.')
+    expect(html).not.toContain('PR template hint')
+    expect(html).not.toContain('inline hidden')
+    expect(html).toContain('&lt;!-- kept in backticks --&gt;')
+    expect(html).toContain('&lt;!-- kept in fenced block --&gt;')
+  })
 })
