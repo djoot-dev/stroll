@@ -44,6 +44,7 @@ export const useAuthStore = defineStore('auth', () => {
   const isLoading = ref(false)
   const error = ref<string | null>(null)
   let knownReviewRequestedIds: Set<string> | null = null
+  let persistedPat: string | null = null
 
   const isAuthenticated = computed(() => Boolean(pat.value && viewer.value))
 
@@ -53,7 +54,8 @@ export const useAuthStore = defineStore('auth', () => {
     const savedPat = await loadGitHubPat()
     if (savedPat) {
       pat.value = savedPat
-      await verifyAndLoadProfile(savedPat)
+      persistedPat = savedPat
+      await verifyAndLoadProfile(savedPat, { persist: false })
       return
     }
     if (isTauriRuntime()) {
@@ -78,7 +80,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function verifyAndLoadProfile(
     token: string,
-    options?: { notifyOnNew?: boolean },
+    options?: { notifyOnNew?: boolean; persist?: boolean },
   ): Promise<boolean> {
     isLoading.value = true
     error.value = null
@@ -95,7 +97,11 @@ export const useAuthStore = defineStore('auth', () => {
       requestedPRs.value = prs
       hasMorePRs.value = hasNextPage
       prEndCursor.value = endCursor
-      await saveGitHubPat(token)
+      const trimmedToken = token.trim()
+      if (options?.persist !== false && trimmedToken !== persistedPat) {
+        await saveGitHubPat(trimmedToken)
+        persistedPat = trimmedToken
+      }
 
       if (activeFilter === 'review-requested') {
         const settings = useSettingsStore()
@@ -157,7 +163,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function refreshRequestedPRs(options?: { notifyOnNew?: boolean }): Promise<void> {
     if (!pat.value) return
-    await verifyAndLoadProfile(pat.value, options)
+    await verifyAndLoadProfile(pat.value, { ...options, persist: false })
   }
 
   async function setPrFilter(mode: PRFilterMode): Promise<void> {
@@ -170,6 +176,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function clearPat(): Promise<void> {
     pat.value = ''
+    persistedPat = null
     viewer.value = null
     requestedPRs.value = []
     hasMorePRs.value = false
