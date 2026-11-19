@@ -1,3 +1,20 @@
+<script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { getVersion } from '@tauri-apps/api/app'
+import { isTauriRuntime } from '@/services/native'
+
+const appVersion = ref('')
+
+onMounted(async () => {
+  if (!isTauriRuntime()) return
+  try {
+    appVersion.value = await getVersion()
+  } catch {
+    // Version unavailable; show the name only
+  }
+})
+</script>
+
 <template>
   <footer
     class="flex h-7 shrink-0 items-center justify-between border-t border-border bg-canvas-subtle px-4 text-[11px] text-slate-500"
@@ -10,6 +27,6 @@
       <span><kbd class="rounded border border-border px-1 font-mono text-slate-300">[</kbd> Toggle Sidebar</span>
       <span><kbd class="rounded border border-border px-1 font-mono text-slate-300">R</kbd> Finish Review</span>
     </div>
-    <span class="hidden font-mono text-slate-600 sm:inline">PR Tour v0.1.0</span>
+    <span class="hidden font-mono text-slate-600 sm:inline">Stroll<template v-if="appVersion"> v{{ appVersion }}</template></span>
   </footer>
 </template>

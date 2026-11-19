@@ -73,8 +73,8 @@ jobs:
           # APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'PR Tour ${{ github.ref_name }}'
-          releaseBody: 'See the assets below to download and install PR Tour.'
+          releaseName: 'Stroll ${{ github.ref_name }}'
+          releaseBody: 'See the assets below to download and install Stroll.'
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}

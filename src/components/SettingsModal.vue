@@ -253,7 +253,7 @@ async function handleResetDefaults() {
           </nav>
 
           <div class="hidden border-t border-border-muted px-4 py-2.5 text-[10px] text-slate-500 sm:block">
-            PR Tour v{{ appVersion }}
+            Stroll v{{ appVersion }}
           </div>
         </aside>
 
@@ -345,7 +345,7 @@ async function handleResetDefaults() {
                 <div class="rounded-lg border border-border bg-canvas/60 p-4">
                   <p class="text-xs font-medium text-slate-200">Default Reading Order</p>
                   <p class="mt-0.5 text-[11px] text-slate-400">
-                    Controls how PR Tour orders files in the dependency graph.
+                    Controls how Stroll orders files in the dependency graph.
                   </p>
                   <div class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <button
@@ -678,7 +678,7 @@ async function handleResetDefaults() {
                 <div class="rounded-lg border border-border bg-canvas/60 p-4">
                   <div class="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <p class="text-xs font-medium text-slate-200">PR Tour v{{ appVersion }}</p>
+                      <p class="text-xs font-medium text-slate-200">Stroll v{{ appVersion }}</p>
                       <p v-if="updateState === 'up-to-date'" class="mt-0.5 text-[11px] text-emerald-400">
                         You're on the latest version.
                       </p>

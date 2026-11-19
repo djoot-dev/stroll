@@ -56,7 +56,7 @@ function toggleDirection() {
             PT
           </span>
           <span class="hidden text-sm font-semibold tracking-tight text-slate-100 sm:inline">
-            PR Tour
+            Stroll
           </span>
         </div>
 

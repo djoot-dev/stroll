@@ -104,7 +104,7 @@ onBeforeUnmount(() => {
             PT
           </span>
           <div>
-            <span class="text-sm font-semibold tracking-tight text-slate-100">PR Tour</span>
+            <span class="text-sm font-semibold tracking-tight text-slate-100">Stroll</span>
             <span class="ml-2 hidden text-xs text-slate-500 sm:inline">Review Inbox</span>
           </div>
         </div>

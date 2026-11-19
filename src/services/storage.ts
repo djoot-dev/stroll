@@ -1,8 +1,8 @@
 import { LazyStore } from '@tauri-apps/plugin-store'
 import type { DraftComment, TourDirection } from '@/types/pr'
 
-const STORE_FILE = 'pr-tour-settings.json'
-const FALLBACK_PREFIX = 'pr_tour_'
+const STORE_FILE = 'stroll-settings.json'
+const FALLBACK_PREFIX = 'stroll_'
 
 function isTauriRuntime(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
