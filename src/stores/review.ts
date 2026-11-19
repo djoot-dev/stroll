@@ -3,13 +3,30 @@ import { computed, ref } from 'vue'
 import { MOCK_PR } from '@/data/mockPR'
 import {
   addPRComment,
+  addPullRequestLabels,
   addReviewThread,
+  closePullRequest,
   createPendingReview,
+  deleteIssueComment as apiDeleteIssueComment,
+  deleteReviewComment as apiDeleteReviewComment,
+  fetchCommitDiffFiles,
+  fetchCompareDiffFiles,
+  fetchPRHeadPulse,
   fetchPullRequest,
+  mergePullRequest,
   parsePRUrl,
+  removePullRequestLabel,
+  removePullRequestReviewers,
+  reopenPullRequest,
   replyToReviewThread,
+  requestPullRequestReviewers,
+  setFileViewedState,
+  setPullRequestDraft,
   setReviewThreadResolved,
   submitReview,
+  toggleReaction as apiToggleReaction,
+  updateIssueComment as apiUpdateIssueComment,
+  updateReviewComment as apiUpdateReviewComment,
 } from '@/services/github'
 import { buildReadingOrder } from '@/services/readingOrder'
 import {
@@ -25,8 +42,12 @@ import {
 import type {
   DiffSide,
   DraftComment,
+  PRFile,
   PRIssueComment,
+  PRMergeMethod,
   PullRequestData,
+  ReactionContent,
+  ReactionGroup,
   ReviewEvent,
   TourDirection,
   TourStep,
@@ -59,6 +80,8 @@ export const useReviewStore = defineStore('review', () => {
 
   const isLoadingPR = ref(false)
   const isRefreshingPR = ref(false)
+  const prHasRemoteUpdates = ref(false)
+  const remoteUpdateSummary = ref<string | null>(null)
   const prError = ref<string | null>(null)
   const refreshError = ref<string | null>(null)
   const isSubmittingReview = ref(false)
@@ -66,6 +89,13 @@ export const useReviewStore = defineStore('review', () => {
   const submitSuccessMessage = ref<string | null>(null)
 
   const sidebarOpen = ref(true)
+  const ignoreWhitespace = ref(false)
+  const commitFilter = ref<string>('all')
+  const filteredFiles = ref<PRFile[] | null>(null)
+  const isLoadingCommitFilter = ref(false)
+  const pinnedPaths = ref<Set<string>>(new Set())
+  const hiddenPaths = ref<Set<string>>(new Set())
+  const customOrderPaths = ref<string[]>([])
   const showLoaderModal = ref(false)
   const showFinishModal = ref(false)
 
@@ -78,9 +108,52 @@ export const useReviewStore = defineStore('review', () => {
     return repoPaths.value[`${pr.value.owner}/${pr.value.repo}`] ?? null
   })
 
+  const lastReviewedCommitOid = computed<string | null>(() => {
+    if (!pr.value || pr.value.commits.length < 2) return null
+    const auth = useAuthStore()
+    const viewerLogin = auth.viewer?.login
+    if (!viewerLogin) return null
+    const submittedReviews = pr.value.reviews
+      .filter((r) => r.author.login === viewerLogin && r.state !== 'PENDING' && r.submittedAt)
+      .sort((a, b) => (b.submittedAt ?? '').localeCompare(a.submittedAt ?? ''))
+    const latestReviewAt = submittedReviews[0]?.submittedAt
+    if (!latestReviewAt) return null
+
+    let lastCommitBeforeReview: string | null = null
+    let hasNewerCommit = false
+    for (const c of pr.value.commits) {
+      if (c.committedDate <= latestReviewAt) {
+        lastCommitBeforeReview = c.oid
+      } else {
+        hasNewerCommit = true
+      }
+    }
+    return hasNewerCommit ? lastCommitBeforeReview : null
+  })
+
   const tourSteps = computed<TourStep[]>(() => {
     if (!pr.value) return []
-    return buildReadingOrder(pr.value.files, tourDirection.value)
+    const files = filteredFiles.value ?? pr.value.files
+    let steps = buildReadingOrder(files, tourDirection.value).filter(
+      (s) => !hiddenPaths.value.has(s.file.path),
+    )
+
+    if (customOrderPaths.value.length > 0) {
+      const orderMap = new Map(customOrderPaths.value.map((p, i) => [p, i]))
+      steps = [...steps].sort((a, b) => {
+        const ia = orderMap.get(a.file.path) ?? Number.MAX_SAFE_INTEGER
+        const ib = orderMap.get(b.file.path) ?? Number.MAX_SAFE_INTEGER
+        return ia - ib
+      })
+    }
+
+    if (pinnedPaths.value.size > 0) {
+      const pinned = steps.filter((s) => pinnedPaths.value.has(s.file.path))
+      const rest = steps.filter((s) => !pinnedPaths.value.has(s.file.path))
+      steps = [...pinned, ...rest]
+    }
+
+    return steps.map((s, idx) => ({ ...s, stepIndex: idx }))
   })
 
   const currentStep = computed<TourStep | null>(
@@ -128,11 +201,18 @@ export const useReviewStore = defineStore('review', () => {
     pr.value = data
     activeView.value = 'overview'
     currentStepIndex.value = 0
+    commitFilter.value = 'all'
+    filteredFiles.value = null
+    pinnedPaths.value = new Set()
+    hiddenPaths.value = new Set()
+    customOrderPaths.value = []
     reviewedPaths.value = new Set()
     fileFingerprints = new Map(
       data.files.map((file) => [file.path, computeFileFingerprint(file)]),
     )
     sidebarOpen.value = settings.sidebarDefaultOpen
+    prHasRemoteUpdates.value = false
+    remoteUpdateSummary.value = null
     refreshError.value = null
     submitError.value = null
     submitSuccessMessage.value = null
@@ -147,7 +227,11 @@ export const useReviewStore = defineStore('review', () => {
     const validViewed: ViewedFilesMap = {}
     for (const file of data.files) {
       const fingerprint = fileFingerprints.get(file.path) ?? computeFileFingerprint(file)
-      if (savedViewed[file.path] === fingerprint) {
+      const isViewed =
+        file.viewerViewedState !== undefined
+          ? file.viewerViewedState === 'VIEWED'
+          : savedViewed[file.path] === fingerprint
+      if (isViewed) {
         restoredPaths.add(file.path)
         validViewed[file.path] = fingerprint
       }
@@ -253,13 +337,19 @@ export const useReviewStore = defineStore('review', () => {
       const validViewed: ViewedFilesMap = {}
       for (const file of data.files) {
         const nextFp = nextFingerprints.get(file.path) ?? computeFileFingerprint(file)
-        if (prevReviewed.has(file.path) && prevFingerprints.get(file.path) === nextFp) {
+        const isViewed =
+          file.viewerViewedState !== undefined
+            ? file.viewerViewedState === 'VIEWED'
+            : prevReviewed.has(file.path) && prevFingerprints.get(file.path) === nextFp
+        if (isViewed) {
           restoredPaths.add(file.path)
           validViewed[file.path] = nextFp
         }
       }
 
       pr.value = data
+      prHasRemoteUpdates.value = false
+      remoteUpdateSummary.value = null
       fileFingerprints = nextFingerprints
       reviewedPaths.value = restoredPaths
 
@@ -284,6 +374,41 @@ export const useReviewStore = defineStore('review', () => {
       return false
     } finally {
       isRefreshingPR.value = false
+    }
+  }
+
+  function dismissRemoteUpdates(): void {
+    prHasRemoteUpdates.value = false
+    remoteUpdateSummary.value = null
+  }
+
+  async function checkForRemotePRUpdates(): Promise<void> {
+    if (screen.value !== 'review' || !pr.value || pr.value.isMock || isRefreshingPR.value) {
+      return
+    }
+    const auth = useAuthStore()
+    if (!auth.pat) return
+    try {
+      const pulse = await fetchPRHeadPulse(
+        auth.pat,
+        pr.value.owner,
+        pr.value.repo,
+        pr.value.number,
+      )
+      if (!pulse) return
+      if (pulse.headRefOid !== pr.value.headRefOid) {
+        prHasRemoteUpdates.value = true
+        remoteUpdateSummary.value = 'New commits have been pushed to this Pull Request.'
+      } else if (
+        pulse.commentCount > pr.value.issueComments.length ||
+        pulse.threadCount > pr.value.threads.length ||
+        pulse.updatedAt > pr.value.updatedAt
+      ) {
+        prHasRemoteUpdates.value = true
+        remoteUpdateSummary.value = 'New comments or activity arrived on GitHub.'
+      }
+    } catch {
+      // Background poll failures are non-fatal
     }
   }
 
@@ -370,19 +495,158 @@ export const useReviewStore = defineStore('review', () => {
       }
     }
 
-    if (pr.value && prKey.value) {
+    const buildViewedMap = (paths: Set<string>): ViewedFilesMap => {
       const viewedMap: ViewedFilesMap = {}
+      if (!pr.value) return viewedMap
       for (const file of pr.value.files) {
-        if (next.has(file.path)) {
+        if (paths.has(file.path)) {
           viewedMap[file.path] = fileFingerprints.get(file.path) ?? computeFileFingerprint(file)
         }
       }
-      await saveViewedFiles(prKey.value, viewedMap)
+      return viewedMap
+    }
+
+    if (pr.value && prKey.value) {
+      await saveViewedFiles(prKey.value, buildViewedMap(next))
+    }
+
+    const auth = useAuthStore()
+    if (pr.value && !pr.value.isMock && auth.pat) {
+      try {
+        await setFileViewedState(auth.pat, pr.value.id, target, markingReviewed)
+      } catch (err) {
+        const reverted = new Set(reviewedPaths.value)
+        if (markingReviewed) {
+          reverted.delete(target)
+        } else {
+          reverted.add(target)
+        }
+        reviewedPaths.value = reverted
+        if (pr.value && prKey.value) {
+          await saveViewedFiles(prKey.value, buildViewedMap(reverted))
+        }
+        refreshError.value =
+          err instanceof Error ? err.message : 'Failed to sync viewed state with GitHub'
+      }
     }
   }
 
   function isStepReviewed(path: string): boolean {
     return reviewedPaths.value.has(path)
+  }
+
+  function toggleIgnoreWhitespace(): void {
+    ignoreWhitespace.value = !ignoreWhitespace.value
+  }
+
+  function togglePinStep(path: string): void {
+    const activePath = currentStep.value?.file.path
+    const next = new Set(pinnedPaths.value)
+    if (next.has(path)) next.delete(path)
+    else next.add(path)
+    pinnedPaths.value = next
+    if (activePath) {
+      const idx = tourSteps.value.findIndex((s) => s.file.path === activePath)
+      if (idx >= 0) currentStepIndex.value = idx
+    }
+  }
+
+  function toggleHideStep(path: string): void {
+    const activePath = currentStep.value?.file.path
+    const next = new Set(hiddenPaths.value)
+    if (next.has(path)) next.delete(path)
+    else next.add(path)
+    hiddenPaths.value = next
+    if (tourSteps.value.length === 0) {
+      activeView.value = 'overview'
+      currentStepIndex.value = 0
+      return
+    }
+    if (activePath === path) {
+      currentStepIndex.value = Math.min(currentStepIndex.value, tourSteps.value.length - 1)
+    } else if (activePath) {
+      const idx = tourSteps.value.findIndex((s) => s.file.path === activePath)
+      if (idx >= 0) currentStepIndex.value = idx
+    }
+  }
+
+  function moveStep(path: string, delta: -1 | 1): void {
+    const activePath = currentStep.value?.file.path
+    const currentOrder = tourSteps.value.map((s) => s.file.path)
+    const idx = currentOrder.indexOf(path)
+    const targetIdx = idx + delta
+    if (idx < 0 || targetIdx < 0 || targetIdx >= currentOrder.length) return
+    const next = [...currentOrder]
+    ;[next[idx], next[targetIdx]] = [next[targetIdx], next[idx]]
+    customOrderPaths.value = next
+    if (activePath) {
+      const newIdx = tourSteps.value.findIndex((s) => s.file.path === activePath)
+      if (newIdx >= 0) currentStepIndex.value = newIdx
+    }
+  }
+
+  function resetTourCustomization(): void {
+    const activePath = currentStep.value?.file.path
+    pinnedPaths.value = new Set()
+    hiddenPaths.value = new Set()
+    customOrderPaths.value = []
+    if (activePath) {
+      const idx = tourSteps.value.findIndex((s) => s.file.path === activePath)
+      if (idx >= 0) currentStepIndex.value = idx
+    }
+  }
+
+  async function setCommitFilter(mode: string): Promise<void> {
+    if (!pr.value) return
+    commitFilter.value = mode
+    if (mode === 'all') {
+      filteredFiles.value = null
+      currentStepIndex.value = 0
+      return
+    }
+    if (pr.value.isMock) {
+      const idx = pr.value.commits.findIndex((c) => c.oid === mode)
+      if (idx >= 0) {
+        const start = idx % pr.value.files.length
+        filteredFiles.value = pr.value.files.slice(start, start + 2)
+      } else {
+        filteredFiles.value = pr.value.files.slice(-2)
+      }
+      currentStepIndex.value = 0
+      return
+    }
+
+    const auth = useAuthStore()
+    if (!auth.pat) {
+      refreshError.value = 'GitHub PAT is required to filter by commit.'
+      commitFilter.value = 'all'
+      filteredFiles.value = null
+      return
+    }
+
+    isLoadingCommitFilter.value = true
+    refreshError.value = null
+    try {
+      const { owner, repo, headRefOid } = pr.value
+      if (mode === 'since-last-review') {
+        const baseOid = lastReviewedCommitOid.value
+        if (!baseOid) {
+          filteredFiles.value = null
+          commitFilter.value = 'all'
+          return
+        }
+        filteredFiles.value = await fetchCompareDiffFiles(auth.pat, owner, repo, baseOid, headRefOid)
+      } else {
+        filteredFiles.value = await fetchCommitDiffFiles(auth.pat, owner, repo, mode)
+      }
+      currentStepIndex.value = 0
+    } catch (err) {
+      refreshError.value = err instanceof Error ? err.message : 'Failed to load commit diff'
+      commitFilter.value = 'all'
+      filteredFiles.value = null
+    } finally {
+      isLoadingCommitFilter.value = false
+    }
   }
 
   async function addDraftComment(
@@ -412,6 +676,15 @@ export const useReviewStore = defineStore('review', () => {
   async function deleteDraftComment(id: string): Promise<void> {
     if (!pr.value) return
     draftComments.value = draftComments.value.filter((d) => d.id !== id)
+    await saveDraftComments(prKey.value, draftComments.value)
+  }
+
+  async function updateDraftComment(id: string, body: string): Promise<void> {
+    if (!pr.value || !body.trim()) return
+    const trimmed = body.trim()
+    draftComments.value = draftComments.value.map((d) =>
+      d.id === id ? { ...d, body: trimmed } : d,
+    )
     await saveDraftComments(prKey.value, draftComments.value)
   }
 
@@ -598,6 +871,260 @@ export const useReviewStore = defineStore('review', () => {
     return comment
   }
 
+  async function editReviewComment(
+    threadId: string,
+    commentId: string,
+    body: string,
+  ): Promise<void> {
+    if (!pr.value || !body.trim()) return
+    const trimmed = body.trim()
+    const thread = pr.value.threads.find((t) => t.id === threadId)
+    const comment = thread?.comments.find((c) => c.id === commentId)
+    if (!comment) return
+
+    if (pr.value.isMock) {
+      comment.body = trimmed
+      return
+    }
+
+    const auth = useAuthStore()
+    if (!auth.pat) {
+      throw new Error('GitHub PAT is required to edit a review comment.')
+    }
+    comment.body = await apiUpdateReviewComment(auth.pat, commentId, trimmed)
+  }
+
+  async function deleteReviewComment(threadId: string, commentId: string): Promise<void> {
+    if (!pr.value) return
+    const thread = pr.value.threads.find((t) => t.id === threadId)
+    if (!thread) return
+
+    if (!pr.value.isMock) {
+      const auth = useAuthStore()
+      if (!auth.pat) {
+        throw new Error('GitHub PAT is required to delete a review comment.')
+      }
+      await apiDeleteReviewComment(auth.pat, commentId)
+    }
+
+    thread.comments = thread.comments.filter((c) => c.id !== commentId)
+    if (thread.comments.length === 0) {
+      pr.value = {
+        ...pr.value,
+        threads: pr.value.threads.filter((t) => t.id !== threadId),
+      }
+    }
+  }
+
+  async function editIssueComment(commentId: string, body: string): Promise<void> {
+    if (!pr.value || !body.trim()) return
+    const trimmed = body.trim()
+    const comment = pr.value.issueComments.find((c) => c.id === commentId)
+    if (!comment) return
+
+    if (pr.value.isMock) {
+      comment.body = trimmed
+      return
+    }
+
+    const auth = useAuthStore()
+    if (!auth.pat) {
+      throw new Error('GitHub PAT is required to edit a comment.')
+    }
+    comment.body = await apiUpdateIssueComment(auth.pat, commentId, trimmed)
+  }
+
+  async function deleteIssueComment(commentId: string): Promise<void> {
+    if (!pr.value) return
+    if (!pr.value.isMock) {
+      const auth = useAuthStore()
+      if (!auth.pat) {
+        throw new Error('GitHub PAT is required to delete a comment.')
+      }
+      await apiDeleteIssueComment(auth.pat, commentId)
+    }
+    pr.value = {
+      ...pr.value,
+      issueComments: pr.value.issueComments.filter((c) => c.id !== commentId),
+    }
+  }
+
+  function findReactionTarget(
+    subjectId: string,
+  ): { reactions?: ReactionGroup[] } | null {
+    if (!pr.value) return null
+    for (const thread of pr.value.threads) {
+      const c = thread.comments.find((item) => item.id === subjectId)
+      if (c) return c
+    }
+    const ic = pr.value.issueComments.find((item) => item.id === subjectId)
+    if (ic) return ic
+    const rev = pr.value.reviews.find((item) => item.id === subjectId)
+    if (rev) return rev
+    return null
+  }
+
+  async function toggleCommentReaction(
+    subjectId: string,
+    content: ReactionContent,
+  ): Promise<void> {
+    if (!pr.value) return
+    const target = findReactionTarget(subjectId)
+    if (!target) return
+
+    const prev = target.reactions ? target.reactions.map((r) => ({ ...r })) : []
+    const existing = prev.find((r) => r.content === content)
+    const adding = !(existing?.viewerHasReacted ?? false)
+
+    const next: ReactionGroup[] = existing
+      ? prev
+          .map((r) =>
+            r.content === content
+              ? {
+                  ...r,
+                  count: Math.max(0, r.count + (adding ? 1 : -1)),
+                  viewerHasReacted: adding,
+                }
+              : r,
+          )
+          .filter((r) => r.count > 0)
+      : [...prev, { content, count: 1, viewerHasReacted: true }]
+
+    target.reactions = next
+
+    if (pr.value.isMock) return
+
+    const auth = useAuthStore()
+    if (!auth.pat) {
+      target.reactions = prev
+      throw new Error('GitHub PAT is required to react to a comment.')
+    }
+
+    try {
+      await apiToggleReaction(auth.pat, subjectId, content, adding)
+    } catch (err) {
+      target.reactions = prev
+      throw err
+    }
+  }
+
+  async function mergePR(method: PRMergeMethod, commitHeadline?: string): Promise<void> {
+    if (!pr.value) return
+    if (pr.value.isMock) {
+      pr.value = { ...pr.value, state: 'MERGED' }
+      return
+    }
+    const auth = useAuthStore()
+    if (!auth.pat) throw new Error('GitHub PAT is required to merge a Pull Request.')
+    const nextState = await mergePullRequest(auth.pat, pr.value.id, method, commitHeadline)
+    pr.value = { ...pr.value, state: nextState }
+  }
+
+  async function closePR(): Promise<void> {
+    if (!pr.value) return
+    if (pr.value.isMock) {
+      pr.value = { ...pr.value, state: 'CLOSED' }
+      return
+    }
+    const auth = useAuthStore()
+    if (!auth.pat) throw new Error('GitHub PAT is required to close a Pull Request.')
+    const nextState = await closePullRequest(auth.pat, pr.value.id)
+    pr.value = { ...pr.value, state: nextState }
+  }
+
+  async function reopenPR(): Promise<void> {
+    if (!pr.value) return
+    if (pr.value.isMock) {
+      pr.value = { ...pr.value, state: 'OPEN' }
+      return
+    }
+    const auth = useAuthStore()
+    if (!auth.pat) throw new Error('GitHub PAT is required to reopen a Pull Request.')
+    const nextState = await reopenPullRequest(auth.pat, pr.value.id)
+    pr.value = { ...pr.value, state: nextState }
+  }
+
+  async function setPRDraft(isDraft: boolean): Promise<void> {
+    if (!pr.value) return
+    if (pr.value.isMock) {
+      pr.value = { ...pr.value, isDraft }
+      return
+    }
+    const auth = useAuthStore()
+    if (!auth.pat) throw new Error('GitHub PAT is required to update draft status.')
+    const nextDraft = await setPullRequestDraft(auth.pat, pr.value.id, isDraft)
+    pr.value = { ...pr.value, isDraft: nextDraft }
+  }
+
+  async function addReviewer(login: string): Promise<void> {
+    const clean = login.trim().replace(/^@/, '')
+    if (!pr.value || !clean) return
+    if (pr.value.isMock) {
+      if (!pr.value.requestedReviewers.some((r) => r.login === clean)) {
+        pr.value = {
+          ...pr.value,
+          requestedReviewers: [
+            ...pr.value.requestedReviewers,
+            { type: 'user', login: clean, avatarUrl: '' },
+          ],
+        }
+      }
+      return
+    }
+    const auth = useAuthStore()
+    if (!auth.pat) throw new Error('GitHub PAT is required to request reviewers.')
+    const { owner, repo, number } = pr.value
+    const reviewers = await requestPullRequestReviewers(auth.pat, owner, repo, number, [clean])
+    const teams = pr.value.requestedReviewers.filter((r) => r.type === 'team')
+    pr.value = { ...pr.value, requestedReviewers: [...reviewers, ...teams] }
+  }
+
+  async function removeReviewer(login: string): Promise<void> {
+    if (!pr.value) return
+    if (!pr.value.isMock) {
+      const auth = useAuthStore()
+      if (!auth.pat) throw new Error('GitHub PAT is required to remove reviewers.')
+      const { owner, repo, number } = pr.value
+      await removePullRequestReviewers(auth.pat, owner, repo, number, [login])
+    }
+    pr.value = {
+      ...pr.value,
+      requestedReviewers: pr.value.requestedReviewers.filter((r) => r.login !== login),
+    }
+  }
+
+  async function addLabels(names: string[]): Promise<void> {
+    const cleaned = names.map((n) => n.trim()).filter(Boolean)
+    if (!pr.value || cleaned.length === 0) return
+    if (pr.value.isMock) {
+      const existing = new Set(pr.value.labels.map((l) => l.name))
+      const added = cleaned
+        .filter((n) => !existing.has(n))
+        .map((name) => ({ name, color: '8b949e' }))
+      pr.value = { ...pr.value, labels: [...pr.value.labels, ...added] }
+      return
+    }
+    const auth = useAuthStore()
+    if (!auth.pat) throw new Error('GitHub PAT is required to add labels.')
+    const { owner, repo, number } = pr.value
+    const labels = await addPullRequestLabels(auth.pat, owner, repo, number, cleaned)
+    pr.value = { ...pr.value, labels }
+  }
+
+  async function removeLabel(name: string): Promise<void> {
+    if (!pr.value) return
+    if (!pr.value.isMock) {
+      const auth = useAuthStore()
+      if (!auth.pat) throw new Error('GitHub PAT is required to remove labels.')
+      const { owner, repo, number } = pr.value
+      await removePullRequestLabel(auth.pat, owner, repo, number, name)
+    }
+    pr.value = {
+      ...pr.value,
+      labels: pr.value.labels.filter((l) => l.name !== name),
+    }
+  }
+
   return {
     screen,
     activeView,
@@ -611,12 +1138,21 @@ export const useReviewStore = defineStore('review', () => {
     currentRepoPath,
     isLoadingPR,
     isRefreshingPR,
+    prHasRemoteUpdates,
+    remoteUpdateSummary,
     prError,
     refreshError,
     isSubmittingReview,
     submitError,
     submitSuccessMessage,
     sidebarOpen,
+    ignoreWhitespace,
+    commitFilter,
+    isLoadingCommitFilter,
+    lastReviewedCommitOid,
+    pinnedPaths,
+    hiddenPaths,
+    customOrderPaths,
     showLoaderModal,
     showFinishModal,
     prKey,
@@ -631,6 +1167,8 @@ export const useReviewStore = defineStore('review', () => {
     loadPRByUrl,
     loadPRByRepo,
     refreshCurrentPR,
+    checkForRemotePRUpdates,
+    dismissRemoteUpdates,
     backToInbox,
     setTourDirection,
     openOverview,
@@ -642,11 +1180,31 @@ export const useReviewStore = defineStore('review', () => {
     prevStep,
     toggleReviewed,
     isStepReviewed,
+    toggleIgnoreWhitespace,
+    setCommitFilter,
+    togglePinStep,
+    toggleHideStep,
+    moveStep,
+    resetTourCustomization,
     addDraftComment,
+    updateDraftComment,
     deleteDraftComment,
     replyToThread,
     toggleThreadResolved,
     postPRComment,
+    editReviewComment,
+    deleteReviewComment,
+    editIssueComment,
+    deleteIssueComment,
+    toggleCommentReaction,
+    mergePR,
+    closePR,
+    reopenPR,
+    setPRDraft,
+    addReviewer,
+    removeReviewer,
+    addLabels,
+    removeLabel,
     submitCompleteReview,
   }
 })

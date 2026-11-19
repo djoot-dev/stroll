@@ -4,7 +4,11 @@ export type TourDirection = 'bottom-up' | 'top-down'
 
 export type FileChangeStatus = 'added' | 'modified' | 'deleted' | 'renamed'
 
+export type FileViewedState = 'VIEWED' | 'UNVIEWED' | 'DISMISSED'
+
 export type ReviewEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'
+
+export type PRMergeMethod = 'MERGE' | 'SQUASH' | 'REBASE'
 
 export type DiffSide = 'LEFT' | 'RIGHT'
 
@@ -25,6 +29,22 @@ export type PRReviewState =
 
 export type CheckRollupState = 'SUCCESS' | 'FAILURE' | 'PENDING' | 'EXPECTED' | 'ERROR'
 
+export type ReactionContent =
+  | 'THUMBS_UP'
+  | 'THUMBS_DOWN'
+  | 'LAUGH'
+  | 'HOORAY'
+  | 'CONFUSED'
+  | 'HEART'
+  | 'ROCKET'
+  | 'EYES'
+
+export interface ReactionGroup {
+  content: ReactionContent
+  count: number
+  viewerHasReacted: boolean
+}
+
 export interface PRLabel {
   name: string
   color: string
@@ -43,6 +63,7 @@ export interface PRReview {
   state: PRReviewState
   body: string
   submittedAt: string | null
+  reactions?: ReactionGroup[]
 }
 
 export interface PRIssueComment {
@@ -50,6 +71,7 @@ export interface PRIssueComment {
   author: GitHubUser
   body: string
   createdAt: string
+  reactions?: ReactionGroup[]
 }
 
 export interface PRStatusCheck {
@@ -106,6 +128,8 @@ export interface PRFile {
   baseImageDataUrl?: string | null
   /** Optional preloaded base64 data URL for head image preview */
   headImageDataUrl?: string | null
+  /** GitHub viewer viewed state when loaded from GitHub GraphQL */
+  viewerViewedState?: FileViewedState
 }
 
 export interface ReviewComment {
@@ -114,6 +138,7 @@ export interface ReviewComment {
   body: string
   createdAt: string
   isPending?: boolean
+  reactions?: ReactionGroup[]
 }
 
 export interface ReviewThread {

@@ -17,18 +17,25 @@ import {
   GitPullRequestDraft,
   Loader2,
   MessageSquare,
+  Pencil,
+  Plus,
   Send,
   ShieldAlert,
   ShieldCheck,
+  Trash2,
   Users,
+  X,
   XCircle,
 } from '@lucide/vue'
 import { computed, ref } from 'vue'
 import { openExternalUrl } from '@/services/native'
+import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
-import type { PRReviewState, PRStatusCheck } from '@/types/pr'
+import type { PRMergeMethod, PRReviewState, PRStatusCheck, ReactionGroup } from '@/types/pr'
 import MarkdownContent from './MarkdownContent.vue'
+import ReactionBar from './ReactionBar.vue'
 
+const auth = useAuthStore()
 const review = useReviewStore()
 const pr = computed(() => review.pr)
 
@@ -37,6 +44,18 @@ const commitsExpanded = ref(true)
 const commentDraft = ref('')
 const isPostingComment = ref(false)
 const commentError = ref<string | null>(null)
+const editingCommentId = ref<string | null>(null)
+const editCommentBody = ref('')
+const isSavingCommentEdit = ref(false)
+const deletingCommentId = ref<string | null>(null)
+const mergeMenuOpen = ref(false)
+const mergeMethod = ref<PRMergeMethod>('SQUASH')
+const isUpdatingLifecycle = ref(false)
+const lifecycleError = ref<string | null>(null)
+const isAddingLabel = ref(false)
+const newLabelInput = ref('')
+const isAddingReviewer = ref(false)
+const newReviewerInput = ref('')
 
 function formatRelativeTime(iso: string | null | undefined): string {
   if (!iso) return ''
@@ -243,11 +262,13 @@ function reviewStatusMeta(status: ReviewerSummary['status'] | PRReviewState): {
 
 interface ConversationItem {
   id: string
+  rawId: string
   kind: 'comment' | 'review'
   author: { login: string; avatarUrl: string }
   body: string
   createdAt: string
   reviewState?: PRReviewState
+  reactions?: ReactionGroup[]
 }
 
 const conversationItems = computed<ConversationItem[]>(() => {
@@ -257,10 +278,12 @@ const conversationItems = computed<ConversationItem[]>(() => {
   for (const c of pr.value.issueComments) {
     items.push({
       id: `comment:${c.id}`,
+      rawId: c.id,
       kind: 'comment',
       author: c.author,
       body: c.body,
       createdAt: c.createdAt,
+      reactions: c.reactions,
     })
   }
 
@@ -269,16 +292,58 @@ const conversationItems = computed<ConversationItem[]>(() => {
     if (!r.body.trim()) continue
     items.push({
       id: `review:${r.id}`,
+      rawId: r.id,
       kind: 'review',
       author: r.author,
       body: r.body,
       createdAt: r.submittedAt ?? pr.value.updatedAt,
       reviewState: r.state,
+      reactions: r.reactions,
     })
   }
 
   return items.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
 })
+
+function canModifyIssueComment(item: ConversationItem): boolean {
+  if (item.kind !== 'comment') return false
+  if (pr.value?.isMock) return true
+  return Boolean(auth.viewer?.login && auth.viewer.login === item.author.login)
+}
+
+function startEditIssueComment(item: ConversationItem) {
+  editingCommentId.value = item.rawId
+  editCommentBody.value = item.body
+  commentError.value = null
+}
+
+async function handleSaveIssueCommentEdit(commentId: string) {
+  if (!editCommentBody.value.trim() || isSavingCommentEdit.value) return
+  isSavingCommentEdit.value = true
+  commentError.value = null
+  try {
+    await review.editIssueComment(commentId, editCommentBody.value)
+    editingCommentId.value = null
+    editCommentBody.value = ''
+  } catch (err) {
+    commentError.value = err instanceof Error ? err.message : 'Failed to update comment'
+  } finally {
+    isSavingCommentEdit.value = false
+  }
+}
+
+async function handleDeleteIssueComment(commentId: string) {
+  if (deletingCommentId.value) return
+  deletingCommentId.value = commentId
+  commentError.value = null
+  try {
+    await review.deleteIssueComment(commentId)
+  } catch (err) {
+    commentError.value = err instanceof Error ? err.message : 'Failed to delete comment'
+  } finally {
+    deletingCommentId.value = null
+  }
+}
 
 function labelBadgeStyle(hexColor: string): Record<string, string> {
   const clean = hexColor.replace(/^#/, '')
@@ -316,6 +381,96 @@ const tourCtaLabel = computed(() =>
     ? 'Continue Guided Tour'
     : 'Start Guided Tour',
 )
+
+async function handleMerge(method: PRMergeMethod) {
+  if (isUpdatingLifecycle.value) return
+  isUpdatingLifecycle.value = true
+  lifecycleError.value = null
+  mergeMenuOpen.value = false
+  try {
+    await review.mergePR(method)
+  } catch (err) {
+    lifecycleError.value = err instanceof Error ? err.message : 'Failed to merge Pull Request'
+  } finally {
+    isUpdatingLifecycle.value = false
+  }
+}
+
+async function handleToggleClose() {
+  if (!pr.value || isUpdatingLifecycle.value) return
+  isUpdatingLifecycle.value = true
+  lifecycleError.value = null
+  try {
+    if (pr.value.state === 'OPEN') {
+      await review.closePR()
+    } else if (pr.value.state === 'CLOSED') {
+      await review.reopenPR()
+    }
+  } catch (err) {
+    lifecycleError.value = err instanceof Error ? err.message : 'Failed to update PR state'
+  } finally {
+    isUpdatingLifecycle.value = false
+  }
+}
+
+async function handleToggleDraft() {
+  if (!pr.value || isUpdatingLifecycle.value) return
+  isUpdatingLifecycle.value = true
+  lifecycleError.value = null
+  try {
+    await review.setPRDraft(!pr.value.isDraft)
+  } catch (err) {
+    lifecycleError.value = err instanceof Error ? err.message : 'Failed to update draft state'
+  } finally {
+    isUpdatingLifecycle.value = false
+  }
+}
+
+async function handleAddLabels() {
+  const names = newLabelInput.value
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (names.length === 0) return
+  lifecycleError.value = null
+  try {
+    await review.addLabels(names)
+    newLabelInput.value = ''
+    isAddingLabel.value = false
+  } catch (err) {
+    lifecycleError.value = err instanceof Error ? err.message : 'Failed to add labels'
+  }
+}
+
+async function handleRemoveLabel(name: string) {
+  lifecycleError.value = null
+  try {
+    await review.removeLabel(name)
+  } catch (err) {
+    lifecycleError.value = err instanceof Error ? err.message : 'Failed to remove label'
+  }
+}
+
+async function handleAddReviewer() {
+  if (!newReviewerInput.value.trim()) return
+  lifecycleError.value = null
+  try {
+    await review.addReviewer(newReviewerInput.value)
+    newReviewerInput.value = ''
+    isAddingReviewer.value = false
+  } catch (err) {
+    lifecycleError.value = err instanceof Error ? err.message : 'Failed to request reviewer'
+  }
+}
+
+async function handleRemoveReviewer(login: string) {
+  lifecycleError.value = null
+  try {
+    await review.removeReviewer(login)
+  } catch (err) {
+    lifecycleError.value = err instanceof Error ? err.message : 'Failed to remove reviewer'
+  }
+}
 </script>
 
 <template>
@@ -406,7 +561,7 @@ const tourCtaLabel = computed(() =>
           </div>
 
           <!-- Labels -->
-          <div v-if="pr.labels.length > 0" class="flex flex-wrap items-center gap-1.5 pt-1">
+          <div class="flex flex-wrap items-center gap-1.5 pt-1">
             <span
               v-for="label in pr.labels"
               :key="label.name"
@@ -417,12 +572,49 @@ const tourCtaLabel = computed(() =>
                 class="h-2 w-2 rounded-full"
                 :style="labelDotStyle(label.color)"
               />
-              {{ label.name }}
+              <span>{{ label.name }}</span>
+              <button
+                type="button"
+                title="Remove label"
+                class="ml-0.5 rounded-full p-0.5 text-ink-faint transition-colors hover:bg-canvas-elevated hover:text-ink"
+                @click="handleRemoveLabel(label.name)"
+              >
+                <X class="h-2.5 w-2.5" />
+              </button>
             </span>
+
+            <form
+              v-if="isAddingLabel"
+              class="inline-flex items-center gap-1"
+              @submit.prevent="handleAddLabels"
+            >
+              <input
+                v-model="newLabelInput"
+                type="text"
+                placeholder="label1, label2…"
+                class="w-32 rounded-full border border-terra-border bg-canvas-inset px-2.5 py-0.5 text-[11px] text-ink focus:outline-none"
+                @keydown.esc.prevent="isAddingLabel = false"
+              />
+              <button
+                type="submit"
+                class="rounded-full bg-terra px-2 py-0.5 text-[10.5px] font-semibold text-white hover:bg-terra-hover"
+              >
+                Add
+              </button>
+            </form>
+            <button
+              v-else
+              type="button"
+              class="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-[10.5px] text-ink-muted transition-colors hover:border-terra-border hover:text-terra-text"
+              @click="isAddingLabel = true"
+            >
+              <Plus class="h-2.5 w-2.5" />
+              <span>Label</span>
+            </button>
           </div>
         </div>
 
-        <!-- Primary CTA: Start Guided Tour -->
+        <!-- Primary CTA & Lifecycle Actions -->
         <div class="flex shrink-0 flex-col items-end gap-2">
           <button
             class="inline-flex items-center gap-2 rounded-xl bg-terra px-4 py-2.5 text-xs font-semibold text-white shadow-xs transition-all hover:bg-terra-hover active:scale-[0.98] disabled:opacity-40"
@@ -435,6 +627,85 @@ const tourCtaLabel = computed(() =>
           <span class="text-[11px] text-ink-faint">
             {{ review.reviewedCount }} of {{ review.tourSteps.length }} steps reviewed
           </span>
+
+          <div class="relative flex flex-wrap items-center justify-end gap-1.5 pt-1">
+            <template v-if="pr.state === 'OPEN'">
+              <div class="relative inline-flex">
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1.5 rounded-l-lg border border-pine-border bg-pine-soft px-2.5 py-1 text-[11px] font-semibold text-pine-text transition-colors hover:bg-pine/20 disabled:opacity-40"
+                  :disabled="isUpdatingLifecycle || pr.isDraft || pr.mergeable === 'CONFLICTING'"
+                  :title="pr.isDraft ? 'Mark ready for review before merging' : pr.mergeable === 'CONFLICTING' ? 'Resolve merge conflicts before merging' : `Merge using ${mergeMethod}`"
+                  @click="handleMerge(mergeMethod)"
+                >
+                  <Loader2 v-if="isUpdatingLifecycle" class="h-3 w-3 animate-spin" />
+                  <GitMerge v-else class="h-3 w-3" />
+                  <span>{{ mergeMethod === 'SQUASH' ? 'Squash & merge' : mergeMethod === 'REBASE' ? 'Rebase & merge' : 'Merge PR' }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="inline-flex items-center rounded-r-lg border border-l-0 border-pine-border bg-pine-soft px-1.5 py-1 text-pine-text transition-colors hover:bg-pine/20 disabled:opacity-40"
+                  :disabled="isUpdatingLifecycle"
+                  @click="mergeMenuOpen = !mergeMenuOpen"
+                >
+                  <ChevronDown class="h-3 w-3" />
+                </button>
+
+                <div
+                  v-if="mergeMenuOpen"
+                  class="animate-pop-in absolute right-0 top-full z-20 mt-1 w-44 rounded-xl border border-border bg-canvas-subtle p-1 shadow-lg"
+                >
+                  <button
+                    v-for="opt in [
+                      { value: 'SQUASH' as PRMergeMethod, label: 'Squash and merge' },
+                      { value: 'MERGE' as PRMergeMethod, label: 'Create a merge commit' },
+                      { value: 'REBASE' as PRMergeMethod, label: 'Rebase and merge' },
+                    ]"
+                    :key="opt.value"
+                    type="button"
+                    class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-[11px] transition-colors hover:bg-canvas-elevated"
+                    :class="mergeMethod === opt.value ? 'font-semibold text-terra-text' : 'text-ink-secondary'"
+                    @click="mergeMethod = opt.value; mergeMenuOpen = false"
+                  >
+                    <span>{{ opt.label }}</span>
+                    <CheckCircle2 v-if="mergeMethod === opt.value" class="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary transition-colors hover:bg-canvas-elevated disabled:opacity-40"
+                :disabled="isUpdatingLifecycle"
+                @click="handleToggleDraft"
+              >
+                {{ pr.isDraft ? 'Ready for review' : 'Convert to draft' }}
+              </button>
+
+              <button
+                type="button"
+                class="rounded-lg border border-crimson-border/60 bg-canvas px-2.5 py-1 text-[11px] text-crimson-text transition-colors hover:bg-crimson-soft disabled:opacity-40"
+                :disabled="isUpdatingLifecycle"
+                @click="handleToggleClose"
+              >
+                Close PR
+              </button>
+            </template>
+
+            <button
+              v-else-if="pr.state === 'CLOSED'"
+              type="button"
+              class="rounded-lg border border-pine-border bg-pine-soft px-2.5 py-1 text-[11px] font-semibold text-pine-text transition-colors hover:bg-pine/20 disabled:opacity-40"
+              :disabled="isUpdatingLifecycle"
+              @click="handleToggleClose"
+            >
+              Reopen PR
+            </button>
+          </div>
+
+          <p v-if="lifecycleError" class="max-w-xs text-right text-[11px] text-crimson-text">
+            {{ lifecycleError }}
+          </p>
         </div>
       </div>
     </section>
@@ -551,6 +822,35 @@ const tourCtaLabel = computed(() =>
               </p>
             </div>
           </div>
+
+          <form
+            v-if="isAddingReviewer"
+            class="flex items-center gap-1"
+            @submit.prevent="handleAddReviewer"
+          >
+            <input
+              v-model="newReviewerInput"
+              type="text"
+              placeholder="@username"
+              class="w-28 rounded-lg border border-terra-border bg-canvas-inset px-2 py-1 text-[11px] text-ink focus:outline-none"
+              @keydown.esc.prevent="isAddingReviewer = false"
+            />
+            <button
+              type="submit"
+              class="rounded-lg bg-terra px-2 py-1 text-[10.5px] font-semibold text-white hover:bg-terra-hover"
+            >
+              Request
+            </button>
+          </form>
+          <button
+            v-else
+            type="button"
+            class="inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-1 text-[11px] text-ink-secondary transition-colors hover:border-terra-border hover:text-terra-text"
+            @click="isAddingReviewer = true"
+          >
+            <Plus class="h-3 w-3" />
+            <span>Request</span>
+          </button>
         </div>
 
         <div v-if="reviewerSummaries.length === 0" class="px-5 py-4 text-xs text-ink-faint">
@@ -580,12 +880,23 @@ const tourCtaLabel = computed(() =>
               <span class="truncate font-medium text-ink">{{ reviewer.displayName }}</span>
             </div>
 
-            <span
-              class="shrink-0 rounded-full border px-2 py-0.5 text-[10.5px] font-medium"
-              :class="reviewStatusMeta(reviewer.status).class"
-            >
-              {{ reviewStatusMeta(reviewer.status).label }}
-            </span>
+            <div class="flex items-center gap-1.5">
+              <span
+                class="shrink-0 rounded-full border px-2 py-0.5 text-[10.5px] font-medium"
+                :class="reviewStatusMeta(reviewer.status).class"
+              >
+                {{ reviewStatusMeta(reviewer.status).label }}
+              </span>
+              <button
+                v-if="reviewer.status === 'REQUESTED' && !reviewer.isTeam"
+                type="button"
+                title="Remove reviewer request"
+                class="rounded p-0.5 text-ink-faint transition-colors hover:bg-canvas-elevated hover:text-ink"
+                @click="handleRemoveReviewer(reviewer.login)"
+              >
+                <X class="h-3 w-3" />
+              </button>
+            </div>
           </li>
         </ul>
       </section>
@@ -619,7 +930,9 @@ const tourCtaLabel = computed(() =>
           <li
             v-for="commit in pr.commits"
             :key="commit.oid"
-            class="flex items-center justify-between gap-3 px-5 py-2.5 text-xs"
+            class="flex cursor-pointer items-center justify-between gap-3 px-5 py-2.5 text-xs transition-colors hover:bg-canvas-elevated/40"
+            title="Review changes in this commit"
+            @click="review.setCommitFilter(commit.oid).then(() => review.startTour())"
           >
             <div class="flex min-w-0 items-center gap-2.5">
               <code class="shrink-0 rounded bg-canvas-elevated px-1.5 py-0.5 font-mono text-[11px] text-terra-text">
@@ -680,15 +993,68 @@ const tourCtaLabel = computed(() =>
                 {{ reviewStatusMeta(item.reviewState).label }}
               </span>
             </div>
-            <span class="text-[11px] text-ink-faint">
-              {{ formatRelativeTime(item.createdAt) }}
-            </span>
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] text-ink-faint">
+                {{ formatRelativeTime(item.createdAt) }}
+              </span>
+              <template v-if="canModifyIssueComment(item)">
+                <button
+                  type="button"
+                  title="Edit comment"
+                  class="rounded p-0.5 text-ink-faint transition-colors hover:bg-canvas-elevated hover:text-ink"
+                  @click="startEditIssueComment(item)"
+                >
+                  <Pencil class="h-3 w-3" />
+                </button>
+                <button
+                  type="button"
+                  title="Delete comment"
+                  class="rounded p-0.5 text-ink-faint transition-colors hover:bg-crimson-soft hover:text-crimson-text disabled:opacity-40"
+                  :disabled="deletingCommentId === item.rawId"
+                  @click="handleDeleteIssueComment(item.rawId)"
+                >
+                  <Loader2 v-if="deletingCommentId === item.rawId" class="h-3 w-3 animate-spin" />
+                  <Trash2 v-else class="h-3 w-3" />
+                </button>
+              </template>
+            </div>
           </div>
 
-          <MarkdownContent
-            :content="item.body"
-            class="text-xs leading-relaxed text-ink-secondary"
-          />
+          <div v-if="editingCommentId === item.rawId" class="space-y-2 pt-1">
+            <textarea
+              v-model="editCommentBody"
+              rows="3"
+              class="w-full resize-y rounded-xl border border-border bg-canvas-inset px-3 py-2 text-xs text-ink focus:border-terra-border focus:outline-none"
+              @keydown.meta.enter.prevent="handleSaveIssueCommentEdit(item.rawId)"
+              @keydown.ctrl.enter.prevent="handleSaveIssueCommentEdit(item.rawId)"
+              @keydown.esc.prevent="editingCommentId = null"
+            />
+            <div class="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-canvas-elevated"
+                @click="editingCommentId = null"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 rounded-lg bg-terra px-3 py-1 text-[11px] font-semibold text-white hover:bg-terra-hover disabled:opacity-40"
+                :disabled="isSavingCommentEdit || !editCommentBody.trim()"
+                @click="handleSaveIssueCommentEdit(item.rawId)"
+              >
+                <Loader2 v-if="isSavingCommentEdit" class="h-3 w-3 animate-spin" />
+                <span>Save</span>
+              </button>
+            </div>
+          </div>
+          <template v-else>
+            <MarkdownContent
+              :content="item.body"
+              class="text-xs leading-relaxed text-ink-secondary"
+            />
+            <ReactionBar :subject-id="item.rawId" :reactions="item.reactions" />
+          </template>
         </article>
       </div>
 
