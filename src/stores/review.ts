@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { MOCK_PR } from '@/data/mockPR'
 import {
+  addPRComment,
   addReviewThread,
   createPendingReview,
   fetchPullRequest,
@@ -24,6 +25,7 @@ import {
 import type {
   DiffSide,
   DraftComment,
+  PRIssueComment,
   PullRequestData,
   ReviewEvent,
   TourDirection,
@@ -34,6 +36,8 @@ import { useSettingsStore } from './settings'
 
 export type AppScreen = 'splash' | 'inbox' | 'review' | 'submitted'
 
+export type ReviewViewMode = 'overview' | 'step'
+
 export interface SubmittedReviewSummary {
   prRef: string
   prTitle: string
@@ -43,6 +47,7 @@ export interface SubmittedReviewSummary {
 
 export const useReviewStore = defineStore('review', () => {
   const screen = ref<AppScreen>('splash')
+  const activeView = ref<ReviewViewMode>('overview')
   const pr = ref<PullRequestData | null>(null)
   const tourDirection = ref<TourDirection>('bottom-up')
   const currentStepIndex = ref(0)
@@ -53,7 +58,9 @@ export const useReviewStore = defineStore('review', () => {
   const lastSubmitted = ref<SubmittedReviewSummary | null>(null)
 
   const isLoadingPR = ref(false)
+  const isRefreshingPR = ref(false)
   const prError = ref<string | null>(null)
+  const refreshError = ref<string | null>(null)
   const isSubmittingReview = ref(false)
   const submitError = ref<string | null>(null)
   const submitSuccessMessage = ref<string | null>(null)
@@ -119,12 +126,14 @@ export const useReviewStore = defineStore('review', () => {
   async function activatePR(data: PullRequestData): Promise<void> {
     const settings = useSettingsStore()
     pr.value = data
+    activeView.value = 'overview'
     currentStepIndex.value = 0
     reviewedPaths.value = new Set()
     fileFingerprints = new Map(
       data.files.map((file) => [file.path, computeFileFingerprint(file)]),
     )
     sidebarOpen.value = settings.sidebarDefaultOpen
+    refreshError.value = null
     submitError.value = null
     submitSuccessMessage.value = null
     const key = `${data.owner}/${data.repo}#${data.number}`
@@ -208,23 +217,123 @@ export const useReviewStore = defineStore('review', () => {
     }
   }
 
+  async function refreshCurrentPR(): Promise<boolean> {
+    if (!pr.value) return false
+    if (pr.value.isMock) {
+      refreshError.value = null
+      return true
+    }
+
+    const auth = useAuthStore()
+    if (!auth.pat) {
+      refreshError.value = 'GitHub PAT is required to refresh Pull Request.'
+      return false
+    }
+
+    if (isRefreshingPR.value) return false
+
+    const activePath = currentStep.value?.file.path ?? null
+    const prevStepIndex = currentStepIndex.value
+    const prevView = activeView.value
+    const prevFingerprints = new Map(fileFingerprints)
+    const prevReviewed = new Set(reviewedPaths.value)
+    const { owner, repo, number } = pr.value
+    const localRepoPath = currentRepoPath.value
+
+    isRefreshingPR.value = true
+    refreshError.value = null
+    try {
+      const data = await fetchPullRequest(auth.pat, owner, repo, number, localRepoPath)
+      const nextFingerprints = new Map(
+        data.files.map((file) => [file.path, computeFileFingerprint(file)]),
+      )
+
+      const restoredPaths = new Set<string>()
+      const validViewed: ViewedFilesMap = {}
+      for (const file of data.files) {
+        const nextFp = nextFingerprints.get(file.path) ?? computeFileFingerprint(file)
+        if (prevReviewed.has(file.path) && prevFingerprints.get(file.path) === nextFp) {
+          restoredPaths.add(file.path)
+          validViewed[file.path] = nextFp
+        }
+      }
+
+      pr.value = data
+      fileFingerprints = nextFingerprints
+      reviewedPaths.value = restoredPaths
+
+      const key = `${data.owner}/${data.repo}#${data.number}`
+      await saveViewedFiles(key, validViewed)
+
+      if (activePath) {
+        const mappedIdx = tourSteps.value.findIndex((s) => s.file.path === activePath)
+        if (mappedIdx >= 0) {
+          currentStepIndex.value = mappedIdx
+        } else {
+          currentStepIndex.value = Math.min(prevStepIndex, Math.max(0, tourSteps.value.length - 1))
+        }
+      } else {
+        currentStepIndex.value = Math.min(prevStepIndex, Math.max(0, tourSteps.value.length - 1))
+      }
+
+      activeView.value = prevView
+      return true
+    } catch (err) {
+      refreshError.value = err instanceof Error ? err.message : 'Failed to refresh Pull Request'
+      return false
+    } finally {
+      isRefreshingPR.value = false
+    }
+  }
+
+  function openOverview(): void {
+    activeView.value = 'overview'
+  }
+
+  function toggleOverview(): void {
+    if (activeView.value === 'overview') {
+      if (tourSteps.value.length > 0) {
+        activeView.value = 'step'
+      }
+    } else {
+      activeView.value = 'overview'
+    }
+  }
+
+  function startTour(): void {
+    if (tourSteps.value.length > 0) {
+      activeView.value = 'step'
+    }
+  }
+
   function goToStep(index: number): void {
     if (index < 0 || index >= tourSteps.value.length) return
     currentStepIndex.value = index
+    activeView.value = 'step'
   }
 
   function goToFile(path: string): void {
     const idx = tourSteps.value.findIndex((s) => s.file.path === path)
-    if (idx >= 0) currentStepIndex.value = idx
+    if (idx >= 0) {
+      currentStepIndex.value = idx
+      activeView.value = 'step'
+    }
   }
 
   function nextStep(): void {
+    if (activeView.value === 'overview') {
+      if (tourSteps.value.length > 0) {
+        activeView.value = 'step'
+      }
+      return
+    }
     if (currentStepIndex.value < tourSteps.value.length - 1) {
       currentStepIndex.value += 1
     }
   }
 
   function prevStep(): void {
+    if (activeView.value === 'overview') return
     if (currentStepIndex.value > 0) {
       currentStepIndex.value -= 1
     }
@@ -454,8 +563,43 @@ export const useReviewStore = defineStore('review', () => {
     target.isResolved = await setReviewThreadResolved(auth.pat, threadId, nextState)
   }
 
+  async function postPRComment(body: string): Promise<PRIssueComment | null> {
+    if (!pr.value || !body.trim()) return null
+    const auth = useAuthStore()
+    const trimmed = body.trim()
+
+    if (pr.value.isMock) {
+      const comment: PRIssueComment = {
+        id: `mock_pr_comment_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        author: auth.viewer ?? {
+          login: 'you (demo)',
+          avatarUrl: 'https://avatars.githubusercontent.com/u/0?v=4',
+        },
+        body: trimmed,
+        createdAt: new Date().toISOString(),
+      }
+      pr.value = {
+        ...pr.value,
+        issueComments: [...pr.value.issueComments, comment],
+      }
+      return comment
+    }
+
+    if (!auth.pat) {
+      throw new Error('GitHub PAT is required to comment on a Pull Request.')
+    }
+
+    const comment = await addPRComment(auth.pat, pr.value.id, trimmed)
+    pr.value = {
+      ...pr.value,
+      issueComments: [...pr.value.issueComments, comment],
+    }
+    return comment
+  }
+
   return {
     screen,
+    activeView,
     pr,
     lastSubmitted,
     tourDirection,
@@ -465,7 +609,9 @@ export const useReviewStore = defineStore('review', () => {
     repoPaths,
     currentRepoPath,
     isLoadingPR,
+    isRefreshingPR,
     prError,
+    refreshError,
     isSubmittingReview,
     submitError,
     submitSuccessMessage,
@@ -483,8 +629,12 @@ export const useReviewStore = defineStore('review', () => {
     loadMockPR,
     loadPRByUrl,
     loadPRByRepo,
+    refreshCurrentPR,
     backToInbox,
     setTourDirection,
+    openOverview,
+    toggleOverview,
+    startTour,
     goToStep,
     goToFile,
     nextStep,
@@ -495,6 +645,7 @@ export const useReviewStore = defineStore('review', () => {
     deleteDraftComment,
     replyToThread,
     toggleThreadResolved,
+    postPRComment,
     submitCompleteReview,
   }
 })

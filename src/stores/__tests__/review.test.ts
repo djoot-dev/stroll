@@ -185,3 +185,151 @@ describe('useReviewStore viewed files persistence', () => {
     expect(store.reviewedCount).toBe(0)
   })
 })
+
+describe('useReviewStore refreshCurrentPR and PR overview comments', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.stubGlobal('localStorage', createMemoryStorage())
+    fetchPullRequestMock.mockReset()
+  })
+
+  it('refreshes the active PR while preserving current file, drafts, and valid viewed state', async () => {
+    const initialPR = makePR({
+      owner: 'acme',
+      repo: 'stroll',
+      number: 99,
+    })
+    fetchPullRequestMock.mockResolvedValueOnce(initialPR)
+
+    const auth = useAuthStore()
+    auth.pat = 'ghp_test_token'
+
+    const store = useReviewStore()
+    await store.loadPRByRepo('acme', 'stroll', 99)
+
+    // Navigate to the 3rd step in the tour so we can verify step-path preservation
+    const targetStep = store.tourSteps[2]
+    store.goToStep(2)
+    expect(store.activeView).toBe('step')
+    expect(store.currentStep?.file.path).toBe(targetStep.file.path)
+
+    // Mark two files as viewed: one will remain unchanged, one will change on refresh
+    const unchangedPath = store.tourSteps[0].file.path
+    const changedPath = store.tourSteps[1].file.path
+    await store.toggleReviewed(unchangedPath)
+    await store.toggleReviewed(changedPath)
+
+    // Add a local draft comment
+    await store.addDraftComment(targetStep.file.path, 10, 'RIGHT', 'Check edge case here')
+    expect(store.draftComments).toHaveLength(1)
+
+    // Build refreshed PR where a new config file is added (shifting indices!),
+    // changedPath has an updated patch, and a new issue comment arrived
+    const updatedFiles = initialPR.files.map((f) => {
+      const cloned = structuredClone(f)
+      if (cloned.path === changedPath) {
+        cloned.patch = `${cloned.patch}\n+// refreshed change`
+        cloned.headContent = `${cloned.headContent ?? ''}\n// refreshed change`
+      }
+      return cloned
+    })
+    updatedFiles.push({
+      path: 'package.json',
+      status: 'modified',
+      additions: 1,
+      deletions: 0,
+      language: 'json',
+      baseContent: '{}',
+      headContent: '{"name":"updated"}',
+      patch: '@@ -1 +1 @@\n-{}\n+{"name":"updated"}',
+    })
+
+    const refreshedPR = makePR({
+      owner: 'acme',
+      repo: 'stroll',
+      number: 99,
+      files: updatedFiles,
+      issueComments: [
+        ...initialPR.issueComments,
+        {
+          id: 'ic_new',
+          author: { login: 'reviewer', avatarUrl: '' },
+          body: 'Pushed a follow-up commit.',
+          createdAt: '2026-11-19T10:00:00Z',
+        },
+      ],
+    })
+    fetchPullRequestMock.mockResolvedValueOnce(refreshedPR)
+
+    const ok = await store.refreshCurrentPR()
+    expect(ok).toBe(true)
+    expect(store.isRefreshingPR).toBe(false)
+
+    // Active file path and view mode preserved even though a new config file shifted step indices
+    expect(store.activeView).toBe('step')
+    expect(store.currentStep?.file.path).toBe(targetStep.file.path)
+
+    // Local draft comments preserved
+    expect(store.draftComments).toHaveLength(1)
+    expect(store.draftComments[0].body).toBe('Check edge case here')
+
+    // Valid viewed fingerprint preserved, changed file unmarked
+    expect(store.isStepReviewed(unchangedPath)).toBe(true)
+    expect(store.isStepReviewed(changedPath)).toBe(false)
+    expect(store.reviewedCount).toBe(1)
+
+    // Refreshed PR metadata/comments applied
+    expect(store.pr?.issueComments.some((c) => c.id === 'ic_new')).toBe(true)
+  })
+
+  it('handles refreshCurrentPR gracefully in Demo PR mode', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+    store.goToStep(1)
+    await store.addDraftComment(store.tourSteps[1].file.path, 5, 'RIGHT', 'Demo draft')
+
+    const ok = await store.refreshCurrentPR()
+    expect(ok).toBe(true)
+    expect(fetchPullRequestMock).not.toHaveBeenCalled()
+    expect(store.currentStepIndex).toBe(1)
+    expect(store.draftComments).toHaveLength(1)
+  })
+
+  it('posts a general PR comment locally in Demo PR mode', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+
+    const initialCount = store.pr?.issueComments.length ?? 0
+
+    // Blank comments are ignored
+    expect(await store.postPRComment('   ')).toBeNull()
+    expect(store.pr?.issueComments.length).toBe(initialCount)
+
+    const created = await store.postPRComment('Looks great overall, checking the tests next!')
+    expect(created).not.toBeNull()
+    expect(created?.body).toBe('Looks great overall, checking the tests next!')
+    expect(created?.author.login).toBe('you (demo)')
+    expect(store.pr?.issueComments.length).toBe(initialCount + 1)
+    expect(store.pr?.issueComments[initialCount].body).toBe(
+      'Looks great overall, checking the tests next!',
+    )
+  })
+
+  it('toggles between Overview and Step view without losing currentStepIndex', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+
+    expect(store.activeView).toBe('overview')
+    store.goToStep(3)
+    expect(store.activeView).toBe('step')
+    expect(store.currentStepIndex).toBe(3)
+
+    store.toggleOverview()
+    expect(store.activeView).toBe('overview')
+    expect(store.currentStepIndex).toBe(3)
+
+    store.toggleOverview()
+    expect(store.activeView).toBe('step')
+    expect(store.currentStepIndex).toBe(3)
+  })
+})

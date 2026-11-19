@@ -6,6 +6,7 @@ import FinishReviewModal from '@/components/FinishReviewModal.vue'
 import KeyboardShortcutsBar from '@/components/KeyboardShortcutsBar.vue'
 import PRInboxView from '@/components/PRInboxView.vue'
 import PRLoaderModal from '@/components/PRLoaderModal.vue'
+import PROverview from '@/components/PROverview.vue'
 import ReviewSubmittedView from '@/components/ReviewSubmittedView.vue'
 import SettingsModal from '@/components/SettingsModal.vue'
 import SplashScreen from '@/components/SplashScreen.vue'
@@ -109,6 +110,16 @@ watch(
   },
 )
 
+watch(
+  () => review.activeView,
+  () => {
+    cancelSmoothScroll()
+    if (previewScrollRef.value) {
+      previewScrollRef.value.scrollTop = 0
+    }
+  },
+)
+
 function isEditableElement(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
   const tag = target.tagName.toLowerCase()
@@ -148,15 +159,23 @@ function handleKeydown(e: KeyboardEvent) {
     return
   }
 
-  if (e.key === 'l' || e.key === 'L' || e.key === 'ArrowRight') {
+  if (e.key === '0') {
+    e.preventDefault()
+    review.openOverview()
+  } else if (e.key === 'o' || e.key === 'O') {
+    e.preventDefault()
+    review.toggleOverview()
+  } else if (e.key === 'l' || e.key === 'L' || e.key === 'ArrowRight') {
     e.preventDefault()
     review.nextStep()
   } else if (e.key === 'h' || e.key === 'H' || e.key === 'ArrowLeft') {
     e.preventDefault()
     review.prevStep()
   } else if (e.key === 'm' || e.key === 'M') {
-    e.preventDefault()
-    review.toggleReviewed()
+    if (review.activeView === 'step') {
+      e.preventDefault()
+      review.toggleReviewed()
+    }
   } else if (e.key === '[') {
     e.preventDefault()
     review.sidebarOpen = !review.sidebarOpen
@@ -218,7 +237,9 @@ onBeforeUnmount(() => {
           @wheel="cancelSmoothScroll"
           @pointerdown="cancelSmoothScroll"
         >
-          <template v-if="review.currentStep">
+          <PROverview v-if="review.pr && review.activeView === 'overview'" />
+
+          <template v-else-if="review.currentStep">
             <Transition :name="stepTransitionName" mode="out-in">
               <DiffViewer :key="review.currentStep.file.path" :step="review.currentStep" />
             </Transition>

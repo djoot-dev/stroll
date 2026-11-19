@@ -1,9 +1,18 @@
 <script setup lang="ts">
-import { Check, MessageSquare } from '@lucide/vue'
+import { Check, FileText, MessageSquare } from '@lucide/vue'
+import { computed } from 'vue'
 import { LAYER_META } from '@/services/readingOrder'
 import { useReviewStore } from '@/stores/review'
 
 const review = useReviewStore()
+
+const overviewCommentCount = computed(() => {
+  if (!review.pr) return 0
+  const reviewBodies = review.pr.reviews.filter(
+    (r) => r.state !== 'PENDING' && r.body.trim().length > 0,
+  ).length
+  return review.pr.issueComments.length + reviewBodies
+})
 
 function draftCountForFile(path: string): number {
   const drafts = review.draftComments.filter((d) => d.path === path).length
@@ -52,6 +61,55 @@ function dirOnly(path: string): string {
         </div>
       </div>
 
+      <!-- Pinned Step 0: PR Overview -->
+      <div class="border-b border-border-muted px-2.5 py-2">
+        <button
+          class="group flex w-full items-center justify-between gap-2 rounded-xl border px-2.5 py-2 text-left transition-all"
+          :class="
+            review.activeView === 'overview'
+              ? 'stroll-card border-terra-border bg-terra-soft'
+              : 'border-transparent hover:border-border-muted hover:bg-canvas-elevated/60'
+          "
+          title="PR Overview (0 or O)"
+          @click="review.openOverview()"
+        >
+          <div class="flex min-w-0 items-center gap-2.5">
+            <span
+              class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-colors"
+              :class="
+                review.activeView === 'overview'
+                  ? 'bg-terra text-white shadow-xs'
+                  : 'border border-border bg-canvas-subtle text-ink-muted group-hover:border-terra-border group-hover:text-ink'
+              "
+            >
+              <FileText class="h-3 w-3" />
+            </span>
+            <div class="min-w-0">
+              <div
+                class="truncate text-xs font-semibold"
+                :class="review.activeView === 'overview' ? 'text-ink' : 'text-ink-secondary group-hover:text-ink'"
+              >
+                Overview
+              </div>
+              <div class="truncate text-[10px] text-ink-faint">
+                Description, checks &amp; discussion
+              </div>
+            </div>
+          </div>
+
+          <div class="flex shrink-0 items-center gap-1.5">
+            <span
+              v-if="overviewCommentCount > 0"
+              class="inline-flex items-center gap-0.5 rounded-md bg-canvas-elevated px-1.5 py-0.2 font-mono text-[10px] text-ink-muted"
+            >
+              <MessageSquare class="h-2.5 w-2.5" />
+              {{ overviewCommentCount }}
+            </span>
+            <kbd class="rounded border border-border bg-canvas px-1 font-mono text-[9.5px] text-ink-faint">0</kbd>
+          </div>
+        </button>
+      </div>
+
       <!-- Ordered Tour Steps — Connected Stepping-Stone Trail -->
       <div class="relative flex-1 overflow-y-auto px-2.5 py-2.5">
         <div class="relative space-y-1">
@@ -66,7 +124,7 @@ function dirOnly(path: string): string {
             :key="step.file.path"
             class="group relative flex w-full items-start gap-2.5 rounded-xl border px-2 py-2 text-left transition-all"
             :class="
-              step.stepIndex === review.currentStepIndex
+              review.activeView === 'step' && step.stepIndex === review.currentStepIndex
                 ? 'stroll-card border-terra-border bg-terra-soft'
                 : 'border-transparent hover:border-border-muted hover:bg-canvas-elevated/60'
             "
@@ -78,7 +136,7 @@ function dirOnly(path: string): string {
               :class="
                 review.isStepReviewed(step.file.path)
                   ? 'animate-check-pop bg-pine text-white shadow-xs'
-                  : step.stepIndex === review.currentStepIndex
+                  : review.activeView === 'step' && step.stepIndex === review.currentStepIndex
                     ? 'bg-terra text-white ring-3 ring-terra-soft shadow-xs'
                     : 'border border-border bg-canvas-subtle text-ink-muted group-hover:border-terra-border group-hover:text-ink'
               "
@@ -101,7 +159,7 @@ function dirOnly(path: string): string {
                   <span
                     class="truncate font-mono text-xs font-medium"
                     :class="
-                      step.stepIndex === review.currentStepIndex
+                      review.activeView === 'step' && step.stepIndex === review.currentStepIndex
                         ? 'text-ink'
                         : 'text-ink-secondary group-hover:text-ink'
                     "

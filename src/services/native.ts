@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { openUrl } from '@tauri-apps/plugin-opener'
 
 export interface RuntimeInfo {
   app_version: string
@@ -110,5 +111,30 @@ export async function getGhAuthToken(): Promise<{ token: string | null; error: s
       token: null,
       error: typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to read gh auth token',
     }
+  }
+}
+
+export async function openExternalUrl(url: string): Promise<void> {
+  const trimmed = url.trim()
+  if (!trimmed) return
+
+  let parsed: URL
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    return
+  }
+
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    return
+  }
+
+  if (isTauriRuntime()) {
+    await openUrl(parsed.toString())
+    return
+  }
+
+  if (typeof window !== 'undefined') {
+    window.open(parsed.toString(), '_blank', 'noopener,noreferrer')
   }
 }

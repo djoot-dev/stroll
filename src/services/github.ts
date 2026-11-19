@@ -1,12 +1,22 @@
 import { httpFetch } from './http'
 import { gitReadBlobs, isTauriRuntime, type GitBlobSpec } from './native'
 import type {
+  CheckRollupState,
   DiffSide,
   FileChangeStatus,
   GitHubUser,
   PRCommit,
   PRFile,
   PRFilterMode,
+  PRIssueComment,
+  PRLabel,
+  PRMergeableState,
+  PRRequestedReviewer,
+  PRReview,
+  PRReviewDecision,
+  PRReviewState,
+  PRStatusCheck,
+  PRStatusCheckRollup,
   PRSummary,
   PullRequestData,
   ReviewComment,
@@ -305,6 +315,11 @@ export async function fetchPullRequest(
           body
           url
           state
+          isDraft
+          mergeable
+          reviewDecision
+          createdAt
+          updatedAt
           baseRefName
           headRefName
           baseRefOid
@@ -312,6 +327,29 @@ export async function fetchPullRequest(
           author {
             login
             avatarUrl
+          }
+          labels(first: 20) {
+            nodes {
+              name
+              color
+            }
+          }
+          reviewRequests(first: 20) {
+            nodes {
+              requestedReviewer {
+                __typename
+                ... on User {
+                  login
+                  name
+                  avatarUrl
+                }
+                ... on Team {
+                  name
+                  slug
+                  avatarUrl
+                }
+              }
+            }
           }
           commits(first: 50) {
             nodes {
@@ -326,11 +364,63 @@ export async function fetchPullRequest(
               }
             }
           }
-          reviews(first: 20, states: [PENDING]) {
+          headCommit: commits(last: 1) {
+            nodes {
+              commit {
+                statusCheckRollup {
+                  state
+                  contexts(first: 50) {
+                    nodes {
+                      __typename
+                      ... on CheckRun {
+                        id
+                        name
+                        status
+                        conclusion
+                        detailsUrl
+                        title
+                      }
+                      ... on StatusContext {
+                        id
+                        context
+                        state
+                        targetUrl
+                        description
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+          pendingReviews: reviews(first: 20, states: [PENDING]) {
             nodes {
               id
               author {
                 login
+              }
+            }
+          }
+          reviews(last: 50) {
+            nodes {
+              id
+              state
+              body
+              submittedAt
+              author {
+                login
+                avatarUrl
+              }
+            }
+          }
+          comments(first: 50) {
+            nodes {
+              id
+              body
+              createdAt
+              author {
+                login
+                avatarUrl
               }
             }
           }
@@ -363,6 +453,25 @@ export async function fetchPullRequest(
     }
   `
 
+  interface RawCheckRun {
+    __typename: 'CheckRun'
+    id: string
+    name: string
+    status: string
+    conclusion: string | null
+    detailsUrl: string | null
+    title: string | null
+  }
+
+  interface RawStatusContext {
+    __typename: 'StatusContext'
+    id: string
+    context: string
+    state: string
+    targetUrl: string | null
+    description: string | null
+  }
+
   interface RawPRResp {
     repository: {
       pullRequest: {
@@ -372,11 +481,28 @@ export async function fetchPullRequest(
         body: string
         url: string
         state: 'OPEN' | 'CLOSED' | 'MERGED'
+        isDraft: boolean
+        mergeable: PRMergeableState
+        reviewDecision: PRReviewDecision
+        createdAt: string
+        updatedAt: string
         baseRefName: string
         headRefName: string
         baseRefOid: string
         headRefOid: string
         author: GitHubUser | null
+        labels: {
+          nodes: Array<PRLabel | null>
+        }
+        reviewRequests: {
+          nodes: Array<{
+            requestedReviewer:
+              | { __typename: 'User'; login: string; name?: string | null; avatarUrl: string }
+              | { __typename: 'Team'; name: string; slug: string; avatarUrl?: string | null }
+              | { __typename: string }
+              | null
+          } | null>
+        }
         commits: {
           nodes: Array<{
             commit: {
@@ -388,8 +514,37 @@ export async function fetchPullRequest(
             }
           }>
         }
-        reviews: {
+        headCommit: {
+          nodes: Array<{
+            commit: {
+              statusCheckRollup: {
+                state: CheckRollupState
+                contexts: {
+                  nodes: Array<RawCheckRun | RawStatusContext | { __typename: string } | null>
+                }
+              } | null
+            }
+          }>
+        }
+        pendingReviews: {
           nodes: Array<{ id: string; author: { login: string } | null }>
+        }
+        reviews: {
+          nodes: Array<{
+            id: string
+            state: PRReviewState
+            body: string
+            submittedAt: string | null
+            author: GitHubUser | null
+          } | null>
+        }
+        comments: {
+          nodes: Array<{
+            id: string
+            body: string
+            createdAt: string
+            author: GitHubUser | null
+          } | null>
         }
         reviewThreads: {
           nodes: Array<{
@@ -523,6 +678,84 @@ export async function fetchPullRequest(
       })),
     }))
 
+  const labels: PRLabel[] = (pr.labels?.nodes ?? [])
+    .filter((l): l is PRLabel => Boolean(l && l.name))
+    .map((l) => ({ name: l.name, color: l.color }))
+
+  const requestedReviewers: PRRequestedReviewer[] = []
+  for (const node of pr.reviewRequests?.nodes ?? []) {
+    const reviewer = node?.requestedReviewer
+    if (!reviewer) continue
+    if (reviewer.__typename === 'User' && 'login' in reviewer) {
+      requestedReviewers.push({
+        type: 'user',
+        login: reviewer.login,
+        name: reviewer.name ?? null,
+        avatarUrl: reviewer.avatarUrl,
+      })
+    } else if (reviewer.__typename === 'Team' && 'slug' in reviewer) {
+      requestedReviewers.push({
+        type: 'team',
+        login: reviewer.slug,
+        name: reviewer.name,
+        avatarUrl: reviewer.avatarUrl ?? '',
+      })
+    }
+  }
+
+  const reviews: PRReview[] = (pr.reviews?.nodes ?? [])
+    .filter((r): r is NonNullable<typeof r> => Boolean(r))
+    .map((r) => ({
+      id: r.id,
+      author: r.author ?? { login: 'ghost', avatarUrl: '' },
+      state: r.state,
+      body: r.body ?? '',
+      submittedAt: r.submittedAt,
+    }))
+
+  const issueComments: PRIssueComment[] = (pr.comments?.nodes ?? [])
+    .filter((c): c is NonNullable<typeof c> => Boolean(c))
+    .map((c) => ({
+      id: c.id,
+      author: c.author ?? { login: 'ghost', avatarUrl: '' },
+      body: c.body,
+      createdAt: c.createdAt,
+    }))
+
+  const rawRollup = pr.headCommit?.nodes?.[0]?.commit?.statusCheckRollup ?? null
+  let statusCheckRollup: PRStatusCheckRollup | null = null
+  if (rawRollup) {
+    const checks: PRStatusCheck[] = []
+    for (const ctx of rawRollup.contexts?.nodes ?? []) {
+      if (!ctx) continue
+      if (ctx.__typename === 'CheckRun' && 'name' in ctx) {
+        checks.push({
+          id: ctx.id,
+          name: ctx.name,
+          kind: 'check-run',
+          status: ctx.status,
+          conclusion: ctx.conclusion,
+          url: ctx.detailsUrl,
+          description: ctx.title,
+        })
+      } else if (ctx.__typename === 'StatusContext' && 'context' in ctx) {
+        checks.push({
+          id: ctx.id,
+          name: ctx.context,
+          kind: 'status-context',
+          status: ctx.state,
+          conclusion: ctx.state,
+          url: ctx.targetUrl,
+          description: ctx.description,
+        })
+      }
+    }
+    statusCheckRollup = {
+      state: rawRollup.state,
+      checks,
+    }
+  }
+
   return {
     id: pr.id,
     owner,
@@ -532,6 +765,12 @@ export async function fetchPullRequest(
     body: pr.body,
     url: pr.url,
     state: pr.state,
+    isDraft: Boolean(pr.isDraft),
+    mergeable: pr.mergeable ?? 'UNKNOWN',
+    reviewDecision: pr.reviewDecision ?? null,
+    labels,
+    createdAt: pr.createdAt,
+    updatedAt: pr.updatedAt,
     author: pr.author ?? { login: 'ghost', avatarUrl: '' },
     baseRefName: pr.baseRefName,
     headRefName: pr.headRefName,
@@ -540,7 +779,11 @@ export async function fetchPullRequest(
     commits,
     files,
     threads,
-    pendingReviewId: pr.reviews.nodes[0]?.id ?? null,
+    requestedReviewers,
+    reviews,
+    issueComments,
+    statusCheckRollup,
+    pendingReviewId: pr.pendingReviews?.nodes?.[0]?.id ?? null,
   }
 }
 
@@ -722,4 +965,48 @@ export async function submitReview(
     event,
     body,
   })
+}
+
+export async function addPRComment(
+  pat: string,
+  pullRequestId: string,
+  body: string,
+): Promise<PRIssueComment> {
+  const mutation = `
+    mutation AddPRComment($subjectId: ID!, $body: String!) {
+      addComment(input: { subjectId: $subjectId, body: $body }) {
+        commentEdge {
+          node {
+            id
+            body
+            createdAt
+            author {
+              login
+              avatarUrl
+            }
+          }
+        }
+      }
+    }
+  `
+  const data = await graphql<{
+    addComment: {
+      commentEdge: {
+        node: {
+          id: string
+          body: string
+          createdAt: string
+          author: GitHubUser | null
+        }
+      }
+    }
+  }>(pat, mutation, { subjectId: pullRequestId, body })
+
+  const node = data.addComment.commentEdge.node
+  return {
+    id: node.id,
+    body: node.body,
+    createdAt: node.createdAt,
+    author: node.author ?? { login: 'ghost', avatarUrl: '' },
+  }
 }

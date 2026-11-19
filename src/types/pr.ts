@@ -10,6 +10,61 @@ export type DiffSide = 'LEFT' | 'RIGHT'
 
 export type PRFilterMode = 'review-requested' | 'authored' | 'involves'
 
+export type PRMergeableState = 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN'
+
+export type PRReviewDecision = 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | null
+
+export type PRReviewState =
+  | 'APPROVED'
+  | 'CHANGES_REQUESTED'
+  | 'COMMENTED'
+  | 'DISMISSED'
+  | 'PENDING'
+
+export type CheckRollupState = 'SUCCESS' | 'FAILURE' | 'PENDING' | 'EXPECTED' | 'ERROR'
+
+export interface PRLabel {
+  name: string
+  color: string
+}
+
+export interface PRRequestedReviewer {
+  type: 'user' | 'team'
+  login: string
+  name?: string | null
+  avatarUrl: string
+}
+
+export interface PRReview {
+  id: string
+  author: GitHubUser
+  state: PRReviewState
+  body: string
+  submittedAt: string | null
+}
+
+export interface PRIssueComment {
+  id: string
+  author: GitHubUser
+  body: string
+  createdAt: string
+}
+
+export interface PRStatusCheck {
+  id: string
+  name: string
+  kind: 'check-run' | 'status-context'
+  status: string
+  conclusion: string | null
+  url: string | null
+  description?: string | null
+}
+
+export interface PRStatusCheckRollup {
+  state: CheckRollupState
+  checks: PRStatusCheck[]
+}
+
 export interface GitHubUser {
   login: string
   name?: string | null
@@ -109,6 +164,12 @@ export interface PullRequestData {
   body: string
   url: string
   state: 'OPEN' | 'CLOSED' | 'MERGED'
+  isDraft: boolean
+  mergeable: PRMergeableState
+  reviewDecision: PRReviewDecision
+  labels: PRLabel[]
+  createdAt: string
+  updatedAt: string
   author: GitHubUser
   baseRefName: string
   headRefName: string
@@ -117,6 +178,10 @@ export interface PullRequestData {
   commits: PRCommit[]
   files: PRFile[]
   threads: ReviewThread[]
+  requestedReviewers: PRRequestedReviewer[]
+  reviews: PRReview[]
+  issueComments: PRIssueComment[]
+  statusCheckRollup: PRStatusCheckRollup | null
   pendingReviewId: string | null
   isMock?: boolean
 }
