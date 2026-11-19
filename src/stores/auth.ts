@@ -35,6 +35,9 @@ export const useAuthStore = defineStore('auth', () => {
   const pat = ref<string>('')
   const viewer = ref<GitHubUser | null>(null)
   const requestedPRs = ref<PRSummary[]>([])
+  const hasMorePRs = ref(false)
+  const prEndCursor = ref<string | null>(null)
+  const isLoadingMore = ref(false)
   const prFilter = ref<PRFilterMode>('review-requested')
   const isLoading = ref(false)
   const error = ref<string | null>(null)
@@ -72,22 +75,55 @@ export const useAuthStore = defineStore('auth', () => {
     isLoading.value = true
     error.value = null
     try {
-      const { viewer: user, requestedPRs: prs } = await fetchViewerAndRequestedPRs(
-        token,
-        prFilter.value,
-      )
+      const {
+        viewer: user,
+        requestedPRs: prs,
+        hasNextPage,
+        endCursor,
+      } = await fetchViewerAndRequestedPRs(token, prFilter.value)
       pat.value = token
       viewer.value = user
       requestedPRs.value = prs
+      hasMorePRs.value = hasNextPage
+      prEndCursor.value = endCursor
       await saveGitHubPat(token)
       return true
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to authenticate with GitHub'
       viewer.value = null
       requestedPRs.value = []
+      hasMorePRs.value = false
+      prEndCursor.value = null
       return false
     } finally {
       isLoading.value = false
+    }
+  }
+
+  async function loadMorePRs(): Promise<void> {
+    if (!pat.value || !hasMorePRs.value || !prEndCursor.value || isLoadingMore.value) return
+    isLoadingMore.value = true
+    error.value = null
+    try {
+      const {
+        requestedPRs: nextPrs,
+        hasNextPage,
+        endCursor,
+      } = await fetchViewerAndRequestedPRs(pat.value, prFilter.value, prEndCursor.value)
+      const seen = new Set(requestedPRs.value.map((p) => p.id))
+      const merged = [...requestedPRs.value]
+      for (const item of nextPrs) {
+        if (!seen.has(item.id)) {
+          merged.push(item)
+        }
+      }
+      requestedPRs.value = merged
+      hasMorePRs.value = hasNextPage
+      prEndCursor.value = endCursor
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to load more pull requests'
+    } finally {
+      isLoadingMore.value = false
     }
   }
 
@@ -108,6 +144,8 @@ export const useAuthStore = defineStore('auth', () => {
     pat.value = ''
     viewer.value = null
     requestedPRs.value = []
+    hasMorePRs.value = false
+    prEndCursor.value = null
     error.value = null
     await saveGitHubPat('')
   }
@@ -116,6 +154,8 @@ export const useAuthStore = defineStore('auth', () => {
     pat,
     viewer,
     requestedPRs,
+    hasMorePRs,
+    isLoadingMore,
     prFilter,
     isLoading,
     error,
@@ -124,6 +164,7 @@ export const useAuthStore = defineStore('auth', () => {
     verifyAndLoadProfile,
     signInWithGh,
     refreshRequestedPRs,
+    loadMorePRs,
     setPrFilter,
     clearPat,
   }

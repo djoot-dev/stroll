@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Check, FileText, MessageSquare } from '@lucide/vue'
 import { computed } from 'vue'
-import { LAYER_META } from '@/services/readingOrder'
+import { isLockfile, LAYER_META } from '@/services/readingOrder'
 import { useReviewStore } from '@/stores/review'
 
 const review = useReviewStore()
@@ -151,6 +151,13 @@ function dirOnly(path: string): string {
               <div class="flex items-center justify-between gap-1.5">
                 <div class="flex min-w-0 items-center gap-1.5">
                   <span
+                    v-if="step.isGenerated"
+                    class="shrink-0 rounded border border-border bg-canvas-elevated px-1 py-0.2 font-mono text-[9px] font-semibold text-ink-muted"
+                  >
+                    {{ isLockfile(step.file.path) ? 'LOCKFILE' : 'GENERATED' }}
+                  </span>
+                  <span
+                    v-else
                     class="shrink-0 rounded border px-1 py-0.2 font-mono text-[9px] font-semibold"
                     :class="LAYER_META[step.layer].badgeClass"
                   >
@@ -161,7 +168,9 @@ function dirOnly(path: string): string {
                     :class="
                       review.activeView === 'step' && step.stepIndex === review.currentStepIndex
                         ? 'text-ink'
-                        : 'text-ink-secondary group-hover:text-ink'
+                        : step.isGenerated
+                          ? 'text-ink-muted group-hover:text-ink'
+                          : 'text-ink-secondary group-hover:text-ink'
                     "
                   >
                     {{ fileNameOnly(step.file.path) }}

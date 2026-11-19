@@ -45,17 +45,74 @@ export const LAYER_META: Record<
   },
 }
 
+const LOCKFILE_NAMES = new Set([
+  'package-lock.json',
+  'npm-shrinkwrap.json',
+  'bun.lock',
+  'bun.lockb',
+  'yarn.lock',
+  'pnpm-lock.yaml',
+  'cargo.lock',
+  'poetry.lock',
+  'uv.lock',
+  'pipfile.lock',
+  'gemfile.lock',
+  'go.sum',
+  'composer.lock',
+  'packages.lock.json',
+  'flake.lock',
+  'pubspec.lock',
+  'podfile.lock',
+  'mix.lock',
+  'paket.lock',
+])
+
+/**
+ * Returns true if the file path is a known package manager lockfile.
+ */
+export function isLockfile(path: string): boolean {
+  const fileName = (path.split('/').pop() ?? path).toLowerCase()
+  return LOCKFILE_NAMES.has(fileName)
+}
+
+/**
+ * Returns true if the file path is a lockfile or auto-generated/bundled asset
+ * that should be deprioritized and collapsed by default during PR review.
+ */
+export function isGeneratedOrLockfile(path: string): boolean {
+  if (isLockfile(path)) return true
+  const lower = path.toLowerCase()
+
+  return (
+    /\.(designer|g|g\.i|generated)\.cs$/.test(lower) ||
+    /\.min\.(js|mjs|cjs|css)$/.test(lower) ||
+    /\.bundle\.(js|css)$/.test(lower) ||
+    /\.(js|css|mjs|cjs)\.map$/.test(lower) ||
+    /\.map$/.test(lower) ||
+    /\.snap$/.test(lower) ||
+    /\.pb\.(go|ts|js|cs)$/.test(lower) ||
+    /_pb2\.py$/.test(lower) ||
+    /(_|\.)generated\.[^/]+$/.test(lower) ||
+    /\.gen\.(go|ts|js|cs)$/.test(lower) ||
+    /(^|\/)(dist|__snapshots__|coverage)\//.test(lower) ||
+    /(^|\/)obj\/(debug|release)\//.test(lower)
+  )
+}
+
 /**
  * Classifies a file path into one of the 5 architectural layers.
  */
 export function classifyLayer(path: string): ArchitecturalLayer {
+  const rawFileName = path.split('/').pop() ?? path
   const lower = path.toLowerCase()
-  const fileName = lower.split('/').pop() ?? lower
+  const fileName = rawFileName.toLowerCase()
 
   // 5. Tests
   if (
     /\.(test|spec)\.[cm]?[jt]sx?$/.test(lower) ||
     /_test\.(rs|py|go)$/.test(lower) ||
+    /tests?\.cs$/.test(lower) ||
+    /(^|\/)[^/]+\.tests\//.test(lower) ||
     /\/__tests__\//.test(lower) ||
     /(^|\/)tests?\//.test(lower)
   ) {
@@ -66,7 +123,9 @@ export function classifyLayer(path: string): ArchitecturalLayer {
   if (
     /(^|\/)(migrations?|schema|prisma|drizzle|db\/migrate)\//.test(lower) ||
     /\.sql$/.test(lower) ||
-    /^(package\.json|tsconfig.*\.json|vite\.config\..*|tailwind\.config\..*|cargo\.toml|tauri\.conf\.json|\.env.*|dockerfile|docker-compose.*)$/.test(
+    /\.(csproj|sln|props|targets)$/.test(lower) ||
+    /^appsettings(\.[^/]+)?\.json$/.test(fileName) ||
+    /^(package\.json|tsconfig.*\.json|vite\.config\..*|tailwind\.config\..*|cargo\.toml|tauri\.conf\.json|\.env.*|dockerfile(\..*)?|docker-compose.*)$/.test(
       fileName,
     ) ||
     /\.(ya?ml|toml|ini|conf)$/.test(lower) ||
@@ -78,6 +137,7 @@ export function classifyLayer(path: string): ArchitecturalLayer {
   // 2. Types / Interfaces / Models
   if (
     /\.d\.ts$/.test(lower) ||
+    /^I[A-Z][\w]*\.cs$/.test(rawFileName) ||
     /(^|\/)(types?|interfaces?|models?|entities|dtos?|schemas?)\//.test(lower) ||
     /\.(types|model|interface|schema|dto)\.[cm]?[jt]sx?$/.test(lower)
   ) {
@@ -86,7 +146,9 @@ export function classifyLayer(path: string): ArchitecturalLayer {
 
   // 4. UI / Controllers / Entry Points
   if (
-    /\.(vue|svelte|jsx|tsx|html|css|scss)$/.test(lower) ||
+    /\.(vue|svelte|jsx|tsx|html|css|scss|sass)$/.test(lower) ||
+    /controller\.cs$/.test(lower) ||
+    /^(program|startup)\.cs$/.test(fileName) ||
     /(^|\/)(components?|views?|pages?|screens?|layouts?|controllers?|routes?|handlers?|endpoints?|api|cli)\//.test(
       lower,
     ) ||
@@ -207,6 +269,66 @@ function resolveImportToPRFile(
 }
 
 /**
+ * Extracts C# `namespace Foo.Bar` declarations (both file-scoped and block-scoped).
+ */
+function extractCSharpNamespaces(content: string): string[] {
+  const namespaces: string[] = []
+  const regex = /^\s*namespace\s+([A-Za-z_][\w.]*)\s*(?:;|\{|$)/gm
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(content)) !== null) {
+    namespaces.push(match[1])
+  }
+  return namespaces
+}
+
+/**
+ * Extracts top-level C# type names declared in a `.cs` file.
+ */
+function extractCSharpTypeNames(content: string): string[] {
+  const names: string[] = []
+  const regex =
+    /^\s*(?:(?:public|internal|private|protected|static|sealed|partial|abstract|readonly|ref|new)\s+)*(?:record\s+(?:struct|class)|record|class|struct|interface|enum)\s+([A-Za-z_][\w]*)/gm
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(content)) !== null) {
+    names.push(match[1])
+  }
+  return names
+}
+
+interface ParsedCSharpUsing {
+  namespace: string
+  explicitSymbol?: string
+}
+
+/**
+ * Extracts C# `using` directives (`using Ns;`, `global using Ns;`, `using static Ns.Type;`, `using Alias = Ns.Type;`).
+ */
+function parseCSharpUsings(content: string): ParsedCSharpUsing[] {
+  const results: ParsedCSharpUsing[] = []
+  const regex =
+    /^\s*(?:global\s+)?using\s+(?:(static)\s+)?(?:([A-Za-z_]\w*)\s*=\s*)?([A-Za-z_][\w.]*)\s*;/gm
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(content)) !== null) {
+    const isStatic = Boolean(match[1])
+    const alias = match[2]
+    const target = match[3]
+    if (isStatic || alias) {
+      const lastDot = target.lastIndexOf('.')
+      if (lastDot > 0) {
+        results.push({
+          namespace: target.slice(0, lastDot),
+          explicitSymbol: target.slice(lastDot + 1),
+        })
+      }
+      results.push({ namespace: target })
+    } else {
+      results.push({ namespace: target })
+    }
+  }
+  return results
+}
+
+/**
  * Extracts a concise, read-only code snippet from `sourceFile` containing the
  * definitions of `symbolNames` so the reviewer can see referenced PR context.
  */
@@ -223,7 +345,7 @@ function extractReferencedSnippet(
   if (symbolNames.length > 0) {
     const escaped = symbolNames.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
     const defRegex = new RegExp(
-      `\\b(?:export\\s+)?(?:async\\s+)?(?:interface|type|class|enum|function|const|let|def|fn|struct)\\s+(?:${escaped.join('|')})\\b`,
+      `\\b(?:(?:export|public|internal|private|protected|static|sealed|partial|abstract|readonly|ref|async)\\s+)*(?:record\\s+(?:struct|class)|record|interface|type|class|enum|function|const|let|def|fn|struct)\\s+(?:${escaped.join('|')})\\b`,
     )
     lines.forEach((line, idx) => {
       if (defRegex.test(line)) {
@@ -254,11 +376,12 @@ function findPairedImplFile(
   implFiles: PRFile[],
   depsOfTest: string[],
 ): string | undefined {
-  // 1. Basename heuristic: foo.test.ts -> foo.ts / foo.vue
+  // 1. Basename heuristic: foo.test.ts -> foo.ts / foo.vue, FooTests.cs -> Foo.cs
   const testName = testFile.path.split('/').pop() ?? ''
   const cleanTestBase = testName
     .replace(/\.(test|spec)\.[cm]?[jt]sx?$/i, '')
     .replace(/_test\.(rs|py|go)$/i, '')
+    .replace(/tests?\.cs$/i, '')
     .toLowerCase()
 
   const match = implFiles.find((impl) => {
@@ -291,6 +414,21 @@ export function buildReadingOrder(
     strippedPathMap.set(stripExt(f.path), f.path)
   }
 
+  // Build C# namespace -> file paths and file -> declared type names indexes
+  const csharpNamespaceFiles = new Map<string, string[]>()
+  const csharpFileTypes = new Map<string, string[]>()
+  for (const f of files) {
+    if (!f.path.toLowerCase().endsWith('.cs')) continue
+    if (f.isGenerated || isGeneratedOrLockfile(f.path)) continue
+    const content = f.headContent ?? f.baseContent ?? ''
+    if (!content) continue
+    for (const ns of extractCSharpNamespaces(content)) {
+      if (!csharpNamespaceFiles.has(ns)) csharpNamespaceFiles.set(ns, [])
+      csharpNamespaceFiles.get(ns)!.push(f.path)
+    }
+    csharpFileTypes.set(f.path, extractCSharpTypeNames(content))
+  }
+
   // Build dependency graph: file -> Set<imported PR files>
   const dependencies = new Map<string, Set<string>>()
   const dependents = new Map<string, Set<string>>()
@@ -303,8 +441,10 @@ export function buildReadingOrder(
   }
 
   for (const f of files) {
+    if (f.isGenerated || isGeneratedOrLockfile(f.path)) continue
     const content = f.headContent ?? f.baseContent ?? ''
     if (!content) continue
+
     const parsed = parseImports(content)
     for (const imp of parsed) {
       const target = resolveImportToPRFile(f.path, imp.specifier, allPaths, strippedPathMap)
@@ -318,13 +458,59 @@ export function buildReadingOrder(
         imp.symbols.forEach((s) => symMap.get(target)!.add(s))
       }
     }
+
+    // C# `using Namespace.SubNamespace;` -> match against PR `.cs` files declaring that namespace
+    if (f.path.toLowerCase().endsWith('.cs')) {
+      const usings = parseCSharpUsings(content)
+      for (const u of usings) {
+        const candidates = (csharpNamespaceFiles.get(u.namespace) ?? []).filter(
+          (p) => p !== f.path,
+        )
+        if (candidates.length === 0) continue
+
+        // Prefer candidates whose declared types are actually referenced in `content`
+        const matchedCandidates: Array<{ path: string; syms: string[] }> = []
+        for (const candPath of candidates) {
+          const types = csharpFileTypes.get(candPath) ?? []
+          const referenced = types.filter((t) => {
+            if (u.explicitSymbol && u.explicitSymbol === t) return true
+            const escaped = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            return new RegExp(`\\b${escaped}\\b`).test(content)
+          })
+          if (referenced.length > 0) {
+            matchedCandidates.push({ path: candPath, syms: referenced })
+          }
+        }
+
+        const targets =
+          matchedCandidates.length > 0
+            ? matchedCandidates
+            : candidates.map((p) => ({
+                path: p,
+                syms: u.explicitSymbol ? [u.explicitSymbol] : (csharpFileTypes.get(p) ?? []).slice(0, 3),
+              }))
+
+        for (const { path: target, syms } of targets) {
+          dependencies.get(f.path)!.add(target)
+          dependents.get(target)!.add(f.path)
+          if (syms.length > 0) {
+            const symMap = importedSymbols.get(f.path)!
+            if (!symMap.has(target)) symMap.set(target, new Set())
+            syms.forEach((s) => symMap.get(target)!.add(s))
+          }
+        }
+      }
+    }
   }
 
   const implFiles: PRFile[] = []
   const testFiles: PRFile[] = []
+  const generatedFiles: PRFile[] = []
 
   for (const f of files) {
-    if (classifyLayer(f.path) === 'tests') {
+    if (f.isGenerated || isGeneratedOrLockfile(f.path)) {
+      generatedFiles.push(f)
+    } else if (classifyLayer(f.path) === 'tests') {
       testFiles.push(f)
     } else {
       implFiles.push(f)
@@ -430,15 +616,24 @@ export function buildReadingOrder(
   orphanTests.sort((a, b) => a.path.localeCompare(b.path))
   finalOrder.push(...orphanTests)
 
+  // Deprioritize generated & lockfiles to the end of the tour
+  generatedFiles.sort((a, b) => a.path.localeCompare(b.path))
+  finalOrder.push(...generatedFiles)
+
   // Construct TourStep[] with explanations & referenced context cards
   return finalOrder.map((file, idx) => {
+    const generated = Boolean(file.isGenerated || isGeneratedOrLockfile(file.path))
     const layer = classifyLayer(file.path)
     const deps = Array.from(dependencies.get(file.path) ?? [])
     const revs = Array.from(dependents.get(file.path) ?? [])
     const pairedWith = testPairTarget.get(file.path)
 
     let reason = LAYER_META[layer].label
-    if (pairedWith) {
+    if (generated) {
+      reason = isLockfile(file.path)
+        ? 'Lockfile · Collapsed by default to reduce noise'
+        : 'Generated asset · Collapsed by default to reduce noise'
+    } else if (pairedWith) {
       const implName = pairedWith.split('/').pop()
       reason = `Verifies ${implName}`
     } else if (revs.length > 0 && deps.length > 0) {
@@ -464,6 +659,7 @@ export function buildReadingOrder(
       file,
       layer,
       reason,
+      isGenerated: generated || undefined,
       dependencies: deps,
       dependents: revs,
       pairedWith,

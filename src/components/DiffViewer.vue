@@ -1,8 +1,16 @@
 <script setup lang="ts">
 import {
+  ArrowRight,
+  ArrowRightLeft,
   CheckCircle2,
   ChevronsUpDown,
   ChevronRight,
+  Code2,
+  Eye,
+  FileArchive,
+  FileCode2,
+  Image as ImageIcon,
+  Loader2,
   MessageSquarePlus,
   Sparkles,
   Trash2,
@@ -15,11 +23,17 @@ import {
   resolveHoverSymbolWithRepoFallback,
   type HoverSymbolInfo,
 } from '@/services/codeContext'
-import { gitBlameLine, isTauriRuntime, type GitBlameInfo } from '@/services/native'
-import { buildDiffSegments, type DiffLine } from '@/services/diffParser'
+import { buildDiffSegments, isPureRename, type DiffLine } from '@/services/diffParser'
+import {
+  fetchFileBlobDataUrl,
+  isBinaryFilePath,
+  isImageFilePath,
+} from '@/services/github'
 import { highlightLinesWithCodeMirror, type HighlightSpan } from '@/services/highlighter'
 import { buildLineTokenParts, type DiffTokenPart } from '@/services/inlineDiff'
-import { LAYER_META } from '@/services/readingOrder'
+import { gitBlameLine, isTauriRuntime, type GitBlameInfo } from '@/services/native'
+import { isLockfile, LAYER_META } from '@/services/readingOrder'
+import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore } from '@/stores/settings'
 import type { DiffSide, DraftComment, ReviewThread, TourStep } from '@/types/pr'
@@ -32,10 +46,22 @@ const props = defineProps<{
   step: TourStep
 }>()
 
+const auth = useAuthStore()
 const review = useReviewStore()
 const settings = useSettingsStore()
 
 const expandedGaps = ref<Set<string>>(new Set())
+const isGeneratedExpanded = ref(false)
+const showSvgSource = ref(false)
+const baseImageSrc = ref<string | null>(null)
+const headImageSrc = ref<string | null>(null)
+const isLoadingImages = ref(false)
+const imageLoadError = ref<string | null>(null)
+const baseImageDims = ref<{ width: number; height: number } | null>(null)
+const headImageDims = ref<{ width: number; height: number } | null>(null)
+const imageDataUrlCache = new Map<string, string | null>()
+let imageLoadSeq = 0
+
 const activeComposer = ref<{
   key: string
   line: number
@@ -83,15 +109,142 @@ function closePopoverImmediately() {
   hoverState.value = null
 }
 
+const isGeneratedStep = computed(() =>
+  Boolean(props.step.isGenerated || props.step.file.isGenerated),
+)
+
+const isCollapsedGenerated = computed(() => isGeneratedStep.value && !isGeneratedExpanded.value)
+
+const isPureRenameFile = computed(() => isPureRename(props.step.file))
+
+const isImageFile = computed(() =>
+  Boolean(props.step.file.isImage || isImageFilePath(props.step.file.path)),
+)
+
+const isSvgFile = computed(() => props.step.file.path.toLowerCase().endsWith('.svg'))
+
+const isNonImageBinary = computed(
+  () =>
+    !isImageFile.value &&
+    !isPureRenameFile.value &&
+    Boolean(props.step.file.isBinary || isBinaryFilePath(props.step.file.path)),
+)
+
+const fileExtensionBadge = computed(() => {
+  const name = props.step.file.path.split('/').pop() ?? ''
+  const idx = name.lastIndexOf('.')
+  return idx > 0 ? name.slice(idx + 1).toUpperCase() : 'BIN'
+})
+
+function svgTextToDataUrl(svg: string | null): string | null {
+  if (!svg) return null
+  try {
+    const bytes = new TextEncoder().encode(svg)
+    let binary = ''
+    for (const b of bytes) binary += String.fromCharCode(b)
+    return `data:image/svg+xml;base64,${btoa(binary)}`
+  } catch {
+    return null
+  }
+}
+
+async function loadImageDiffAssets() {
+  const file = props.step.file
+  baseImageSrc.value = null
+  headImageSrc.value = null
+  baseImageDims.value = null
+  headImageDims.value = null
+  imageLoadError.value = null
+
+  if (!isImageFile.value) return
+
+  // Use preloaded data URLs or inline SVG content when already available
+  if (file.baseImageDataUrl !== undefined) {
+    baseImageSrc.value = file.baseImageDataUrl
+  } else if (isSvgFile.value && file.baseContent) {
+    baseImageSrc.value = svgTextToDataUrl(file.baseContent)
+  }
+
+  if (file.headImageDataUrl !== undefined) {
+    headImageSrc.value = file.headImageDataUrl
+  } else if (isSvgFile.value && file.headContent) {
+    headImageSrc.value = svgTextToDataUrl(file.headContent)
+  }
+
+  const pr = review.pr
+  if (!pr || pr.isMock || !auth.pat) return
+
+  const needBase = file.status !== 'added' && !baseImageSrc.value
+  const needHead = file.status !== 'deleted' && !headImageSrc.value
+  if (!needBase && !needHead) return
+
+  const reqId = ++imageLoadSeq
+  isLoadingImages.value = true
+
+  try {
+    const fetchCached = async (
+      path: string,
+      refOid: string,
+      sha?: string,
+    ): Promise<string | null> => {
+      const cacheKey = `${pr.owner}/${pr.repo}:${refOid}:${path}`
+      if (imageDataUrlCache.has(cacheKey)) {
+        return imageDataUrlCache.get(cacheKey) ?? null
+      }
+      const url = await fetchFileBlobDataUrl(auth.pat, pr.owner, pr.repo, path, refOid, sha)
+      imageDataUrlCache.set(cacheKey, url)
+      return url
+    }
+
+    const [baseUrl, headUrl] = await Promise.all([
+      needBase
+        ? fetchCached(file.previousPath ?? file.path, pr.baseRefOid)
+        : Promise.resolve(baseImageSrc.value),
+      needHead
+        ? fetchCached(file.path, pr.headRefOid, file.sha)
+        : Promise.resolve(headImageSrc.value),
+    ])
+
+    if (reqId !== imageLoadSeq) return
+    baseImageSrc.value = baseUrl
+    headImageSrc.value = headUrl
+  } catch (err) {
+    if (reqId !== imageLoadSeq) return
+    imageLoadError.value = err instanceof Error ? err.message : 'Failed to load image preview'
+  } finally {
+    if (reqId === imageLoadSeq) {
+      isLoadingImages.value = false
+    }
+  }
+}
+
+function handleBaseImageLoad(e: Event) {
+  const img = e.target as HTMLImageElement | null
+  if (img && img.naturalWidth && img.naturalHeight) {
+    baseImageDims.value = { width: img.naturalWidth, height: img.naturalHeight }
+  }
+}
+
+function handleHeadImageLoad(e: Event) {
+  const img = e.target as HTMLImageElement | null
+  if (img && img.naturalWidth && img.naturalHeight) {
+    headImageDims.value = { width: img.naturalWidth, height: img.naturalHeight }
+  }
+}
+
 watch(
   () => props.step.file.path,
   () => {
     expandedGaps.value = new Set()
+    isGeneratedExpanded.value = false
+    showSvgSource.value = false
     activeComposer.value = null
     activeScopes.value = []
     activeReplacedCount.value = 0
     closePopoverImmediately()
+    void loadImageDiffAssets()
   },
+  { immediate: true },
 )
 
 function handleEsc(e: KeyboardEvent) {
@@ -115,7 +268,12 @@ const symbolIndex = computed(() => buildPRSymbolIndex(review.pr?.files ?? []))
 
 const segments = computed(() => buildDiffSegments(props.step.file))
 
+const showImagePreview = computed(
+  () => isImageFile.value && (!isSvgFile.value || !showSvgSource.value),
+)
+
 const visibleLines = computed<DiffLine[]>(() => {
+  if (isCollapsedGenerated.value || showImagePreview.value || isNonImageBinary.value) return []
   const list: DiffLine[] = []
   for (const seg of segments.value) {
     if (seg.kind === 'gap' && !expandedGaps.value.has(seg.id)) continue
@@ -162,14 +320,24 @@ function selectionRowClass(key: string): string {
 /**
  * Pre-computes CodeMirror 6 highlight spans, intra-line word diff ranges,
  * and resolvable PR identifier parts for every DiffLine key in the current file.
+ * Skipped when a generated/lockfile diff is collapsed or when viewing binary/image previews.
  */
 const tokenizedByKey = computed(() => {
+  const partMap = new Map<string, DiffTokenPart[]>()
+  if (
+    isCollapsedGenerated.value ||
+    isPureRenameFile.value ||
+    showImagePreview.value ||
+    isNonImageBinary.value
+  ) {
+    return partMap
+  }
+
   const allLines: DiffLine[] = []
   for (const seg of segments.value) {
     allLines.push(...seg.lines)
   }
 
-  const partMap = new Map<string, DiffTokenPart[]>()
   const tokenized = highlightLinesWithCodeMirror(
     allLines.map((l) => l.content),
     props.step.file.language,
@@ -393,6 +561,13 @@ function statusBadgeClass(status: string): string {
         <div class="min-w-0 space-y-1">
           <div class="flex flex-wrap items-center gap-2">
             <span
+              v-if="isGeneratedStep"
+              class="rounded-md border border-border bg-canvas-elevated px-1.5 py-0.5 font-mono text-[10px] font-semibold text-ink-muted"
+            >
+              {{ isLockfile(step.file.path) ? 'LOCKFILE' : 'GENERATED' }}
+            </span>
+            <span
+              v-else
               class="rounded-md border px-1.5 py-0.5 font-mono text-[10px] font-semibold"
               :class="LAYER_META[step.layer].badgeClass"
             >
@@ -407,6 +582,16 @@ function statusBadgeClass(status: string): string {
             <h1 class="truncate font-mono text-sm font-semibold text-ink">
               {{ step.file.path }}
             </h1>
+          </div>
+
+          <div
+            v-if="step.file.status === 'renamed' && step.file.previousPath"
+            class="flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-ochre-text"
+          >
+            <span class="font-sans text-ink-muted">Renamed from</span>
+            <span class="rounded bg-ochre-soft px-1.5 py-0.5">{{ step.file.previousPath }}</span>
+            <ArrowRight class="h-3 w-3 shrink-0 text-ink-faint" />
+            <span class="rounded bg-canvas-elevated px-1.5 py-0.5 text-ink">{{ step.file.path }}</span>
           </div>
 
           <p class="text-xs text-ink-muted">
@@ -449,55 +634,281 @@ function statusBadgeClass(status: string): string {
 
     <!-- Isolated Diff Surface -->
     <div class="stroll-card overflow-hidden rounded-2xl border border-border bg-code">
-      <!-- Sticky Diff Context Toolbar (Enclosing Scope Breadcrumb + Hover Guardrail Toggle) -->
+      <!-- Collapsed Generated / Lockfile Banner -->
       <div
-        class="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b border-border bg-canvas-subtle/95 px-3.5 py-1.5 text-[11px] text-ink-muted backdrop-blur-sm"
+        v-if="isCollapsedGenerated"
+        class="flex flex-col items-center justify-center gap-3 bg-canvas-subtle/60 px-6 py-10 text-center"
       >
-        <div class="flex min-w-0 items-center gap-2">
-          <span class="shrink-0 text-ink-muted">Click or drag lines to comment</span>
-          <template v-if="activeScopes.length > 0">
-            <span class="text-ink-faint">·</span>
-            <div class="flex min-w-0 items-center gap-1 font-mono text-[11px] text-terra-text">
-              <template v-for="(sc, idx) in activeScopes" :key="sc">
-                <ChevronRight v-if="idx > 0" class="h-3 w-3 shrink-0 text-ink-faint" />
-                <span class="truncate">{{ sc }}</span>
-              </template>
-            </div>
-          </template>
-          <span
-            v-if="activeReplacedCount > 0"
-            class="shrink-0 rounded border border-crimson-border bg-crimson-soft px-1.5 py-0.2 font-mono text-[10px] text-crimson-text"
-          >
-            Replaces -{{ activeReplacedCount }}
-          </span>
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-canvas-elevated text-ink-muted">
+          <FileCode2 class="h-5 w-5" />
         </div>
-
+        <div class="space-y-1">
+          <p class="text-xs font-medium text-ink">
+            Generated / lockfile diff hidden to reduce noise
+            <span class="ml-1 font-mono">
+              (<span class="text-pine-text">+{{ step.file.additions }}</span> /
+              <span class="text-crimson-text">-{{ step.file.deletions }}</span>)
+            </span>
+          </p>
+          <p class="text-[11px] text-ink-muted">
+            Syntax highlighting is deferred until you expand this file.
+          </p>
+        </div>
         <button
-          class="inline-flex shrink-0 items-center gap-1 rounded-lg border px-2 py-0.5 text-[10.5px] transition-colors"
-          :class="
-            !settings.requireAltForHover
-              ? 'border-terra-border bg-terra-soft text-terra-text'
-              : 'border-border bg-canvas text-ink-secondary hover:bg-canvas-elevated'
-          "
-          title="Toggle whether symbol hover popovers open automatically (250ms delay) or only when holding Option/Alt"
-          @click="settings.setRequireAltForHover(!settings.requireAltForHover)"
+          class="inline-flex items-center gap-1.5 rounded-xl border border-border bg-canvas px-3.5 py-1.5 text-xs font-medium text-ink-secondary transition-colors hover:border-terra-border hover:bg-terra-soft hover:text-terra-text"
+          @click="isGeneratedExpanded = true"
         >
-          <Sparkles class="h-3 w-3" />
-          <span>{{ settings.requireAltForHover ? 'Hover: ⌥ + Hover' : 'Hover: Auto' }}</span>
+          <Eye class="h-3.5 w-3.5" />
+          <span>Load Diff</span>
         </button>
       </div>
 
-      <div v-if="segments.length === 0" class="p-8 text-center text-xs text-ink-muted">
-        No textual diff available for this file (binary or empty change).
+      <!-- Pure Rename (No Content Changes) -->
+      <div
+        v-else-if="isPureRenameFile"
+        class="flex flex-col items-center justify-center gap-3 bg-canvas-subtle/60 px-6 py-10 text-center"
+      >
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl border border-ochre-border bg-ochre-soft text-ochre-text">
+          <ArrowRightLeft class="h-5 w-5" />
+        </div>
+        <div class="space-y-1">
+          <p class="text-xs font-semibold text-ink">
+            File renamed without content changes
+          </p>
+          <p
+            v-if="step.file.previousPath"
+            class="flex flex-wrap items-center justify-center gap-1.5 font-mono text-[11px] text-ink-muted"
+          >
+            <span>{{ step.file.previousPath }}</span>
+            <ArrowRight class="h-3 w-3 text-ochre-text" />
+            <span class="text-ink">{{ step.file.path }}</span>
+          </p>
+        </div>
       </div>
 
+      <!-- Image Diff Preview -->
+      <template v-else-if="showImagePreview">
+        <div
+          class="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-canvas-subtle/95 px-3.5 py-1.5 text-[11px] text-ink-muted"
+        >
+          <div class="flex items-center gap-2">
+            <ImageIcon class="h-3.5 w-3.5 text-terra" />
+            <span>Image diff preview</span>
+          </div>
+          <button
+            v-if="isSvgFile && segments.length > 0"
+            class="inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-0.5 text-[10.5px] text-ink-secondary transition-colors hover:bg-canvas-elevated hover:text-ink"
+            @click="showSvgSource = true"
+          >
+            <Code2 class="h-3 w-3" />
+            <span>View Source Diff</span>
+          </button>
+        </div>
+
+        <div class="p-6">
+          <div
+            v-if="isLoadingImages"
+            class="flex items-center justify-center gap-2 py-10 text-xs text-ink-muted"
+          >
+            <Loader2 class="h-4 w-4 animate-spin text-terra" />
+            <span>Loading image preview…</span>
+          </div>
+
+          <div
+            v-else-if="imageLoadError"
+            class="rounded-xl border border-crimson-border bg-crimson-soft p-4 text-center text-xs text-crimson-text"
+          >
+            {{ imageLoadError }}
+          </div>
+
+          <!-- Added Image -->
+          <div
+            v-else-if="step.file.status === 'added'"
+            class="mx-auto max-w-2xl overflow-hidden rounded-xl border border-pine-border bg-canvas-subtle"
+          >
+            <div class="flex items-center justify-between border-b border-pine-border bg-pine-soft px-3.5 py-2 text-xs">
+              <span class="font-semibold text-pine-text">Added Image</span>
+              <span v-if="headImageDims" class="font-mono text-[11px] text-pine-text">
+                {{ headImageDims.width }} × {{ headImageDims.height }} px
+              </span>
+            </div>
+            <div class="flex items-center justify-center bg-canvas-inset p-6">
+              <img
+                v-if="headImageSrc"
+                :src="headImageSrc"
+                :alt="step.file.path"
+                class="max-h-[420px] max-w-full rounded-lg border border-border object-contain shadow-xs"
+                @load="handleHeadImageLoad"
+              />
+              <span v-else class="text-xs text-ink-muted">Image preview unavailable</span>
+            </div>
+          </div>
+
+          <!-- Deleted Image -->
+          <div
+            v-else-if="step.file.status === 'deleted'"
+            class="mx-auto max-w-2xl overflow-hidden rounded-xl border border-crimson-border bg-canvas-subtle"
+          >
+            <div class="flex items-center justify-between border-b border-crimson-border bg-crimson-soft px-3.5 py-2 text-xs">
+              <span class="font-semibold text-crimson-text">Deleted Image</span>
+              <span v-if="baseImageDims" class="font-mono text-[11px] text-crimson-text">
+                {{ baseImageDims.width }} × {{ baseImageDims.height }} px
+              </span>
+            </div>
+            <div class="flex items-center justify-center bg-canvas-inset p-6">
+              <img
+                v-if="baseImageSrc"
+                :src="baseImageSrc"
+                :alt="step.file.path"
+                class="max-h-[420px] max-w-full rounded-lg border border-crimson-border object-contain opacity-65 shadow-xs"
+                @load="handleBaseImageLoad"
+              />
+              <span v-else class="text-xs text-ink-muted">Image preview unavailable</span>
+            </div>
+          </div>
+
+          <!-- Modified / Renamed Image: Side-by-Side Comparison -->
+          <div v-else class="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div class="overflow-hidden rounded-xl border border-crimson-border bg-canvas-subtle">
+              <div class="flex items-center justify-between border-b border-crimson-border bg-crimson-soft px-3.5 py-2 text-xs">
+                <span class="font-semibold text-crimson-text">Before (Base)</span>
+                <span v-if="baseImageDims" class="font-mono text-[11px] text-crimson-text">
+                  {{ baseImageDims.width }} × {{ baseImageDims.height }} px
+                </span>
+              </div>
+              <div class="flex min-h-[180px] items-center justify-center bg-canvas-inset p-5">
+                <img
+                  v-if="baseImageSrc"
+                  :src="baseImageSrc"
+                  :alt="`Base ${step.file.path}`"
+                  class="max-h-[360px] max-w-full rounded-lg border border-border object-contain shadow-xs"
+                  @load="handleBaseImageLoad"
+                />
+                <span v-else class="text-xs text-ink-muted">Base preview unavailable</span>
+              </div>
+            </div>
+
+            <div class="overflow-hidden rounded-xl border border-pine-border bg-canvas-subtle">
+              <div class="flex items-center justify-between border-b border-pine-border bg-pine-soft px-3.5 py-2 text-xs">
+                <span class="font-semibold text-pine-text">After (Head)</span>
+                <span v-if="headImageDims" class="font-mono text-[11px] text-pine-text">
+                  {{ headImageDims.width }} × {{ headImageDims.height }} px
+                </span>
+              </div>
+              <div class="flex min-h-[180px] items-center justify-center bg-canvas-inset p-5">
+                <img
+                  v-if="headImageSrc"
+                  :src="headImageSrc"
+                  :alt="`Head ${step.file.path}`"
+                  class="max-h-[360px] max-w-full rounded-lg border border-border object-contain shadow-xs"
+                  @load="handleHeadImageLoad"
+                />
+                <span v-else class="text-xs text-ink-muted">Head preview unavailable</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- Non-Image Binary File Card -->
       <div
-        v-else
-        class="overflow-x-auto font-mono leading-[1.55]"
-        :class="{ 'select-none': isDraggingSelection }"
-        :style="{ fontSize: `${settings.codeFontSize}px` }"
+        v-else-if="isNonImageBinary"
+        class="flex flex-col items-center justify-center gap-3 bg-canvas-subtle/60 px-6 py-10 text-center"
       >
-        <template v-for="seg in segments" :key="seg.id">
+        <div class="flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-canvas-elevated text-ink-muted">
+          <FileArchive class="h-5 w-5" />
+        </div>
+        <div class="space-y-1.5">
+          <div class="flex items-center justify-center gap-2">
+            <span class="rounded-md border border-border bg-canvas-elevated px-1.5 py-0.5 font-mono text-[10px] font-semibold text-ink-secondary">
+              {{ fileExtensionBadge }}
+            </span>
+            <span
+              class="rounded-md border px-1.5 py-0.5 font-mono text-[10px] uppercase"
+              :class="statusBadgeClass(step.file.status)"
+            >
+              {{ step.file.status }}
+            </span>
+          </div>
+          <p class="text-xs font-semibold text-ink">
+            Binary file ({{ step.file.status }})
+          </p>
+          <p class="text-[11px] text-ink-muted">
+            Binary assets cannot be displayed as a textual diff.
+          </p>
+        </div>
+      </div>
+
+      <!-- Standard Textual Diff -->
+      <template v-else>
+        <!-- Sticky Diff Context Toolbar (Enclosing Scope Breadcrumb + Hover Guardrail Toggle) -->
+        <div
+          class="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b border-border bg-canvas-subtle/95 px-3.5 py-1.5 text-[11px] text-ink-muted backdrop-blur-sm"
+        >
+          <div class="flex min-w-0 items-center gap-2">
+            <span class="shrink-0 text-ink-muted">Click or drag lines to comment</span>
+            <template v-if="activeScopes.length > 0">
+              <span class="text-ink-faint">·</span>
+              <div class="flex min-w-0 items-center gap-1 font-mono text-[11px] text-terra-text">
+                <template v-for="(sc, idx) in activeScopes" :key="sc">
+                  <ChevronRight v-if="idx > 0" class="h-3 w-3 shrink-0 text-ink-faint" />
+                  <span class="truncate">{{ sc }}</span>
+                </template>
+              </div>
+            </template>
+            <span
+              v-if="activeReplacedCount > 0"
+              class="shrink-0 rounded border border-crimson-border bg-crimson-soft px-1.5 py-0.2 font-mono text-[10px] text-crimson-text"
+            >
+              Replaces -{{ activeReplacedCount }}
+            </span>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button
+              v-if="isSvgFile"
+              class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-0.5 text-[10.5px] text-ink-secondary transition-colors hover:bg-canvas-elevated hover:text-ink"
+              @click="showSvgSource = false"
+            >
+              <ImageIcon class="h-3 w-3" />
+              <span>Image Preview</span>
+            </button>
+
+            <button
+              v-if="isGeneratedStep && isGeneratedExpanded"
+              class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-0.5 text-[10.5px] text-ink-secondary transition-colors hover:bg-canvas-elevated hover:text-ink"
+              @click="isGeneratedExpanded = false"
+            >
+              <span>Collapse Generated</span>
+            </button>
+
+            <button
+              class="inline-flex shrink-0 items-center gap-1 rounded-lg border px-2 py-0.5 text-[10.5px] transition-colors"
+              :class="
+                !settings.requireAltForHover
+                  ? 'border-terra-border bg-terra-soft text-terra-text'
+                  : 'border-border bg-canvas text-ink-secondary hover:bg-canvas-elevated'
+              "
+              title="Toggle whether symbol hover popovers open automatically (250ms delay) or only when holding Option/Alt"
+              @click="settings.setRequireAltForHover(!settings.requireAltForHover)"
+            >
+              <Sparkles class="h-3 w-3" />
+              <span>{{ settings.requireAltForHover ? 'Hover: ⌥ + Hover' : 'Hover: Auto' }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div v-if="segments.length === 0" class="p-8 text-center text-xs text-ink-muted">
+          No textual diff available for this file (binary or empty change).
+        </div>
+
+        <div
+          v-else
+          class="overflow-x-auto font-mono leading-[1.55]"
+          :class="{ 'select-none': isDraggingSelection }"
+          :style="{ fontSize: `${settings.codeFontSize}px` }"
+        >
+          <template v-for="seg in segments" :key="seg.id">
           <!-- Collapsed Unchanged Gap -->
           <template v-if="seg.kind === 'gap'">
             <button
@@ -678,6 +1089,7 @@ function statusBadgeClass(status: string): string {
           </template>
         </template>
       </div>
+      </template>
     </div>
 
     <!-- Hover Context Popover -->

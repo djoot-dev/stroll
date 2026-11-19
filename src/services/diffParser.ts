@@ -155,16 +155,31 @@ function buildGapSegment(
 }
 
 /**
+ * Returns true if the file was renamed without any textual content modifications.
+ */
+export function isPureRename(file: PRFile): boolean {
+  return (
+    file.status === 'renamed' &&
+    !file.patch.trim() &&
+    file.additions === 0 &&
+    file.deletions === 0
+  )
+}
+
+/**
  * Converts a PRFile's unified patch + full file content into an ordered list of
  * expandable unchanged `DiffGap` segments and `DiffHunkBlock` segments.
  */
 export function buildDiffSegments(file: PRFile): DiffSegment[] {
+  if (isPureRename(file)) return []
+  if (file.isBinary && !file.patch.trim()) return []
+
   const isDeleted = file.status === 'deleted'
   const fullText = isDeleted ? file.baseContent : file.headContent
   const sourceLines = fullText !== null ? fullText.split('\n') : []
   const hunks = parsePatchHunks(file.patch)
 
-  // If there's no patch (e.g. newly added binary/large or full-file view), show headContent
+  // If there's no patch (e.g. newly added large file or full-file view), show headContent
   if (hunks.length === 0 && sourceLines.length > 0) {
     return [
       {
