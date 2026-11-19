@@ -37,3 +37,8 @@ cargo check --manifest-path src-tauri/Cargo.toml   # Verify Rust backend compile
   - Future Phase 2 `git` and `tree-sitter` Rust commands belong in `src-tauri/src/commands/` and are registered in `src-tauri/src/lib.rs`.
 - **Offline Demo Mode**:
   - `src/data/mockPR.ts` provides a realistic 6-file PR loaded on startup so UI/UX changes can always be verified without a GitHub PAT.
+
+## Git Workflow
+
+- **Feature Branches Only:** Do all development on dedicated feature branches created from `main` (never commit directly to `main`).
+- **Pull Requests:** All changes must be merged into `main` via a Pull Request.
