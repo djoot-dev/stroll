@@ -50,11 +50,11 @@ function toggleDirection() {
         </button>
 
         <div class="flex items-center gap-2">
-          <span
-            class="inline-flex h-6 w-6 items-center justify-center rounded bg-blue-500/20 text-xs font-bold text-blue-400"
-          >
-            PT
-          </span>
+          <img
+            src="/logo.svg"
+            alt="Stroll"
+            class="h-6 w-6 rounded-md shadow-sm"
+          />
           <span class="hidden text-sm font-semibold tracking-tight text-slate-100 sm:inline">
             Stroll
           </span>

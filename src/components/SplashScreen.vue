@@ -1,20 +1,19 @@
 <script setup lang="ts">
-import { GitPullRequest } from '@lucide/vue'
 </script>
 
 <template>
   <div class="relative flex h-screen flex-col items-center justify-center overflow-hidden bg-canvas px-6 text-center">
     <!-- Subtle ambient glow -->
     <div
-      class="pointer-events-none absolute h-72 w-72 rounded-full bg-blue-500/10 blur-3xl"
+      class="pointer-events-none absolute h-72 w-72 rounded-full bg-emerald-500/10 blur-3xl"
     />
 
     <div class="animate-pop-in relative flex flex-col items-center gap-5">
-      <div
-        class="flex h-16 w-16 items-center justify-center rounded-2xl border border-blue-500/30 bg-blue-500/15 shadow-lg shadow-blue-500/15"
-      >
-        <GitPullRequest class="h-8 w-8 text-blue-400" />
-      </div>
+      <img
+        src="/logo.svg"
+        alt="Stroll"
+        class="h-16 w-16 rounded-2xl shadow-lg shadow-black/40"
+      />
 
       <div class="space-y-1.5">
         <h1 class="text-xl font-bold tracking-tight text-slate-100">Stroll</h1>

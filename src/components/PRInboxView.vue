@@ -98,11 +98,11 @@ onBeforeUnmount(() => {
     <header class="shrink-0 border-b border-border bg-canvas-subtle">
       <div class="mx-auto flex h-14 max-w-5xl items-center justify-between px-6">
         <div class="flex items-center gap-2.5">
-          <span
-            class="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-blue-500/20 text-xs font-bold text-blue-400"
-          >
-            PT
-          </span>
+          <img
+            src="/logo.svg"
+            alt="Stroll"
+            class="h-7 w-7 rounded-lg shadow-sm"
+          />
           <div>
             <span class="text-sm font-semibold tracking-tight text-slate-100">Stroll</span>
             <span class="ml-2 hidden text-xs text-slate-500 sm:inline">Review Inbox</span>
