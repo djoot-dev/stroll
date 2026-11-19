@@ -466,7 +466,7 @@ function statusBadgeClass(status: string): string {
         class="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b border-border bg-canvas-subtle/95 px-3.5 py-1.5 text-[11px] text-ink-muted backdrop-blur-sm"
       >
         <div class="flex min-w-0 items-center gap-2">
-          <span class="shrink-0 text-ink-faint">Click or drag lines to comment</span>
+          <span class="shrink-0 text-ink-muted">Click or drag lines to comment</span>
           <template v-if="activeScopes.length > 0">
             <span class="text-ink-faint">·</span>
             <div class="flex min-w-0 items-center gap-1 font-mono text-[11px] text-terra-text">
@@ -514,7 +514,7 @@ function statusBadgeClass(status: string): string {
           <template v-if="seg.kind === 'gap'">
             <button
               v-if="!expandedGaps.has(seg.id)"
-              class="flex w-full items-center gap-2 border-y border-border-muted bg-canvas-subtle/80 px-4 py-1 text-left font-sans text-[11px] text-ink-muted transition-colors hover:bg-terra-soft hover:text-terra-text"
+              class="flex w-full items-center gap-2 border-y border-border-muted bg-canvas-subtle px-4 py-1 text-left font-sans text-[11px] text-ink-secondary transition-colors hover:bg-terra-soft hover:text-terra-text"
               @click="toggleGap(seg.id)"
             >
               <ChevronsUpDown class="h-3.5 w-3.5 shrink-0" />
@@ -526,14 +526,14 @@ function statusBadgeClass(status: string): string {
 
             <template v-else>
               <div
-                class="flex items-center justify-between border-y border-border-muted bg-canvas-subtle/60 px-4 py-0.5 font-sans text-[10px] text-ink-faint"
+                class="flex items-center justify-between border-y border-border-muted bg-canvas-subtle/80 px-4 py-0.5 font-sans text-[10px] text-ink-muted"
               >
                 <span>Expanded unchanged context ({{ seg.lineCount }} lines)</span>
                 <button class="hover:text-ink" @click="toggleGap(seg.id)">Collapse</button>
               </div>
               <template v-for="(line, lIdx) in seg.lines" :key="line.key">
                 <div
-                  class="group flex cursor-pointer items-stretch"
+                  class="group flex cursor-pointer items-stretch border-l-2 border-l-transparent"
                   :class="
                     selectedRange.keys.has(line.key)
                       ? selectionRowClass(line.key)
@@ -542,16 +542,16 @@ function statusBadgeClass(status: string): string {
                   @mousedown.left="startLineDrag(line)"
                   @mouseenter="handleLineMouseEnter(line, seg.lines, lIdx)"
                 >
-                  <span class="w-12 shrink-0 select-none px-2 text-right text-[11px] text-ink-faint">
+                  <span class="w-12 shrink-0 select-none px-2 text-right text-[11px] text-code-gutter-text">
                     {{ line.oldLineNumber ?? '' }}
                   </span>
-                  <span class="w-12 shrink-0 select-none border-r border-border-muted px-2 text-right text-[11px] text-ink-faint">
+                  <span class="w-12 shrink-0 select-none border-r border-border-muted px-2 text-right text-[11px] text-code-gutter-text">
                     {{ line.newLineNumber ?? '' }}
                   </span>
-                  <span class="w-6 shrink-0 select-none text-center text-ink-faint">
+                  <span class="w-6 shrink-0 select-none text-center text-code-gutter-text">
                     <MessageSquarePlus class="mx-auto mt-1 hidden h-3 w-3 text-terra group-hover:block" />
                   </span>
-                  <pre class="flex-1 whitespace-pre pr-4 text-ink-secondary"><template
+                  <pre class="flex-1 whitespace-pre pr-4 text-ink"><template
                     v-for="(pt, pIdx) in tokenizedByKey.get(line.key)"
                     :key="pIdx"
                   ><span
@@ -593,23 +593,23 @@ function statusBadgeClass(status: string): string {
 
             <template v-for="(line, lIdx) in seg.lines" :key="line.key">
               <div
-                class="group flex cursor-pointer items-stretch"
+                class="group flex cursor-pointer items-stretch border-l-2"
                 :class="
                   selectedRange.keys.has(line.key)
-                    ? selectionRowClass(line.key)
+                    ? ['border-l-transparent', selectionRowClass(line.key)]
                     : {
-                        'bg-diff-add hover:bg-diff-add-hover': line.type === 'add',
-                        'bg-diff-del hover:bg-diff-del-hover': line.type === 'del',
-                        'hover:bg-diff-hover': line.type === 'context',
+                        'border-l-pine bg-diff-add hover:bg-diff-add-hover': line.type === 'add',
+                        'border-l-crimson bg-diff-del hover:bg-diff-del-hover': line.type === 'del',
+                        'border-l-transparent hover:bg-diff-hover': line.type === 'context',
                       }
                 "
                 @mousedown.left="startLineDrag(line)"
                 @mouseenter="handleLineMouseEnter(line, seg.lines, lIdx)"
               >
-                <span class="w-12 shrink-0 select-none px-2 text-right text-[11px] text-ink-faint">
+                <span class="w-12 shrink-0 select-none px-2 text-right text-[11px] text-code-gutter-text">
                   {{ line.oldLineNumber ?? '' }}
                 </span>
-                <span class="w-12 shrink-0 select-none border-r border-border-muted px-2 text-right text-[11px] text-ink-faint">
+                <span class="w-12 shrink-0 select-none border-r border-border-muted px-2 text-right text-[11px] text-code-gutter-text">
                   {{ line.newLineNumber ?? '' }}
                 </span>
                 <span
@@ -617,7 +617,7 @@ function statusBadgeClass(status: string): string {
                   :class="{
                     'text-pine-text': line.type === 'add',
                     'text-crimson-text': line.type === 'del',
-                    'text-ink-faint': line.type === 'context',
+                    'text-code-gutter-text': line.type === 'context',
                   }"
                 >
                   <span class="group-hover:hidden">
