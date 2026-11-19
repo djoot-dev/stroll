@@ -17,7 +17,7 @@ import { GitPullRequest } from '@lucide/vue'
       </div>
 
       <div class="space-y-1.5">
-        <h1 class="text-xl font-bold tracking-tight text-slate-100">PR Tour</h1>
+        <h1 class="text-xl font-bold tracking-tight text-slate-100">Stroll</h1>
         <p class="text-xs text-slate-400">Guided, dependency-aware code review</p>
       </div>
 

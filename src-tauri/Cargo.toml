@@ -1,12 +1,12 @@
 [package]
-name = "pr-tour"
+name = "stroll"
 version = "0.1.2"
 description = "Guided, step-by-step GitHub Pull Request review desktop app"
 authors = ["Daniel"]
 edition = "2021"
 
 [lib]
-name = "pr_tour_lib"
+name = "stroll_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

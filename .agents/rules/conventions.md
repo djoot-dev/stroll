@@ -1,8 +1,8 @@
 ---
-description: Core coding conventions and architectural guardrails for PR Tour
+description: Core coding conventions and architectural guardrails for Stroll
 ---
 
-# PR Tour Workspace Rules
+# Stroll Workspace Rules
 
 1. **Use Bun exclusively**: Always run `bun install`, `bun run ...`, and `bunx ...`. Never introduce `package-lock.json`, `npm`, or `node` commands in scripts or docs.
 2. **Vue 3 & Pinia conventions**:

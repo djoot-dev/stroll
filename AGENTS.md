@@ -1,10 +1,10 @@
-# AGENTS.md — PR Tour
+# AGENTS.md — Stroll
 
 Guidance for AI coding agents working in this repository.
 
 ## Project Overview
 
-**PR Tour** is a cross-platform desktop application for reviewing GitHub Pull Requests in a guided, step-by-step tour instead of a flat alphabetical file list.
+**Stroll** is a cross-platform desktop application for reviewing GitHub Pull Requests in a guided, step-by-step tour instead of a flat alphabetical file list.
 
 - **Runtime & Package Manager:** Bun (`bun`, `bunx`) — **do not use `npm`, `yarn`, or `node`**
 - **Desktop Shell:** Tauri v2 (`src-tauri/`) with `@tauri-apps/plugin-http` and `@tauri-apps/plugin-store`
