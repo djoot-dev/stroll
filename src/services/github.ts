@@ -25,11 +25,42 @@ import type {
   ReviewThread,
 } from '@/types/pr'
 
-const GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql'
-const GITHUB_REST_URL = 'https://api.github.com'
 const MAX_PR_FILES = 3000
 const MAX_COMMIT_PAGES = 10
 const MAX_THREAD_PAGES = 20
+const DEFAULT_GITHUB_HOST = 'github.com'
+let configuredGitHubHost = DEFAULT_GITHUB_HOST
+
+export function normalizeGitHubHost(rawHost: string): string {
+  const cleaned = rawHost
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/.*$/, '')
+    .toLowerCase()
+  return cleaned || DEFAULT_GITHUB_HOST
+}
+
+export function setGitHubHost(host: string): void {
+  configuredGitHubHost = normalizeGitHubHost(host)
+}
+
+export function getGitHubHost(): string {
+  return configuredGitHubHost
+}
+
+export function getGitHubEndpoints(host?: string): { graphqlUrl: string; restUrl: string } {
+  const normalized = normalizeGitHubHost(host ?? configuredGitHubHost)
+  if (normalized === DEFAULT_GITHUB_HOST) {
+    return {
+      graphqlUrl: 'https://api.github.com/graphql',
+      restUrl: 'https://api.github.com',
+    }
+  }
+  return {
+    graphqlUrl: `https://${normalized}/api/graphql`,
+    restUrl: `https://${normalized}/api/v3`,
+  }
+}
 
 interface GraphQLResponse<T> {
   data?: T
@@ -41,7 +72,8 @@ async function graphql<T>(
   query: string,
   variables: Record<string, unknown> = {},
 ): Promise<T> {
-  const res = await httpFetch(GITHUB_GRAPHQL_URL, {
+  const { graphqlUrl } = getGitHubEndpoints()
+  const res = await httpFetch(graphqlUrl, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${pat}`,
@@ -68,11 +100,34 @@ async function graphql<T>(
 
 export function parsePRUrl(
   rawUrl: string,
+  customHost?: string,
 ): { owner: string; repo: string; number: number } | null {
   const trimmed = rawUrl.trim()
-  const match = trimmed.match(
-    /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/.*)?$/i,
-  )
+  if (!trimmed) return null
+
+  let parsed: URL
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    return null
+  }
+
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    return null
+  }
+
+  const allowedHosts = new Set<string>([
+    DEFAULT_GITHUB_HOST,
+    normalizeGitHubHost(customHost ?? configuredGitHubHost),
+  ])
+
+  const urlHost = parsed.host.toLowerCase()
+  const urlHostname = parsed.hostname.toLowerCase()
+  if (!allowedHosts.has(urlHost) && !allowedHosts.has(urlHostname)) {
+    return null
+  }
+
+  const match = parsed.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/.*)?$/i)
   if (!match) return null
   return {
     owner: match[1],
@@ -278,6 +333,18 @@ export async function fetchViewerAndRequestedPRs(
             additions
             deletions
             changedFiles
+            isDraft
+            reviewDecision
+            totalCommentsCount
+            commits(last: 1) {
+              nodes {
+                commit {
+                  statusCheckRollup {
+                    state
+                  }
+                }
+              }
+            }
             author {
               login
               avatarUrl
@@ -310,6 +377,18 @@ export async function fetchViewerAndRequestedPRs(
         additions: number
         deletions: number
         changedFiles: number
+        isDraft: boolean
+        reviewDecision: PRReviewDecision
+        totalCommentsCount: number | null
+        commits: {
+          nodes: Array<{
+            commit: {
+              statusCheckRollup: {
+                state: CheckRollupState
+              } | null
+            }
+          }>
+        } | null
         author: GitHubUser | null
         repository: { name: string; owner: { login: string } }
       } | null>
@@ -335,6 +414,10 @@ export async function fetchViewerAndRequestedPRs(
       additions: n.additions,
       deletions: n.deletions,
       changedFiles: n.changedFiles,
+      isDraft: Boolean(n.isDraft),
+      reviewDecision: n.reviewDecision ?? null,
+      ciState: n.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state ?? null,
+      totalCommentsCount: n.totalCommentsCount ?? 0,
     }))
 
   return {
@@ -372,11 +455,12 @@ export async function fetchRestPRFiles(
   number: number,
   maxFiles = MAX_PR_FILES,
 ): Promise<RestPRFile[]> {
+  const { restUrl } = getGitHubEndpoints()
   const perPage = 100
   const allFiles: RestPRFile[] = []
   let page = 1
   let nextUrl: string | null =
-    `${GITHUB_REST_URL}/repos/${owner}/${repo}/pulls/${number}/files?per_page=${perPage}&page=${page}`
+    `${restUrl}/repos/${owner}/${repo}/pulls/${number}/files?per_page=${perPage}&page=${page}`
 
   while (nextUrl && allFiles.length < maxFiles) {
     const res = await httpFetch(nextUrl, {
@@ -406,7 +490,7 @@ export async function fetchRestPRFiles(
       nextUrl = null
     } else if (batch.length === perPage) {
       page += 1
-      nextUrl = `${GITHUB_REST_URL}/repos/${owner}/${repo}/pulls/${number}/files?per_page=${perPage}&page=${page}`
+      nextUrl = `${restUrl}/repos/${owner}/${repo}/pulls/${number}/files?per_page=${perPage}&page=${page}`
     } else {
       nextUrl = null
     }
@@ -427,6 +511,7 @@ export async function fetchFileBlobDataUrl(
   refOid: string,
   blobSha?: string,
 ): Promise<string | null> {
+  const { restUrl } = getGitHubEndpoints()
   const mime = getImageMimeType(path) ?? 'application/octet-stream'
   const headers = {
     Authorization: `Bearer ${pat}`,
@@ -437,7 +522,7 @@ export async function fetchFileBlobDataUrl(
   // Prefer Git Blobs API when blob SHA is already known (works for files > 1MB too)
   if (blobSha) {
     const blobRes = await httpFetch(
-      `${GITHUB_REST_URL}/repos/${owner}/${repo}/git/blobs/${encodeURIComponent(blobSha)}`,
+      `${restUrl}/repos/${owner}/${repo}/git/blobs/${encodeURIComponent(blobSha)}`,
       { headers },
     )
     if (blobRes.ok) {
@@ -454,7 +539,7 @@ export async function fetchFileBlobDataUrl(
     .map((seg) => encodeURIComponent(seg))
     .join('/')
   const contentsRes = await httpFetch(
-    `${GITHUB_REST_URL}/repos/${owner}/${repo}/contents/${encodedPath}?ref=${encodeURIComponent(refOid)}`,
+    `${restUrl}/repos/${owner}/${repo}/contents/${encodedPath}?ref=${encodeURIComponent(refOid)}`,
     { headers },
   )
   if (!contentsRes.ok) return null
@@ -473,7 +558,7 @@ export async function fetchFileBlobDataUrl(
   // Fallback to git blob endpoint for files > 1MB where /contents omits `content`
   if (contentsJson.sha) {
     const blobRes = await httpFetch(
-      `${GITHUB_REST_URL}/repos/${owner}/${repo}/git/blobs/${encodeURIComponent(contentsJson.sha)}`,
+      `${restUrl}/repos/${owner}/${repo}/git/blobs/${encodeURIComponent(contentsJson.sha)}`,
       { headers },
     )
     if (blobRes.ok) {

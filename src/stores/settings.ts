@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
+import { normalizeGitHubHost, setGitHubHost as syncGitHubHost } from '@/services/github'
 import {
   loadAppSettings,
   loadTourDirection,
@@ -34,6 +35,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   requireAltForHover: false,
   showShortcutsBar: true,
   inboxAutoRefreshSeconds: 60,
+  inboxNotificationsEnabled: false,
+  githubHost: 'github.com',
 }
 
 function getSystemPrefersDark(): boolean {
@@ -55,6 +58,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const requireAltForHover = ref<boolean>(DEFAULT_APP_SETTINGS.requireAltForHover)
   const showShortcutsBar = ref<boolean>(DEFAULT_APP_SETTINGS.showShortcutsBar)
   const inboxAutoRefreshSeconds = ref<number>(DEFAULT_APP_SETTINGS.inboxAutoRefreshSeconds)
+  const inboxNotificationsEnabled = ref<boolean>(DEFAULT_APP_SETTINGS.inboxNotificationsEnabled)
+  const githubHost = ref<string>(DEFAULT_APP_SETTINGS.githubHost)
 
   const resolvedTheme = computed<'light' | 'dark'>(() => {
     if (theme.value === 'system') {
@@ -113,6 +118,13 @@ export const useSettingsStore = defineStore('settings', () => {
     if (typeof savedSettings.inboxAutoRefreshSeconds === 'number') {
       inboxAutoRefreshSeconds.value = savedSettings.inboxAutoRefreshSeconds
     }
+    if (typeof savedSettings.inboxNotificationsEnabled === 'boolean') {
+      inboxNotificationsEnabled.value = savedSettings.inboxNotificationsEnabled
+    }
+    if (typeof savedSettings.githubHost === 'string') {
+      githubHost.value = normalizeGitHubHost(savedSettings.githubHost)
+    }
+    syncGitHubHost(githubHost.value)
     applyThemeToDom()
     initialized.value = true
   }
@@ -128,6 +140,8 @@ export const useSettingsStore = defineStore('settings', () => {
         requireAltForHover: requireAltForHover.value,
         showShortcutsBar: showShortcutsBar.value,
         inboxAutoRefreshSeconds: inboxAutoRefreshSeconds.value,
+        inboxNotificationsEnabled: inboxNotificationsEnabled.value,
+        githubHost: githubHost.value,
       }),
     ])
   }
@@ -187,6 +201,18 @@ export const useSettingsStore = defineStore('settings', () => {
     await persist()
   }
 
+  async function setInboxNotificationsEnabled(enabled: boolean): Promise<void> {
+    inboxNotificationsEnabled.value = enabled
+    await persist()
+  }
+
+  async function setGithubHost(host: string): Promise<void> {
+    const normalized = normalizeGitHubHost(host)
+    githubHost.value = normalized
+    syncGitHubHost(normalized)
+    await persist()
+  }
+
   async function resetToDefaults(): Promise<void> {
     theme.value = DEFAULT_APP_SETTINGS.theme
     defaultTourDirection.value = DEFAULT_APP_SETTINGS.defaultTourDirection
@@ -196,6 +222,9 @@ export const useSettingsStore = defineStore('settings', () => {
     requireAltForHover.value = DEFAULT_APP_SETTINGS.requireAltForHover
     showShortcutsBar.value = DEFAULT_APP_SETTINGS.showShortcutsBar
     inboxAutoRefreshSeconds.value = DEFAULT_APP_SETTINGS.inboxAutoRefreshSeconds
+    inboxNotificationsEnabled.value = DEFAULT_APP_SETTINGS.inboxNotificationsEnabled
+    githubHost.value = DEFAULT_APP_SETTINGS.githubHost
+    syncGitHubHost(githubHost.value)
     applyThemeToDom()
     await persist()
   }
@@ -212,6 +241,8 @@ export const useSettingsStore = defineStore('settings', () => {
     requireAltForHover,
     showShortcutsBar,
     inboxAutoRefreshSeconds,
+    inboxNotificationsEnabled,
+    githubHost,
     init,
     openSettings,
     closeSettings,
@@ -224,6 +255,8 @@ export const useSettingsStore = defineStore('settings', () => {
     setRequireAltForHover,
     setShowShortcutsBar,
     setInboxAutoRefreshSeconds,
+    setInboxNotificationsEnabled,
+    setGithubHost,
     resetToDefaults,
   }
 })
