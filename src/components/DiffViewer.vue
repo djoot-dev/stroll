@@ -19,6 +19,7 @@ import {
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   buildPRSymbolIndex,
+  extractImportedSymbolNames,
   getEnclosingScope,
   getReplacedLinesForAddedLine,
   resolveHoverSymbolWithRepoFallback,
@@ -284,6 +285,21 @@ onBeforeUnmount(() => {
 
 const symbolIndex = computed(() => buildPRSymbolIndex(review.pr?.files ?? []))
 
+const hoverableSymbols = computed<ReadonlyMap<string, unknown>>(() => {
+  const base = symbolIndex.value
+  if (!review.currentRepoPath || !isTauriRuntime()) return base
+
+  const content = props.step.file.headContent ?? props.step.file.baseContent
+  const imported = extractImportedSymbolNames(content)
+  if (imported.size === 0) return base
+
+  const merged = new Map<string, unknown>(base)
+  for (const name of imported) {
+    if (!merged.has(name)) merged.set(name, true)
+  }
+  return merged
+})
+
 const segments = computed(() => buildDiffSegments(props.step.file))
 
 const showImagePreview = computed(
@@ -368,7 +384,7 @@ const tokenizedByKey = computed(() => {
     props.step.file.language,
   )
 
-  const index = symbolIndex.value
+  const index = hoverableSymbols.value
 
   allLines.forEach((line, idx) => {
     const spans: HighlightSpan[] = tokenized[idx] ?? [{ text: line.content || ' ', className: '' }]

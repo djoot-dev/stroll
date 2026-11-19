@@ -234,25 +234,11 @@ function parseImports(content: string): ParsedImport[] {
   return results
 }
 
-function resolveImportToPRFile(
-  importerPath: string,
-  specifier: string,
+function resolveCandidateBase(
+  candidateBase: string,
   allPaths: Set<string>,
   strippedPathMap: Map<string, string>,
 ): string | null {
-  const dir = importerPath.includes('/')
-    ? importerPath.slice(0, importerPath.lastIndexOf('/'))
-    : ''
-
-  let candidateBase = ''
-  if (specifier.startsWith('./') || specifier.startsWith('../')) {
-    candidateBase = normalizePosix(dir ? `${dir}/${specifier}` : specifier)
-  } else if (specifier.startsWith('@/')) {
-    candidateBase = normalizePosix(`src/${specifier.slice(2)}`)
-  } else {
-    return null
-  }
-
   if (allPaths.has(candidateBase)) return candidateBase
 
   const exts = ['.ts', '.tsx', '.js', '.jsx', '.vue', '.mts', '.py', '.rs', '.sql']
@@ -264,8 +250,42 @@ function resolveImportToPRFile(
     if (allPaths.has(indexPath)) return indexPath
   }
 
-  const byStripped = strippedPathMap.get(stripExt(candidateBase))
-  return byStripped ?? null
+  return strippedPathMap.get(stripExt(candidateBase)) ?? null
+}
+
+function resolveImportToPRFile(
+  importerPath: string,
+  specifier: string,
+  allPaths: Set<string>,
+  strippedPathMap: Map<string, string>,
+): string | null {
+  const dir = importerPath.includes('/')
+    ? importerPath.slice(0, importerPath.lastIndexOf('/'))
+    : ''
+
+  if (specifier.startsWith('./') || specifier.startsWith('../')) {
+    const candidateBase = normalizePosix(dir ? `${dir}/${specifier}` : specifier)
+    return resolveCandidateBase(candidateBase, allPaths, strippedPathMap)
+  }
+
+  if (specifier.startsWith('@/') || specifier.startsWith('~/')) {
+    const rest = specifier.slice(2)
+    const candidates: string[] = []
+    const srcIdx = importerPath.indexOf('/src/')
+    if (srcIdx > 0) {
+      candidates.push(normalizePosix(`${importerPath.slice(0, srcIdx)}/src/${rest}`))
+    }
+    candidates.push(normalizePosix(`src/${rest}`))
+    candidates.push(normalizePosix(rest))
+
+    for (const candidateBase of candidates) {
+      const hit = resolveCandidateBase(candidateBase, allPaths, strippedPathMap)
+      if (hit) return hit
+    }
+    return null
+  }
+
+  return null
 }
 
 /**
