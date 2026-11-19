@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { AlertTriangle, Check, Loader2, MessageSquare, Send, Trash2, X } from '@lucide/vue'
-import { ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useReviewStore } from '@/stores/review'
+import { useSettingsStore } from '@/stores/settings'
 import type { ReviewEvent } from '@/types/pr'
 
 const review = useReviewStore()
+const settings = useSettingsStore()
 
 const summary = ref('')
 const selectedEvent = ref<ReviewEvent>('COMMENT')
@@ -20,11 +22,28 @@ watch(
 )
 
 async function handleSubmit() {
+  if (review.isSubmittingReview) return
   const ok = await review.submitCompleteReview(selectedEvent.value, summary.value)
   if (ok) {
     summary.value = ''
   }
 }
+
+function handleKeydown(e: KeyboardEvent) {
+  if (!review.showFinishModal || !review.pr || settings.isOpen) return
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !e.altKey) {
+    e.preventDefault()
+    void handleSubmit()
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeydown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleKeydown)
+})
 </script>
 
 <template>
@@ -163,21 +182,24 @@ async function handleSubmit() {
           </div>
         </div>
 
-        <div class="flex items-center justify-end gap-2 border-t border-border px-5 py-3">
-          <button
-            class="rounded-xl border border-border bg-canvas px-3.5 py-1.5 text-xs text-ink-secondary hover:bg-canvas-elevated"
-            @click="review.showFinishModal = false"
-          >
-            Cancel
-          </button>
-          <button
-            class="inline-flex items-center gap-1.5 rounded-xl bg-pine px-4 py-1.5 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-pine-hover disabled:opacity-40"
-            :disabled="review.isSubmittingReview"
-            @click="handleSubmit"
-          >
-            <Loader2 v-if="review.isSubmittingReview" class="h-3.5 w-3.5 animate-spin" />
-            <span>Submit Review</span>
-          </button>
+        <div class="flex items-center justify-between gap-2 border-t border-border px-5 py-3">
+          <span class="text-[11px] text-ink-faint">Ctrl+↵ / ⌘↵ to submit</span>
+          <div class="flex items-center gap-2">
+            <button
+              class="rounded-xl border border-border bg-canvas px-3.5 py-1.5 text-xs text-ink-secondary hover:bg-canvas-elevated"
+              @click="review.showFinishModal = false"
+            >
+              Cancel
+            </button>
+            <button
+              class="inline-flex items-center gap-1.5 rounded-xl bg-pine px-4 py-1.5 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-pine-hover disabled:opacity-40"
+              :disabled="review.isSubmittingReview"
+              @click="handleSubmit"
+            >
+              <Loader2 v-if="review.isSubmittingReview" class="h-3.5 w-3.5 animate-spin" />
+              <span>Submit Review</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
