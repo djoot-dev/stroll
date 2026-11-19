@@ -80,6 +80,17 @@ describe('classifyLayer', () => {
     expect(classifyLayer('tests/Orders.Tests/OrderServiceTests.cs')).toBe('tests')
     expect(classifyLayer('src/Orders/OrderValidatorTest.cs')).toBe('tests')
     expect(classifyLayer('Orders.Tests/Fixtures/OrderFixture.cs')).toBe('tests')
+    expect(classifyLayer('Orders.Domain.Test/Fixtures/OrderFixture.cs')).toBe('tests')
+  })
+
+  it('categorizes *Test.js and *.Test/ files as tests without false positives', () => {
+    expect(
+      classifyLayer('implementation/Orders.Domain.Test/Services/OrderFormatting/OrderFormatterTest.js'),
+    ).toBe('tests')
+    expect(classifyLayer('src/OrderFormatting/OrderFormatterTest.js')).toBe('tests')
+    expect(classifyLayer('implementation/Orders.Domain.Test/Fixtures/Helper.js')).toBe('tests')
+    expect(classifyLayer('src/utils/latest.ts')).toBe('core')
+    expect(classifyLayer('src/utils/contest.js')).toBe('core')
   })
 })
 
