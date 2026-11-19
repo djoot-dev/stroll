@@ -1,6 +1,7 @@
 use std::io::ErrorKind;
 use std::path::Path;
-use std::process::Command;
+
+use super::hidden_command;
 
 const GH_FALLBACK_PATHS: &[&str] = &[
     "/opt/homebrew/bin/gh",
@@ -9,7 +10,7 @@ const GH_FALLBACK_PATHS: &[&str] = &[
 ];
 
 fn run_gh_auth_token(bin: &str) -> std::io::Result<std::process::Output> {
-    Command::new(bin).args(["auth", "token"]).output()
+    hidden_command(bin).args(["auth", "token"]).output()
 }
 
 /// Reads the active GitHub CLI (`gh`) auth token from the user's local `gh` session.

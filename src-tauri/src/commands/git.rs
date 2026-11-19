@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::process::Command;
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
+use std::process::Stdio;
+
+use super::hidden_command;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -110,7 +113,7 @@ pub fn inspect_local_repo(path: String) -> Result<LocalRepoInspection, String> {
         });
     }
 
-    let rev_parse = Command::new("git")
+    let rev_parse = hidden_command("git")
         .arg("-C")
         .arg(trimmed)
         .arg("rev-parse")
@@ -131,7 +134,7 @@ pub fn inspect_local_repo(path: String) -> Result<LocalRepoInspection, String> {
         });
     }
 
-    let owner_repo = Command::new("git")
+    let owner_repo = hidden_command("git")
         .arg("-C")
         .arg(trimmed)
         .arg("remote")
@@ -151,7 +154,29 @@ pub fn inspect_local_repo(path: String) -> Result<LocalRepoInspection, String> {
     })
 }
 
-/// Reads multiple `<oid>:<path>` blobs from a local git checkout using `git show`.
+fn parse_cat_file_header(line: &[u8]) -> Option<(&str, usize)> {
+    let text = std::str::from_utf8(line)
+        .ok()?
+        .trim_end_matches(&['\r', '\n'][..]);
+    let mut parts = text.split(' ');
+    let oid = parts.next()?;
+    let obj_type = parts.next()?;
+    let size_str = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    if oid.len() < 40 || !oid.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    if !matches!(obj_type, "blob" | "tree" | "commit" | "tag") {
+        return None;
+    }
+    let size = size_str.parse::<usize>().ok()?;
+    Some((obj_type, size))
+}
+
+/// Reads multiple `<oid>:<path>` blobs from a local git checkout using a single
+/// `git cat-file --batch` process.
 /// Returns `None` for any blob that is missing locally (e.g. un-fetched commit).
 #[tauri::command]
 pub fn git_read_blobs(request: GitReadBlobsRequest) -> Result<Vec<Option<String>>, String> {
@@ -163,25 +188,101 @@ pub fn git_read_blobs(request: GitReadBlobsRequest) -> Result<Vec<Option<String>
         ));
     }
 
-    let results = request
+    let mut results = vec![None; request.specs.len()];
+    if request.specs.is_empty() {
+        return Ok(results);
+    }
+
+    let valid_indices: Vec<usize> = request
         .specs
         .iter()
-        .map(|spec| {
-            let obj = format!("{}:{}", spec.oid.trim(), spec.path);
-            let output = Command::new("git")
-                .arg("-C")
-                .arg(&request.repo_path)
-                .arg("show")
-                .arg(&obj)
-                .output()
-                .ok()?;
-            if !output.status.success() {
-                return None;
+        .enumerate()
+        .filter_map(|(idx, spec)| {
+            let oid = spec.oid.trim();
+            if oid.is_empty()
+                || oid.contains(['\n', '\r'])
+                || spec.path.contains(['\n', '\r'])
+            {
+                None
+            } else {
+                Some(idx)
             }
-            String::from_utf8(output.stdout).ok()
         })
         .collect();
 
+    if valid_indices.is_empty() {
+        return Ok(results);
+    }
+
+    let mut child = match hidden_command("git")
+        .arg("-C")
+        .arg(&request.repo_path)
+        .arg("cat-file")
+        .arg("--batch")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => return Ok(results),
+    };
+
+    let Some(stdin) = child.stdin.take() else {
+        let _ = child.wait();
+        return Ok(results);
+    };
+    let Some(stdout) = child.stdout.take() else {
+        drop(stdin);
+        let _ = child.wait();
+        return Ok(results);
+    };
+
+    std::thread::scope(|s| {
+        let specs = &request.specs;
+        let valid = &valid_indices;
+        s.spawn(move || {
+            let mut writer = BufWriter::new(stdin);
+            for &idx in valid {
+                let spec = &specs[idx];
+                if writeln!(writer, "{}:{}", spec.oid.trim(), spec.path).is_err() {
+                    break;
+                }
+            }
+            let _ = writer.flush();
+        });
+
+        let mut reader = BufReader::new(stdout);
+        let mut header_buf = Vec::new();
+        let mut body_buf = Vec::new();
+
+        for &idx in &valid_indices {
+            header_buf.clear();
+            let read_len = match reader.read_until(b'\n', &mut header_buf) {
+                Ok(n) => n,
+                Err(_) => break,
+            };
+            if read_len == 0 {
+                break;
+            }
+
+            if let Some((obj_type, size)) = parse_cat_file_header(&header_buf) {
+                body_buf.resize(size, 0);
+                if reader.read_exact(&mut body_buf).is_err() {
+                    break;
+                }
+                let mut trailing_nl = [0u8; 1];
+                if reader.read_exact(&mut trailing_nl).is_err() {
+                    break;
+                }
+                if obj_type == "blob" {
+                    results[idx] = std::str::from_utf8(&body_buf).ok().map(str::to_owned);
+                }
+            }
+        }
+    });
+
+    let _ = child.wait();
     Ok(results)
 }
 
@@ -248,7 +349,7 @@ pub fn git_blame_line(request: GitBlameLineRequest) -> Result<GitBlameInfo, Stri
         ));
     }
 
-    let mut cmd = Command::new("git");
+    let mut cmd = hidden_command("git");
     cmd.arg("-C")
         .arg(&request.repo_path)
         .arg("blame")
@@ -362,5 +463,118 @@ filename src/services/webhookDispatcher.ts
             parse_remote_owner_repo("https://github.com/acme/stroll/extra"),
             None
         );
+    }
+
+    #[test]
+    fn parses_cat_file_batch_headers() {
+        let oid = "a1b2c3d4e5f6789012345678901234567890abcd";
+        assert_eq!(
+            parse_cat_file_header(format!("{oid} blob 42\n").as_bytes()),
+            Some(("blob", 42))
+        );
+        assert_eq!(
+            parse_cat_file_header(format!("{oid} tree 0\n").as_bytes()),
+            Some(("tree", 0))
+        );
+        assert_eq!(
+            parse_cat_file_header(format!("{oid}:missing.txt missing\n").as_bytes()),
+            None
+        );
+        assert_eq!(
+            parse_cat_file_header(format!("{oid}:file missing missing\n").as_bytes()),
+            None
+        );
+    }
+
+    #[test]
+    fn reads_blobs_in_single_batch() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "stroll_git_batch_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let run_git = |args: &[&str]| {
+            let out = hidden_command("git")
+                .arg("-C")
+                .arg(&temp_dir)
+                .args(args)
+                .output()
+                .expect("git should run");
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+
+        run_git(&["init"]);
+        run_git(&["config", "user.email", "test@example.com"]);
+        run_git(&["config", "user.name", "Test"]);
+
+        std::fs::write(temp_dir.join("a.txt"), "hello\nworld\n").unwrap();
+        std::fs::write(temp_dir.join("bin.dat"), [0xff, 0xfe, 0x00, 0x01]).unwrap();
+        std::fs::write(temp_dir.join("b.txt"), "second file").unwrap();
+
+        run_git(&["add", "."]);
+        run_git(&["commit", "-m", "initial"]);
+        let head = run_git(&["rev-parse", "HEAD"]);
+
+        let repo_path = temp_dir.to_string_lossy().to_string();
+
+        // Empty specs returns empty vec
+        let empty = git_read_blobs(GitReadBlobsRequest {
+            repo_path: repo_path.clone(),
+            specs: vec![],
+        })
+        .unwrap();
+        assert!(empty.is_empty());
+
+        // Interleave existing, missing, binary, and newline-invalid specs
+        let blobs = git_read_blobs(GitReadBlobsRequest {
+            repo_path,
+            specs: vec![
+                GitBlobSpec {
+                    oid: head.clone(),
+                    path: "a.txt".to_string(),
+                },
+                GitBlobSpec {
+                    oid: head.clone(),
+                    path: "does-not-exist.txt".to_string(),
+                },
+                GitBlobSpec {
+                    oid: head.clone(),
+                    path: "bin.dat".to_string(),
+                },
+                GitBlobSpec {
+                    oid: head.clone(),
+                    path: "bad\npath.txt".to_string(),
+                },
+                GitBlobSpec {
+                    oid: head,
+                    path: "b.txt".to_string(),
+                },
+            ],
+        })
+        .unwrap();
+
+        assert_eq!(
+            blobs,
+            vec![
+                Some("hello\nworld\n".to_string()),
+                None,
+                None,
+                None,
+                Some("second file".to_string()),
+            ]
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
