@@ -851,7 +851,7 @@ async function handleResetDefaults() {
                       placeholder="owner/repo"
                       class="rounded-xl border border-border bg-canvas-inset px-2.5 py-1.5 font-mono text-xs text-ink placeholder-ink-faint focus:border-terra focus:outline-none sm:w-40"
                     />
-                    <div class="flex flex-1 gap-1.5">
+                    <div class="flex min-w-0 flex-1 gap-1.5">
                       <input
                         v-model="pathInput"
                         type="text"
