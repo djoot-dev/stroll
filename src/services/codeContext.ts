@@ -37,7 +37,7 @@ export interface HoverSymbolInfo {
 }
 
 const DECL_REGEX =
-  /^\s*(?:export\s+(?:default\s+)?)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(interface|type|class|enum|function|const|def|fn|struct)\s+([A-Za-z_$][\w$]*)/
+  /^\s*(?:export\s+(?:default\s+)?)?(?:declare\s+)?(?:(?:public|internal|private|protected|static|sealed|partial|abstract|readonly|ref|new|async)\s+)*(record\s+(?:struct|class)|record|interface|type|class|enum|function|const|def|fn|struct)\s+([A-Za-z_$][\w$]*)/
 
 function normalizeKind(raw: string): SymbolKind {
   switch (raw) {
@@ -47,12 +47,16 @@ function normalizeKind(raw: string): SymbolKind {
       return 'type'
     case 'class':
     case 'struct':
+    case 'record':
+    case 'record class':
+    case 'record struct':
       return 'class'
     case 'enum':
       return 'enum'
     case 'function':
     case 'def':
     case 'fn':
+    case 'method':
       return 'function'
     case 'const':
       return 'const'
@@ -64,6 +68,10 @@ function normalizeKind(raw: string): SymbolKind {
 function extractLeadingDocComment(lines: string[], declLineIdx: number): string | null {
   const collected: string[] = []
   let i = declLineIdx - 1
+  // Skip C# / Rust attributes (e.g. [ApiController], [Serializable], #[derive(...)]) right above the declaration
+  while (i >= 0 && /^\s*#?\[.*\]\s*$/.test(lines[i])) {
+    i -= 1
+  }
   while (i >= 0 && lines[i].trim() === '') {
     // Allow at most 0 blank lines between doc comment and declaration
     break
@@ -79,7 +87,7 @@ function extractLeadingDocComment(lines: string[], declLineIdx: number): string 
     return collected.join('\n').trim()
   }
 
-  // Line comments: // or # or --
+  // Line comments: /// or // or # or --
   while (i >= 0 && /^\s*(\/\/\/?|#|--)/.test(lines[i])) {
     collected.unshift(lines[i])
     i -= 1
@@ -284,6 +292,7 @@ export function findImportSpecifierForSymbol(
     }
   }
 
+  const csharpUsings: string[] = []
   for (const line of lines) {
     const pyMatch = line.match(/^\s*from\s+([A-Za-z0-9_.]+)\s+import\s+(.+)$/)
     if (pyMatch && wordRegex.test(pyMatch[2])) {
@@ -295,6 +304,30 @@ export function findImportSpecifierForSymbol(
       // Strip trailing `::Symbol` to get module path
       return rustMatch[1].replace(new RegExp(`::${escaped}$`), '')
     }
+
+    // C# `using Alias = Ns.Type;` or `using static Ns.Type;` or `using Ns.SubNs;`
+    const csAliasMatch = line.match(
+      /^\s*(?:global\s+)?using\s+([A-Za-z_]\w*)\s*=\s*([A-Za-z_][\w.]*)\s*;/,
+    )
+    if (csAliasMatch && (csAliasMatch[1] === symbolName || wordRegex.test(csAliasMatch[2]))) {
+      return csAliasMatch[2]
+    }
+
+    const csStaticMatch = line.match(/^\s*(?:global\s+)?using\s+static\s+([A-Za-z_][\w.]*)\s*;/)
+    if (csStaticMatch && wordRegex.test(csStaticMatch[1])) {
+      return csStaticMatch[1]
+    }
+
+    const csUsingMatch = line.match(/^\s*(?:global\s+)?using\s+([A-Za-z_][\w.]*)\s*;/)
+    if (csUsingMatch) {
+      csharpUsings.push(csUsingMatch[1])
+    }
+  }
+
+  if (csharpUsings.length > 0) {
+    const nonSystem = csharpUsings.filter((ns) => ns !== 'System' && !ns.startsWith('System.'))
+    const pool = nonSystem.length > 0 ? nonSystem : csharpUsings
+    return pool[0]
   }
 
   return null
@@ -357,16 +390,43 @@ export async function resolveHoverSymbolWithRepoFallback(
 
 const SCOPE_PATTERNS: Array<{ regex: RegExp; format: (m: RegExpMatchArray) => string }> = [
   {
-    regex: /^\s*(?:export\s+)?(?:abstract\s+)?class\s+([A-Za-z_$][\w$]*)/,
+    regex: /^\s*namespace\s+([A-Za-z_][\w.]*)/,
+    format: (m) => `namespace ${m[1]}`,
+  },
+  {
+    regex:
+      /^\s*(?:export\s+)?(?:(?:public|internal|private|protected|static|sealed|partial|abstract|readonly|ref|new)\s+)*(?:record\s+(?:struct|class)|record)\s+([A-Za-z_$][\w$]*)/,
+    format: (m) => `record ${m[1]}`,
+  },
+  {
+    regex:
+      /^\s*(?:export\s+)?(?:(?:public|internal|private|protected|static|sealed|partial|abstract|readonly|ref|new)\s+)*class\s+([A-Za-z_$][\w$]*)/,
     format: (m) => `class ${m[1]}`,
   },
   {
-    regex: /^\s*(?:export\s+)?interface\s+([A-Za-z_$][\w$]*)/,
+    regex:
+      /^\s*(?:export\s+)?(?:(?:public|internal|private|protected|static|sealed|partial|abstract|readonly|ref|new)\s+)*struct\s+([A-Za-z_$][\w$]*)/,
+    format: (m) => `struct ${m[1]}`,
+  },
+  {
+    regex:
+      /^\s*(?:export\s+)?(?:(?:public|internal|private|protected|static|sealed|partial|abstract|new)\s+)*interface\s+([A-Za-z_$][\w$]*)/,
     format: (m) => `interface ${m[1]}`,
+  },
+  {
+    regex:
+      /^\s*(?:export\s+)?(?:(?:public|internal|private|protected|new)\s+)*enum\s+([A-Za-z_$][\w$]*)/,
+    format: (m) => `enum ${m[1]}`,
   },
   {
     regex: /^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/,
     format: (m) => `fn ${m[1]}()`,
+  },
+  {
+    // C# / Java typed method: `public async Task<Order> CreateOrderAsync(...)`
+    regex:
+      /^\s*(?:(?:public|internal|private|protected|static|async|virtual|override|sealed|abstract|new|partial)\s+)+(?:[\w<>?[\],.]+(?:\s+[\w<>?[\],.]+)?)\s+([A-Za-z_]\w*)(?:<[^>]+>)?\s*\(/,
+    format: (m) => `${m[1]}()`,
   },
   {
     regex: /^\s*(?:(?:public|private|protected|static|async)\s+)+([A-Za-z_$][\w$]*)\s*\(/,
@@ -407,7 +467,7 @@ export function getEnclosingScope(file: PRFile, lineNumber: number): string[] {
   for (let i = targetIdx; i >= 0; i--) {
     const line = lines[i]
     const trimmed = line.trim()
-    if (!trimmed) continue
+    if (!trimmed || trimmed === '{' || trimmed === '}') continue
 
     const indent = line.search(/\S/)
     if (indent > minIndentSeen && i !== targetIdx) continue
