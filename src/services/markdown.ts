@@ -1,5 +1,6 @@
 /**
- * Lightweight, XSS-safe Markdown-to-HTML renderer for PR descriptions and comments.
+ * Lightweight, XSS-safe GitHub-Flavored Markdown-to-HTML renderer for PR descriptions,
+ * review comments, and Markdown file previews.
  * Escapes all raw HTML before applying block and inline formatting.
  * External links are tagged with `data-external-url` so callers can delegate clicks
  * to `openExternalUrl()` (Tauri plugin-opener / browser fallback).
@@ -22,48 +23,235 @@ function sanitizeHref(rawUrl: string): string | null {
   return null
 }
 
+function applyEmphasis(html: string): string {
+  // Bold + Italic: ***text*** or ___text___
+  html = html.replace(
+    /\*\*\*([^*]+)\*\*\*/g,
+    '<strong class="font-semibold text-ink"><em class="italic">$1</em></strong>',
+  )
+  html = html.replace(
+    /___([^_]+)___/g,
+    '<strong class="font-semibold text-ink"><em class="italic">$1</em></strong>',
+  )
+
+  // Bold: **text** or __text__
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold text-ink">$1</strong>')
+  html = html.replace(/__([^_]+)__/g, '<strong class="font-semibold text-ink">$1</strong>')
+
+  // Strikethrough: ~~text~~
+  html = html.replace(/~~([^~]+)~~/g, '<del class="text-ink-muted line-through">$1</del>')
+
+  // Italic: *text* or _text_ (avoiding snake_case identifiers)
+  html = html.replace(/(^|[^\w*])\*([^*]+)\*(?!\*)/g, '$1<em class="italic">$2</em>')
+  html = html.replace(/(^|[^\w_])_([^_]+)_(?![\w_])/g, '$1<em class="italic">$2</em>')
+
+  return html
+}
+
 function renderInline(raw: string): string {
-  // Split around inline code spans first so markdown inside backticks isn't transformed
-  const parts = raw.split(/(`[^`]+`)/g)
+  // Split around inline code spans first (double or single backticks) so markdown inside isn't transformed
+  const parts = raw.split(/(``(?:[^`]|`(?!`))+``|`[^`]+`)/g)
   return parts
     .map((part, idx) => {
-      if (idx % 2 === 1 && part.startsWith('`') && part.endsWith('`')) {
-        const code = escapeHtml(part.slice(1, -1))
-        return `<code class="rounded bg-canvas-elevated px-1.5 py-0.5 font-mono text-[0.85em] text-ink">${code}</code>`
+      if (idx % 2 === 1) {
+        const inner = part.startsWith('``') && part.endsWith('``')
+          ? part.slice(2, -2).trim()
+          : part.slice(1, -1)
+        return `<code class="rounded bg-canvas-elevated px-1.5 py-0.5 font-mono text-[0.85em] text-ink">${escapeHtml(inner)}</code>`
       }
 
       let html = escapeHtml(part)
+      const tokens: string[] = []
+      const stash = (tag: string): string => {
+        const id = tokens.length
+        tokens.push(tag)
+        return `\u0000MDTAG${id}\u0000`
+      }
+
+      // Images: ![alt](url)
+      html = html.replace(
+        /!\[([^\]]*)\]\(((?:[^\s()]|\([^\s()]*\))+)\)/g,
+        (_match, alt: string, url: string) => {
+          const safe = sanitizeHref(url)
+          if (!safe) return alt ? `${alt} (${url})` : url
+          return stash(
+            `<img src="${safe}" alt="${alt}" loading="lazy" class="my-2 max-h-96 max-w-full rounded-lg border border-border object-contain" />`,
+          )
+        },
+      )
 
       // Markdown links: [label](url)
-      html = html.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_match, label: string, url: string) => {
-        const safe = sanitizeHref(url)
-        if (!safe) return `${label} (${url})`
-        return `<a href="${safe}" data-external-url="${safe}" class="font-medium text-terra-text underline decoration-terra-border underline-offset-2 transition-colors hover:text-terra">${label}</a>`
-      })
+      html = html.replace(
+        /\[([^\]]+)\]\(((?:[^\s()]|\([^\s()]*\))+)\)/g,
+        (_match, label: string, url: string) => {
+          const safe = sanitizeHref(url)
+          if (!safe) return `${label} (${url})`
+          return stash(
+            `<a href="${safe}" data-external-url="${safe}" class="font-medium text-terra-text underline decoration-terra-border underline-offset-2 transition-colors hover:text-terra">${applyEmphasis(label)}</a>`,
+          )
+        },
+      )
 
-      // Bare http(s) URLs not already inside an href or data-external-url attribute
+      // Bare http(s) URLs
       html = html.replace(
         /(^|[\s(])(https?:\/\/[^\s<)]+)/g,
         (_match, prefix: string, url: string) => {
           const safe = sanitizeHref(url)
           if (!safe) return `${prefix}${url}`
-          return `${prefix}<a href="${safe}" data-external-url="${safe}" class="font-medium text-terra-text underline decoration-terra-border underline-offset-2 transition-colors hover:text-terra">${safe}</a>`
+          return `${prefix}${stash(
+            `<a href="${safe}" data-external-url="${safe}" class="font-medium text-terra-text underline decoration-terra-border underline-offset-2 transition-colors hover:text-terra">${safe}</a>`,
+          )}`
         },
       )
 
-      // Bold: **text** or __text__
-      html = html.replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold text-ink">$1</strong>')
-      html = html.replace(/__([^_]+)__/g, '<strong class="font-semibold text-ink">$1</strong>')
+      html = applyEmphasis(html)
 
-      // Strikethrough: ~~text~~
-      html = html.replace(/~~([^~]+)~~/g, '<del class="text-ink-muted line-through">$1</del>')
-
-      // Italic: *text*
-      html = html.replace(/(^|[^\w*])\*([^*]+)\*(?!\*)/g, '$1<em class="italic">$2</em>')
-
-      return html
+      return html.replace(/\u0000MDTAG(\d+)\u0000/g, (_m, id: string) => tokens[Number(id)] ?? '')
     })
     .join('')
+}
+
+const HEADING_CLASSES: Record<number, string> = {
+  1: 'mt-4 mb-2 text-base font-bold text-ink first:mt-0',
+  2: 'mt-4 mb-1.5 text-sm font-bold text-ink first:mt-0',
+  3: 'mt-3 mb-1 text-[13px] font-semibold text-ink first:mt-0',
+  4: 'mt-2.5 mb-1 text-xs font-semibold uppercase tracking-wide text-ink-muted first:mt-0',
+  5: 'mt-2 mb-1 text-xs font-semibold text-ink-muted first:mt-0',
+  6: 'mt-2 mb-1 text-[11px] font-semibold text-ink-faint first:mt-0',
+}
+
+const ALERT_STYLES: Record<string, { label: string; wrapper: string; title: string }> = {
+  NOTE: {
+    label: 'Note',
+    wrapper: 'border-terra-border bg-terra-soft/40',
+    title: 'text-terra-text',
+  },
+  TIP: {
+    label: 'Tip',
+    wrapper: 'border-pine-border bg-pine-soft/40',
+    title: 'text-pine-text',
+  },
+  IMPORTANT: {
+    label: 'Important',
+    wrapper: 'border-plum-border bg-plum-soft/40',
+    title: 'text-plum-text',
+  },
+  WARNING: {
+    label: 'Warning',
+    wrapper: 'border-ochre-border bg-ochre-soft/40',
+    title: 'text-ochre-text',
+  },
+  CAUTION: {
+    label: 'Caution',
+    wrapper: 'border-crimson-border bg-crimson-soft/40',
+    title: 'text-crimson-text',
+  },
+}
+
+const TABLE_SEPARATOR_RE = /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)*\|?\s*$/
+const LIST_ITEM_RE = /^(\s*)([-*+]|\d+\.)\s+(.*)$/
+
+function splitTableRow(line: string): string[] {
+  let trimmed = line.trim()
+  if (trimmed.startsWith('|')) trimmed = trimmed.slice(1)
+  if (trimmed.endsWith('|')) trimmed = trimmed.slice(0, -1)
+  return trimmed.split('|').map((cell) => cell.trim())
+}
+
+function parseTableAlignments(separatorLine: string): Array<'left' | 'center' | 'right'> {
+  return splitTableRow(separatorLine).map((cell) => {
+    const starts = cell.startsWith(':')
+    const ends = cell.endsWith(':')
+    if (starts && ends) return 'center'
+    if (ends) return 'right'
+    return 'left'
+  })
+}
+
+function isTableStart(lines: string[], index: number): boolean {
+  if (index + 1 >= lines.length) return false
+  const header = lines[index]
+  const sep = lines[index + 1]
+  return header.includes('|') && TABLE_SEPARATOR_RE.test(sep)
+}
+
+function parseList(
+  lines: string[],
+  startIndex: number,
+  baseIndent: number,
+  ordered: boolean,
+): { html: string; nextIndex: number } {
+  const items: string[] = []
+  let isTaskList = false
+  let i = startIndex
+
+  while (i < lines.length) {
+    const match = lines[i].match(LIST_ITEM_RE)
+    if (!match) break
+
+    const indent = match[1].length
+    const isItemOrdered = /^\d+\.$/.test(match[2])
+
+    if (indent < baseIndent) break
+    if (indent === baseIndent && isItemOrdered !== ordered) break
+
+    if (indent > baseIndent) {
+      // Malformed leading deeper indent without a parent item: treat at current level
+      const nested = parseList(lines, i, indent, isItemOrdered)
+      if (items.length > 0) {
+        const last = items[items.length - 1]
+        items[items.length - 1] = last.replace(/<\/li>$/, `${nested.html}</li>`)
+      } else {
+        items.push(`<li>${nested.html}</li>`)
+      }
+      i = nested.nextIndex
+      continue
+    }
+
+    const content = match[3]
+    let itemBody: string
+    const taskMatch = !ordered ? content.match(/^\[([ xX])\]\s+(.*)$/) : null
+    if (taskMatch) {
+      isTaskList = true
+      const checked = taskMatch[1].toLowerCase() === 'x'
+      const box = checked
+        ? '<span class="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border border-pine-border bg-pine text-[10px] font-bold text-white" aria-label="Checked">✓</span>'
+        : '<span class="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border border-border bg-canvas" aria-label="Unchecked"></span>'
+      itemBody = `<div class="flex items-start gap-2">${box}<span class="${checked ? 'text-ink-muted line-through' : ''}">${renderInline(taskMatch[2])}</span></div>`
+    } else {
+      itemBody = renderInline(content)
+    }
+
+    i += 1
+
+    // Check for nested sub-list immediately following this item
+    if (i < lines.length) {
+      const nextMatch = lines[i].match(LIST_ITEM_RE)
+      if (nextMatch && nextMatch[1].length > baseIndent) {
+        const nestedOrdered = /^\d+\.$/.test(nextMatch[2])
+        const nested = parseList(lines, i, nextMatch[1].length, nestedOrdered)
+        itemBody += nested.html
+        i = nested.nextIndex
+      }
+    }
+
+    items.push(`<li>${itemBody}</li>`)
+  }
+
+  if (ordered) {
+    return {
+      html: `<ol class="my-2 list-decimal space-y-1 pl-5 marker:text-ink-faint">${items.join('')}</ol>`,
+      nextIndex: i,
+    }
+  }
+
+  const listClass = isTaskList
+    ? 'my-2 space-y-1.5 pl-0 list-none'
+    : 'my-2 space-y-1 pl-5 list-disc marker:text-ink-faint'
+  return {
+    html: `<ul class="${listClass}">${items.join('')}</ul>`,
+    nextIndex: i,
+  }
 }
 
 export function renderSafeMarkdown(markdown: string): string {
@@ -77,13 +265,16 @@ export function renderSafeMarkdown(markdown: string): string {
   while (i < lines.length) {
     const line = lines[i]
 
-    // Fenced code block
-    const fenceMatch = line.match(/^```([\w+-]*)\s*$/)
+    // Fenced code block (``` or ~~~)
+    const fenceMatch = line.match(/^(`{3,}|~{3,})([\w+-]*)\s*$/)
     if (fenceMatch) {
-      const lang = fenceMatch[1] ? escapeHtml(fenceMatch[1]) : ''
+      const fenceChar = fenceMatch[1][0]
+      const fenceLen = fenceMatch[1].length
+      const lang = fenceMatch[2] ? escapeHtml(fenceMatch[2]) : ''
+      const closeRe = new RegExp(`^${fenceChar}{${fenceLen},}\\s*$`)
       const codeLines: string[] = []
       i += 1
-      while (i < lines.length && !/^```\s*$/.test(lines[i])) {
+      while (i < lines.length && !closeRe.test(lines[i])) {
         codeLines.push(lines[i])
         i += 1
       }
@@ -110,71 +301,100 @@ export function renderSafeMarkdown(markdown: string): string {
       continue
     }
 
-    // Heading (# to ####)
-    const headingMatch = line.match(/^(#{1,4})\s+(.+)$/)
+    // Heading (# to ######)
+    const headingMatch = line.match(/^(#{1,6})\s+(.+?)(?:\s+#+\s*)?$/)
     if (headingMatch) {
       const level = headingMatch[1].length
-      const classes: Record<number, string> = {
-        1: 'mt-4 mb-2 text-base font-bold text-ink first:mt-0',
-        2: 'mt-4 mb-1.5 text-sm font-bold text-ink first:mt-0',
-        3: 'mt-3 mb-1 text-[13px] font-semibold text-ink first:mt-0',
-        4: 'mt-2.5 mb-1 text-xs font-semibold uppercase tracking-wide text-ink-muted first:mt-0',
-      }
-      out.push(`<h${level} class="${classes[level]}">${renderInline(headingMatch[2].trim())}</h${level}>`)
+      out.push(
+        `<h${level} class="${HEADING_CLASSES[level]}">${renderInline(headingMatch[2].trim())}</h${level}>`,
+      )
       i += 1
       continue
     }
 
-    // Blockquote
+    // Blockquote & GitHub Alerts
     if (/^>\s?/.test(line)) {
       const quoteLines: string[] = []
       while (i < lines.length && /^>\s?/.test(lines[i])) {
         quoteLines.push(lines[i].replace(/^>\s?/, ''))
         i += 1
       }
+
+      const alertMatch = quoteLines[0]?.trim().match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]$/i)
+      if (alertMatch) {
+        const kind = alertMatch[1].toUpperCase()
+        const style = ALERT_STYLES[kind]
+        const bodyLines = quoteLines.slice(1)
+        const bodyHtml = bodyLines.length > 0
+          ? `<div class="mt-1 text-xs text-ink-secondary">${bodyLines.map((l) => renderInline(l)).join('<br />')}</div>`
+          : ''
+        out.push(
+          `<div class="my-2.5 rounded-lg border-l-2 px-3 py-2 ${style.wrapper}"><div class="text-[11px] font-semibold uppercase tracking-wide ${style.title}">${style.label}</div>${bodyHtml}</div>`,
+        )
+      } else {
+        out.push(
+          `<blockquote class="my-2.5 border-l-2 border-terra-border bg-canvas/60 px-3 py-1.5 text-xs text-ink-muted">${quoteLines.map((l) => renderInline(l)).join('<br />')}</blockquote>`,
+        )
+      }
+      continue
+    }
+
+    // GFM Table
+    if (isTableStart(lines, i)) {
+      const headers = splitTableRow(lines[i])
+      const alignments = parseTableAlignments(lines[i + 1])
+      i += 2
+
+      const bodyRows: string[][] = []
+      while (
+        i < lines.length &&
+        lines[i].trim() !== '' &&
+        lines[i].includes('|') &&
+        !/^(`{3,}|~{3,})/.test(lines[i])
+      ) {
+        bodyRows.push(splitTableRow(lines[i]))
+        i += 1
+      }
+
+      const alignClass = (idx: number): string => {
+        const align = alignments[idx] ?? 'left'
+        if (align === 'center') return 'text-center'
+        if (align === 'right') return 'text-right'
+        return 'text-left'
+      }
+
+      const ths = headers
+        .map(
+          (h, idx) =>
+            `<th class="border-b border-border bg-canvas-elevated/60 px-3 py-1.5 font-semibold text-ink ${alignClass(idx)}">${renderInline(h)}</th>`,
+        )
+        .join('')
+
+      const trs = bodyRows
+        .map((row) => {
+          const tds = headers
+            .map(
+              (_h, idx) =>
+                `<td class="border-b border-border-muted px-3 py-1.5 text-ink-secondary ${alignClass(idx)}">${renderInline(row[idx] ?? '')}</td>`,
+            )
+            .join('')
+          return `<tr class="last:[&>td]:border-b-0">${tds}</tr>`
+        })
+        .join('')
+
       out.push(
-        `<blockquote class="my-2.5 border-l-2 border-terra-border bg-canvas/60 px-3 py-1.5 text-xs text-ink-muted">${quoteLines.map((l) => renderInline(l)).join('<br />')}</blockquote>`,
+        `<div class="my-3 overflow-x-auto rounded-lg border border-border"><table class="w-full border-collapse text-xs"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table></div>`,
       )
       continue
     }
 
-    // Unordered list (including GitHub task checkboxes)
-    if (/^\s*[-*+]\s+/.test(line)) {
-      const items: string[] = []
-      let isTaskList = false
-      while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
-        const content = lines[i].replace(/^\s*[-*+]\s+/, '')
-        const taskMatch = content.match(/^\[([ xX])\]\s+(.*)$/)
-        if (taskMatch) {
-          isTaskList = true
-          const checked = taskMatch[1].toLowerCase() === 'x'
-          const box = checked
-            ? '<span class="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border border-pine-border bg-pine text-[10px] font-bold text-white" aria-label="Checked">✓</span>'
-            : '<span class="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border border-border bg-canvas" aria-label="Unchecked"></span>'
-          items.push(
-            `<li class="flex items-start gap-2">${box}<span class="${checked ? 'text-ink-muted line-through' : ''}">${renderInline(taskMatch[2])}</span></li>`,
-          )
-        } else {
-          items.push(`<li>${renderInline(content)}</li>`)
-        }
-        i += 1
-      }
-      const listClass = isTaskList
-        ? 'my-2 space-y-1.5 pl-0 list-none'
-        : 'my-2 space-y-1 pl-5 list-disc marker:text-ink-faint'
-      out.push(`<ul class="${listClass}">${items.join('')}</ul>`)
-      continue
-    }
-
-    // Ordered list
-    if (/^\s*\d+\.\s+/.test(line)) {
-      const items: string[] = []
-      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
-        const content = lines[i].replace(/^\s*\d+\.\s+/, '')
-        items.push(`<li>${renderInline(content)}</li>`)
-        i += 1
-      }
-      out.push(`<ol class="my-2 list-decimal space-y-1 pl-5 marker:text-ink-faint">${items.join('')}</ol>`)
+    // Unordered or ordered list (with nesting)
+    const listMatch = line.match(LIST_ITEM_RE)
+    if (listMatch) {
+      const ordered = /^\d+\.$/.test(listMatch[2])
+      const parsed = parseList(lines, i, listMatch[1].length, ordered)
+      out.push(parsed.html)
+      i = parsed.nextIndex
       continue
     }
 
@@ -183,17 +403,19 @@ export function renderSafeMarkdown(markdown: string): string {
     while (
       i < lines.length &&
       lines[i].trim() !== '' &&
-      !/^```/.test(lines[i]) &&
-      !/^(#{1,4})\s+/.test(lines[i]) &&
+      !/^(`{3,}|~{3,})/.test(lines[i]) &&
+      !/^(#{1,6})\s+/.test(lines[i]) &&
       !/^>\s?/.test(lines[i]) &&
-      !/^\s*[-*+]\s+/.test(lines[i]) &&
-      !/^\s*\d+\.\s+/.test(lines[i]) &&
-      !/^(-{3,}|\*{3,}|_{3,})\s*$/.test(lines[i].trim())
+      !LIST_ITEM_RE.test(lines[i]) &&
+      !/^(-{3,}|\*{3,}|_{3,})\s*$/.test(lines[i].trim()) &&
+      !isTableStart(lines, i)
     ) {
       paraLines.push(lines[i])
       i += 1
     }
-    out.push(`<p class="my-2 leading-relaxed first:mt-0 last:mb-0">${paraLines.map((l) => renderInline(l)).join('<br />')}</p>`)
+    out.push(
+      `<p class="my-2 leading-relaxed first:mt-0 last:mb-0">${paraLines.map((l) => renderInline(l)).join('<br />')}</p>`,
+    )
   }
 
   return out.join('')
