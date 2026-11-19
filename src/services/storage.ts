@@ -1,6 +1,7 @@
 import { LazyStore } from '@tauri-apps/plugin-store'
 import type { DraftComment, TourDirection } from '@/types/pr'
 
+// Pre-rename ("PR Tour") names, kept so existing installs keep their settings and drafts.
 const STORE_FILE = 'pr-tour-settings.json'
 const FALLBACK_PREFIX = 'pr_tour_'
 

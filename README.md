@@ -1,4 +1,4 @@
-# PR Tour — Guided Code Review
+# Stroll — Guided Code Review
 
 A cross-platform desktop application built with **Tauri v2**, **Vue 3**, **TypeScript**, **Pinia**, **Tailwind CSS v4**, and **CodeMirror 6** for reviewing GitHub Pull Requests as a guided, dependency-aware tour.
 

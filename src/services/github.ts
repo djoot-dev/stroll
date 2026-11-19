@@ -32,7 +32,7 @@ async function graphql<T>(
     headers: {
       Authorization: `Bearer ${pat}`,
       'Content-Type': 'application/json',
-      'User-Agent': 'PR-Tour-Desktop',
+      'User-Agent': 'Stroll-Desktop',
     },
     body: JSON.stringify({ query, variables }),
   })
@@ -203,7 +203,7 @@ async function fetchRestPRFiles(
       headers: {
         Authorization: `Bearer ${pat}`,
         Accept: 'application/vnd.github.v3+json',
-        'User-Agent': 'PR-Tour-Desktop',
+        'User-Agent': 'Stroll-Desktop',
       },
     },
   )
