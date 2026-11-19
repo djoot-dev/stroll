@@ -24,8 +24,39 @@ import type {
   ReviewThread,
 } from '@/types/pr'
 
-const GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql'
-const GITHUB_REST_URL = 'https://api.github.com'
+const DEFAULT_GITHUB_HOST = 'github.com'
+let configuredGitHubHost = DEFAULT_GITHUB_HOST
+
+export function normalizeGitHubHost(rawHost: string): string {
+  const cleaned = rawHost
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/.*$/, '')
+    .toLowerCase()
+  return cleaned || DEFAULT_GITHUB_HOST
+}
+
+export function setGitHubHost(host: string): void {
+  configuredGitHubHost = normalizeGitHubHost(host)
+}
+
+export function getGitHubHost(): string {
+  return configuredGitHubHost
+}
+
+export function getGitHubEndpoints(host?: string): { graphqlUrl: string; restUrl: string } {
+  const normalized = normalizeGitHubHost(host ?? configuredGitHubHost)
+  if (normalized === DEFAULT_GITHUB_HOST) {
+    return {
+      graphqlUrl: 'https://api.github.com/graphql',
+      restUrl: 'https://api.github.com',
+    }
+  }
+  return {
+    graphqlUrl: `https://${normalized}/api/graphql`,
+    restUrl: `https://${normalized}/api/v3`,
+  }
+}
 
 interface GraphQLResponse<T> {
   data?: T
@@ -37,7 +68,8 @@ async function graphql<T>(
   query: string,
   variables: Record<string, unknown> = {},
 ): Promise<T> {
-  const res = await httpFetch(GITHUB_GRAPHQL_URL, {
+  const { graphqlUrl } = getGitHubEndpoints()
+  const res = await httpFetch(graphqlUrl, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${pat}`,
@@ -64,11 +96,34 @@ async function graphql<T>(
 
 export function parsePRUrl(
   rawUrl: string,
+  customHost?: string,
 ): { owner: string; repo: string; number: number } | null {
   const trimmed = rawUrl.trim()
-  const match = trimmed.match(
-    /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/.*)?$/i,
-  )
+  if (!trimmed) return null
+
+  let parsed: URL
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    return null
+  }
+
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    return null
+  }
+
+  const allowedHosts = new Set<string>([
+    DEFAULT_GITHUB_HOST,
+    normalizeGitHubHost(customHost ?? configuredGitHubHost),
+  ])
+
+  const urlHost = parsed.host.toLowerCase()
+  const urlHostname = parsed.hostname.toLowerCase()
+  if (!allowedHosts.has(urlHost) && !allowedHosts.has(urlHostname)) {
+    return null
+  }
+
+  const match = parsed.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/.*)?$/i)
   if (!match) return null
   return {
     owner: match[1],
@@ -135,6 +190,18 @@ export async function fetchViewerAndRequestedPRs(
             additions
             deletions
             changedFiles
+            isDraft
+            reviewDecision
+            totalCommentsCount
+            commits(last: 1) {
+              nodes {
+                commit {
+                  statusCheckRollup {
+                    state
+                  }
+                }
+              }
+            }
             author {
               login
               avatarUrl
@@ -163,6 +230,18 @@ export async function fetchViewerAndRequestedPRs(
         additions: number
         deletions: number
         changedFiles: number
+        isDraft: boolean
+        reviewDecision: PRReviewDecision
+        totalCommentsCount: number | null
+        commits: {
+          nodes: Array<{
+            commit: {
+              statusCheckRollup: {
+                state: CheckRollupState
+              } | null
+            }
+          }>
+        } | null
         author: GitHubUser | null
         repository: { name: string; owner: { login: string } }
       } | null>
@@ -184,6 +263,10 @@ export async function fetchViewerAndRequestedPRs(
       additions: n.additions,
       deletions: n.deletions,
       changedFiles: n.changedFiles,
+      isDraft: Boolean(n.isDraft),
+      reviewDecision: n.reviewDecision ?? null,
+      ciState: n.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state ?? null,
+      totalCommentsCount: n.totalCommentsCount ?? 0,
     }))
 
   return {
@@ -208,8 +291,9 @@ async function fetchRestPRFiles(
   repo: string,
   number: number,
 ): Promise<RestPRFile[]> {
+  const { restUrl } = getGitHubEndpoints()
   const res = await httpFetch(
-    `${GITHUB_REST_URL}/repos/${owner}/${repo}/pulls/${number}/files?per_page=100`,
+    `${restUrl}/repos/${owner}/${repo}/pulls/${number}/files?per_page=100`,
     {
       headers: {
         Authorization: `Bearer ${pat}`,

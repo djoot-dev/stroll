@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { getVersion } from '@tauri-apps/api/app'
 import {
+  AlertCircle,
   CheckCircle2,
   Code2,
   Download,
   Eye,
   EyeOff,
   FolderGit2,
+  FolderOpen,
+  Globe,
   Keyboard,
   KeyRound,
   ListOrdered,
@@ -25,7 +28,12 @@ import {
   X,
 } from '@lucide/vue'
 import { computed, onMounted, ref, watch } from 'vue'
-import { isTauriRuntime } from '@/services/native'
+import {
+  inspectLocalRepo,
+  isTauriRuntime,
+  pickLocalDirectory,
+  requestNotificationPermission,
+} from '@/services/native'
 import { checkForAppUpdate, type AvailableUpdate } from '@/services/updater'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
@@ -37,10 +45,15 @@ const review = useReviewStore()
 const settings = useSettingsStore()
 
 const tokenInput = ref(auth.pat)
+const githubHostInput = ref(settings.githubHost)
 const showToken = ref(false)
 const resetDone = ref(false)
+const notificationPermissionError = ref<string | null>(null)
 const repoInput = ref('')
 const pathInput = ref('')
+const pathValidationError = ref<string | null>(null)
+const detectedOwnerRepo = ref<string | null>(null)
+const isInspectingPath = ref(false)
 const appVersion = ref('0.1.0')
 const updateState = ref<'idle' | 'checking' | 'up-to-date' | 'available' | 'installing' | 'error'>('idle')
 const availableUpdate = ref<AvailableUpdate | null>(null)
@@ -101,8 +114,12 @@ watch(
   (open) => {
     if (open) {
       tokenInput.value = auth.pat
+      githubHostInput.value = settings.githubHost
       showToken.value = false
       resetDone.value = false
+      notificationPermissionError.value = null
+      pathValidationError.value = null
+      detectedOwnerRepo.value = null
       if (!repoInput.value && activePRRepo.value) {
         repoInput.value = activePRRepo.value
         pathInput.value = review.repoPaths[activePRRepo.value] ?? ''
@@ -203,10 +220,77 @@ const activeSectionTitle = computed(
 
 async function handleSavePat() {
   if (!tokenInput.value.trim()) return
+  await settings.setGithubHost(githubHostInput.value)
+  githubHostInput.value = settings.githubHost
   await auth.verifyAndLoadProfile(tokenInput.value.trim())
 }
 
+async function handleSaveGithubHost() {
+  await settings.setGithubHost(githubHostInput.value)
+  githubHostInput.value = settings.githubHost
+}
+
+async function handleToggleNotifications(event: Event) {
+  const input = event.target as HTMLInputElement
+  const next = input.checked
+  notificationPermissionError.value = null
+
+  if (!next) {
+    await settings.setInboxNotificationsEnabled(false)
+    return
+  }
+
+  const granted = await requestNotificationPermission()
+  if (!granted) {
+    input.checked = false
+    notificationPermissionError.value =
+      'Notification permission was not granted. Enable notifications for Stroll in your system or browser settings.'
+    await settings.setInboxNotificationsEnabled(false)
+    return
+  }
+
+  await settings.setInboxNotificationsEnabled(true)
+}
+
+async function validateAndInspectLocalPath(rawPath: string): Promise<boolean> {
+  const trimmed = rawPath.trim()
+  pathValidationError.value = null
+  detectedOwnerRepo.value = null
+
+  if (!trimmed || !isTauriRuntime()) {
+    return true
+  }
+
+  isInspectingPath.value = true
+  try {
+    const result = await inspectLocalRepo(trimmed)
+    if (!result) return true
+    if (!result.isGitRepo) {
+      pathValidationError.value = 'Selected folder is not a valid Git repository.'
+      return false
+    }
+    if (result.ownerRepo) {
+      detectedOwnerRepo.value = result.ownerRepo
+      if (!repoInput.value.trim() || repoInput.value.trim() === activePRRepo.value) {
+        repoInput.value = result.ownerRepo
+      }
+    }
+    return true
+  } finally {
+    isInspectingPath.value = false
+  }
+}
+
+async function handleBrowseLocalRepo() {
+  const selected = await pickLocalDirectory()
+  if (!selected) return
+  pathInput.value = selected
+  await validateAndInspectLocalPath(selected)
+}
+
 async function handleSignInWithGh() {
+  await settings.setGithubHost(githubHostInput.value)
+  githubHostInput.value = settings.githubHost
   const ok = await auth.signInWithGh()
   if (ok) {
     tokenInput.value = auth.pat
@@ -215,9 +299,13 @@ async function handleSignInWithGh() {
 
 async function handleLinkRepo() {
   if (!repoInput.value.trim() || !pathInput.value.trim()) return
+  const valid = await validateAndInspectLocalPath(pathInput.value)
+  if (!valid) return
   await review.linkRepoPath(repoInput.value, pathInput.value)
   repoInput.value = ''
   pathInput.value = ''
+  pathValidationError.value = null
+  detectedOwnerRepo.value = null
 }
 
 async function handleDirectionChange(direction: TourDirection) {
@@ -372,6 +460,31 @@ async function handleResetDefaults() {
                       </button>
                     </div>
                   </div>
+                </div>
+
+                <div class="rounded-xl border border-border bg-canvas/60 p-4">
+                  <label class="flex cursor-pointer items-center justify-between gap-4">
+                    <div>
+                      <p class="text-xs font-medium text-ink">
+                        Desktop Notifications for New Review Requests
+                      </p>
+                      <p class="mt-0.5 text-[11px] text-ink-muted">
+                        Send a native notification when auto-refresh detects new PRs awaiting your review.
+                      </p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      :checked="settings.inboxNotificationsEnabled"
+                      class="h-4 w-4 rounded border-border bg-canvas-inset accent-terra"
+                      @change="handleToggleNotifications"
+                    />
+                  </label>
+                  <p
+                    v-if="notificationPermissionError"
+                    class="mt-2 text-[11px] text-crimson-text"
+                  >
+                    {{ notificationPermissionError }}
+                  </p>
                 </div>
 
                 <label
@@ -599,6 +712,30 @@ async function handleResetDefaults() {
                 </div>
 
                 <div class="space-y-1.5">
+                  <label class="flex items-center gap-1.5 text-xs font-medium text-ink-secondary">
+                    <Globe class="h-3.5 w-3.5 text-ink-muted" />
+                    <span>GitHub Host</span>
+                    <span class="font-normal text-ink-faint">(optional, for GitHub Enterprise)</span>
+                  </label>
+                  <input
+                    v-model="githubHostInput"
+                    type="text"
+                    placeholder="github.com"
+                    class="w-full rounded-xl border border-border bg-canvas-inset px-3 py-2 font-mono text-xs text-ink placeholder-ink-faint focus:border-terra focus:outline-none"
+                    @blur="handleSaveGithubHost"
+                    @keydown.enter="handleSaveGithubHost"
+                  />
+                  <p class="text-[11px] leading-relaxed text-ink-faint">
+                    Defaults to <code class="font-mono text-ink-muted">github.com</code>. Custom
+                    GitHub Enterprise hosts use <code class="font-mono text-ink-muted">/api/graphql</code>
+                    and <code class="font-mono text-ink-muted">/api/v3</code>, and require allowing
+                    <code class="font-mono text-ink-muted">https://&lt;host&gt;/**</code> in
+                    <code class="font-mono text-ink-muted">src-tauri/capabilities/default.json</code>
+                    (<code class="font-mono text-ink-muted">http:default</code>) for desktop builds.
+                  </p>
+                </div>
+
+                <div class="space-y-1.5">
                   <label class="block text-xs font-medium text-ink-secondary">
                     Personal Access Token
                   </label>
@@ -714,14 +851,43 @@ async function handleResetDefaults() {
                       placeholder="owner/repo"
                       class="rounded-xl border border-border bg-canvas-inset px-2.5 py-1.5 font-mono text-xs text-ink placeholder-ink-faint focus:border-terra focus:outline-none sm:w-40"
                     />
-                    <input
-                      v-model="pathInput"
-                      type="text"
-                      placeholder="/path/to/local/checkout"
-                      class="flex-1 rounded-xl border border-border bg-canvas-inset px-2.5 py-1.5 font-mono text-xs text-ink placeholder-ink-faint focus:border-terra focus:outline-none"
-                      @keydown.enter="handleLinkRepo"
-                    />
+                    <div class="flex flex-1 gap-1.5">
+                      <input
+                        v-model="pathInput"
+                        type="text"
+                        placeholder="/path/to/local/checkout"
+                        class="min-w-0 flex-1 rounded-xl border border-border bg-canvas-inset px-2.5 py-1.5 font-mono text-xs text-ink placeholder-ink-faint focus:border-terra focus:outline-none"
+                        @blur="validateAndInspectLocalPath(pathInput)"
+                        @keydown.enter="handleLinkRepo"
+                      />
+                      <button
+                        v-if="isTauriRuntime()"
+                        type="button"
+                        class="inline-flex shrink-0 items-center gap-1 rounded-xl border border-border bg-canvas-subtle px-2.5 py-1.5 text-xs font-medium text-ink-secondary transition-colors hover:bg-canvas-elevated"
+                        title="Choose local repository folder"
+                        @click="handleBrowseLocalRepo"
+                      >
+                        <FolderOpen class="h-3.5 w-3.5" />
+                        <span>Browse…</span>
+                      </button>
+                    </div>
                   </div>
+
+                  <p
+                    v-if="pathValidationError"
+                    class="flex items-center gap-1.5 text-[11px] text-crimson-text"
+                  >
+                    <AlertCircle class="h-3.5 w-3.5 shrink-0" />
+                    <span>{{ pathValidationError }}</span>
+                  </p>
+                  <p
+                    v-else-if="detectedOwnerRepo"
+                    class="flex items-center gap-1.5 text-[11px] text-pine-text"
+                  >
+                    <CheckCircle2 class="h-3.5 w-3.5 shrink-0" />
+                    <span>Detected remote <strong class="font-mono">{{ detectedOwnerRepo }}</strong></span>
+                  </p>
+
                   <div class="flex items-center justify-between">
                     <button
                       v-if="activePRRepo"
@@ -733,10 +899,16 @@ async function handleResetDefaults() {
                     <span v-else />
                     <button
                       class="inline-flex items-center gap-1 rounded-xl border border-border bg-canvas-subtle px-2.5 py-1 text-xs font-medium text-ink-secondary hover:bg-canvas-elevated disabled:opacity-40"
-                      :disabled="!repoInput.trim() || !pathInput.trim()"
+                      :disabled="
+                        !repoInput.trim() ||
+                        !pathInput.trim() ||
+                        Boolean(pathValidationError) ||
+                        isInspectingPath
+                      "
                       @click="handleLinkRepo"
                     >
-                      <Plus class="h-3.5 w-3.5" />
+                      <Loader2 v-if="isInspectingPath" class="h-3.5 w-3.5 animate-spin" />
+                      <Plus v-else class="h-3.5 w-3.5" />
                       <span>Link Checkout</span>
                     </button>
                   </div>

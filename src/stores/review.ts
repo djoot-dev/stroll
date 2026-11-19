@@ -172,9 +172,10 @@ export const useReviewStore = defineStore('review', () => {
   }
 
   async function loadPRByUrl(url: string): Promise<boolean> {
-    const parsed = parsePRUrl(url)
+    const settings = useSettingsStore()
+    const parsed = parsePRUrl(url, settings.githubHost)
     if (!parsed) {
-      prError.value = 'Invalid GitHub PR URL. Expected format: https://github.com/owner/repo/pull/123'
+      prError.value = `Invalid GitHub PR URL. Expected format: https://${settings.githubHost}/owner/repo/pull/123`
       return false
     }
     return loadPRByRepo(parsed.owner, parsed.repo, parsed.number)
