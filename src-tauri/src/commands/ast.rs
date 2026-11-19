@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tree_sitter::{Language, Node, Parser};
@@ -55,6 +56,7 @@ fn try_resolve_candidate(repo_root: &Path, base: &Path) -> Option<PathBuf> {
             "index.js",
             "index.jsx",
             "index.mjs",
+            "index.vue",
             "mod.rs",
             "__init__.py",
         ] {
@@ -68,7 +70,329 @@ fn try_resolve_candidate(repo_root: &Path, base: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Resolves an import specifier (relative, `@/` alias, or module path) to a file inside `repo_root`.
+/// Strips `//` line comments, `/* ... */` block comments, and trailing commas from JSONC.
+fn strip_jsonc(input: &str) -> String {
+    let chars: Vec<char> = input.chars().collect();
+    let len = chars.len();
+    let mut out = String::with_capacity(input.len());
+    let mut i = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    while i < len {
+        let ch = chars[i];
+        if in_string {
+            out.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = true;
+            out.push(ch);
+            i += 1;
+            continue;
+        }
+
+        if ch == '/' && i + 1 < len && chars[i + 1] == '/' {
+            i += 2;
+            while i < len && chars[i] != '\n' {
+                i += 1;
+            }
+            continue;
+        }
+
+        if ch == '/' && i + 1 < len && chars[i + 1] == '*' {
+            i += 2;
+            while i + 1 < len && !(chars[i] == '*' && chars[i + 1] == '/') {
+                i += 1;
+            }
+            i = (i + 2).min(len);
+            continue;
+        }
+
+        out.push(ch);
+        i += 1;
+    }
+
+    // Remove trailing commas before `}` or `]` outside strings.
+    let out_chars: Vec<char> = out.chars().collect();
+    let mut cleaned = String::with_capacity(out.len());
+    let mut j = 0;
+    in_string = false;
+    escaped = false;
+    while j < out_chars.len() {
+        let ch = out_chars[j];
+        if in_string {
+            cleaned.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            j += 1;
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = true;
+            cleaned.push(ch);
+            j += 1;
+            continue;
+        }
+
+        if ch == ',' {
+            let mut k = j + 1;
+            while k < out_chars.len() && out_chars[k].is_whitespace() {
+                k += 1;
+            }
+            if k < out_chars.len() && (out_chars[k] == '}' || out_chars[k] == ']') {
+                j += 1;
+                continue;
+            }
+        }
+
+        cleaned.push(ch);
+        j += 1;
+    }
+
+    cleaned
+}
+
+fn match_alias_pattern(pattern: &str, target: &str, spec: &str) -> Option<String> {
+    if let Some((prefix, suffix)) = pattern.split_once('*') {
+        if spec.len() >= prefix.len() + suffix.len()
+            && spec.starts_with(prefix)
+            && spec.ends_with(suffix)
+        {
+            let captured = &spec[prefix.len()..spec.len() - suffix.len()];
+            return Some(target.replace('*', captured));
+        }
+        None
+    } else if pattern == spec {
+        Some(target.to_string())
+    } else {
+        None
+    }
+}
+
+fn resolve_tsconfig_aliases(
+    config_path: &Path,
+    canonical_root: &Path,
+    spec: &str,
+    visited: &mut HashSet<PathBuf>,
+    depth: usize,
+) -> Option<PathBuf> {
+    if depth > 4 || !config_path.is_file() {
+        return None;
+    }
+    let canonical_cfg = config_path.canonicalize().ok()?;
+    if !canonical_cfg.starts_with(canonical_root) || !visited.insert(canonical_cfg.clone()) {
+        return None;
+    }
+
+    let raw = fs::read_to_string(&canonical_cfg).ok()?;
+    let cleaned = strip_jsonc(&raw);
+    let val: serde_json::Value = serde_json::from_str(&cleaned).ok()?;
+    let cfg_dir = canonical_cfg.parent()?;
+
+    if let Some(compiler_opts) = val.get("compilerOptions").and_then(|v| v.as_object()) {
+        let base_dir = compiler_opts
+            .get("baseUrl")
+            .and_then(|v| v.as_str())
+            .map(|b| cfg_dir.join(b))
+            .unwrap_or_else(|| cfg_dir.to_path_buf());
+
+        if let Some(paths_obj) = compiler_opts.get("paths").and_then(|v| v.as_object()) {
+            // Prefer more specific patterns first (longer prefix before `*`).
+            let mut entries: Vec<(&str, &Vec<serde_json::Value>)> = paths_obj
+                .iter()
+                .filter_map(|(k, v)| v.as_array().map(|arr| (k.as_str(), arr)))
+                .collect();
+            entries.sort_by(|(a, _), (b, _)| b.len().cmp(&a.len()));
+
+            for (pattern, targets) in entries {
+                for target_val in targets {
+                    let Some(target_str) = target_val.as_str() else {
+                        continue;
+                    };
+                    if let Some(mapped) = match_alias_pattern(pattern, target_str, spec) {
+                        let candidate = base_dir.join(mapped);
+                        if let Some(found) = try_resolve_candidate(canonical_root, &candidate) {
+                            return Some(found);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(extends) = val.get("extends").and_then(|v| v.as_str()) {
+        if extends.starts_with('.') {
+            let mut ext_path = cfg_dir.join(extends);
+            if ext_path.extension().is_none() && !ext_path.is_file() {
+                ext_path = ext_path.with_extension("json");
+            }
+            if let Some(found) =
+                resolve_tsconfig_aliases(&ext_path, canonical_root, spec, visited, depth + 1)
+            {
+                return Some(found);
+            }
+        }
+    }
+
+    if let Some(refs) = val.get("references").and_then(|v| v.as_array()) {
+        for r in refs {
+            if let Some(ref_path_str) = r.get("path").and_then(|v| v.as_str()) {
+                let ref_path = cfg_dir.join(ref_path_str);
+                let ref_cfg = if ref_path.is_dir() {
+                    ref_path.join("tsconfig.json")
+                } else {
+                    ref_path
+                };
+                if let Some(found) =
+                    resolve_tsconfig_aliases(&ref_cfg, canonical_root, spec, visited, depth + 1)
+                {
+                    return Some(found);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn extract_quoted_literal(s: &str) -> Option<&str> {
+    for quote in ['\'', '"'] {
+        if let Some(start) = s.find(quote) {
+            let rest = &s[start + 1..];
+            if let Some(end) = rest.find(quote) {
+                return Some(&rest[..end]);
+            }
+        }
+    }
+    None
+}
+
+fn extract_vite_replacement_path(expr: &str) -> Option<String> {
+    if let Some(idx) = expr.find("new URL(") {
+        if let Some(lit) = extract_quoted_literal(&expr[idx + 8..]) {
+            return Some(lit.to_string());
+        }
+    }
+    if let Some(idx) = expr.find("path.resolve(") {
+        let after = &expr[idx + 13..];
+        let mut parts: Vec<&str> = Vec::new();
+        let mut rest = after;
+        while let Some(lit) = extract_quoted_literal(rest) {
+            parts.push(lit);
+            let pos = rest.find(lit).unwrap_or(0) + lit.len() + 1;
+            if pos >= rest.len() {
+                break;
+            }
+            rest = &rest[pos..];
+        }
+        if !parts.is_empty() {
+            return Some(parts.join("/"));
+        }
+    }
+    extract_quoted_literal(expr).map(|s| s.to_string())
+}
+
+fn resolve_vite_aliases(dir: &Path, canonical_root: &Path, spec: &str) -> Option<PathBuf> {
+    for cfg_name in [
+        "vite.config.ts",
+        "vite.config.mts",
+        "vite.config.js",
+        "vite.config.mjs",
+    ] {
+        let cfg_path = dir.join(cfg_name);
+        if !cfg_path.is_file() {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(&cfg_path) else {
+            continue;
+        };
+
+        let mut aliases: Vec<(String, String)> = Vec::new();
+        for line in content.lines() {
+            let trimmed = line.trim();
+            // Object style: `'@': fileURLToPath(new URL('./src', import.meta.url))` or `'@components': './src/components'`
+            if let Some(colon) = trimmed.find(':') {
+                let left = trimmed[..colon].trim();
+                let right = trimmed[colon + 1..].trim();
+                if let Some(key) = extract_quoted_literal(left) {
+                    if key.starts_with('@') || key.starts_with('~') {
+                        if let Some(rep) = extract_vite_replacement_path(right) {
+                            aliases.push((key.to_string(), rep));
+                        }
+                    }
+                }
+            }
+            // Array style on single line: `{ find: '@', replacement: ... }`
+            if let (Some(find_idx), Some(rep_idx)) = (trimmed.find("find:"), trimmed.find("replacement:")) {
+                if let (Some(key), Some(rep)) = (
+                    extract_quoted_literal(&trimmed[find_idx + 5..]),
+                    extract_vite_replacement_path(&trimmed[rep_idx + 12..]),
+                ) {
+                    aliases.push((key.to_string(), rep));
+                }
+            }
+        }
+
+        // Prefer longest alias prefix first
+        aliases.sort_by(|(a, _), (b, _)| b.len().cmp(&a.len()));
+        for (alias_key, rep) in aliases {
+            let key_no_slash = alias_key.trim_end_matches('/');
+            if spec == key_no_slash || spec.starts_with(&format!("{key_no_slash}/")) {
+                let rest = spec
+                    .strip_prefix(key_no_slash)
+                    .unwrap_or("")
+                    .trim_start_matches('/');
+                let rep_clean = rep.trim_start_matches('/');
+                let base = if rest.is_empty() {
+                    dir.join(rep_clean)
+                } else {
+                    dir.join(rep_clean).join(rest)
+                };
+                if let Some(found) = try_resolve_candidate(canonical_root, &base) {
+                    return Some(found);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn ancestor_project_dirs(canonical_root: &Path, importer_path: &str) -> Vec<PathBuf> {
+    let importer_abs = canonical_root.join(importer_path);
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    let mut cur = importer_abs.parent();
+    while let Some(d) = cur {
+        if d.starts_with(canonical_root) {
+            dirs.push(d.to_path_buf());
+        }
+        if d == canonical_root {
+            break;
+        }
+        cur = d.parent();
+    }
+    if dirs.is_empty() || dirs.last().map(|d| d != canonical_root).unwrap_or(true) {
+        dirs.push(canonical_root.to_path_buf());
+    }
+    dirs
+}
+
+/// Resolves an import specifier (relative, `@/` / `~/` / `tsconfig.json` / `vite.config.*` alias, or module path) to a file inside `repo_root`.
 pub fn resolve_target_file(
     repo_root: &Path,
     importer_path: &str,
@@ -94,11 +418,59 @@ pub fn resolve_target_file(
         }
     }
 
-    // 2. `@/` alias (try `src/...` first, then repo root)
-    if let Some(rest) = spec.strip_prefix("@/") {
-        for base in [canonical_root.join("src").join(rest), canonical_root.join(rest)] {
-            if let Some(found) = try_resolve_candidate(&canonical_root, &base) {
+    let ancestors = ancestor_project_dirs(&canonical_root, importer_path);
+
+    // 2. tsconfig.json / tsconfig.app.json / jsconfig.json `paths` & `baseUrl`
+    let mut visited_configs = HashSet::new();
+    for dir in &ancestors {
+        for cfg_name in ["tsconfig.json", "tsconfig.app.json", "jsconfig.json"] {
+            let cfg_path = dir.join(cfg_name);
+            if let Some(found) = resolve_tsconfig_aliases(
+                &cfg_path,
+                &canonical_root,
+                spec,
+                &mut visited_configs,
+                0,
+            ) {
                 return Some(found);
+            }
+        }
+    }
+
+    // 3. vite.config.{ts,mts,js,mjs} `resolve.alias`
+    for dir in &ancestors {
+        if let Some(found) = resolve_vite_aliases(dir, &canonical_root, spec) {
+            return Some(found);
+        }
+    }
+
+    // 4. Conventional `@/` and `~/` aliases (try nearest project root's `src/...` first, then root)
+    if let Some(rest) = spec.strip_prefix("@/").or_else(|| spec.strip_prefix("~/")) {
+        for dir in &ancestors {
+            let is_project_root = *dir == canonical_root
+                || dir.join("package.json").is_file()
+                || dir.join("tsconfig.json").is_file()
+                || dir.join("jsconfig.json").is_file()
+                || dir.join("src").is_dir();
+            if !is_project_root {
+                continue;
+            }
+            for base in [dir.join("src").join(rest), dir.join(rest)] {
+                if let Some(found) = try_resolve_candidate(&canonical_root, &base) {
+                    return Some(found);
+                }
+            }
+        }
+    }
+
+    // 5. Nuxt `~~/` and `@@/` root aliases
+    if let Some(rest) = spec.strip_prefix("~~/").or_else(|| spec.strip_prefix("@@/")) {
+        for dir in &ancestors {
+            if *dir == canonical_root || dir.join("package.json").is_file() {
+                let base = dir.join(rest);
+                if let Some(found) = try_resolve_candidate(&canonical_root, &base) {
+                    return Some(found);
+                }
             }
         }
     }
@@ -478,6 +850,178 @@ fn find_csharp_decl(node: Node, source: &[u8], target: &str) -> Option<FoundDecl
     None
 }
 
+fn is_vue_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("vue"))
+        .unwrap_or(false)
+}
+
+fn to_pascal_case(name: &str) -> String {
+    name.split(['-', '_'])
+        .filter(|s| !s.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
+                None => String::new(),
+            }
+        })
+        .collect()
+}
+
+fn vue_component_matches_symbol(file_path: &Path, symbol_name: &str) -> bool {
+    let Some(stem) = file_path.file_stem().and_then(|s| s.to_str()) else {
+        return false;
+    };
+    let effective_stem = if stem.eq_ignore_ascii_case("index") {
+        file_path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str())
+            .unwrap_or(stem)
+    } else {
+        stem
+    };
+    effective_stem.eq_ignore_ascii_case(symbol_name) || to_pascal_case(effective_stem) == symbol_name
+}
+
+struct VueScriptBlock {
+    lang_kind: LangKind,
+    language: Language,
+    padded_source: String,
+    start_row: usize,
+}
+
+fn extract_vue_script_blocks(source: &str) -> Vec<VueScriptBlock> {
+    let lower = source.to_ascii_lowercase();
+    let mut blocks = Vec::new();
+    let mut search_from = 0;
+
+    while let Some(rel_start) = lower[search_from..].find("<script") {
+        let tag_start = search_from + rel_start;
+        let Some(rel_tag_end) = lower[tag_start..].find('>') else {
+            break;
+        };
+        let open_tag_end = tag_start + rel_tag_end + 1;
+        let open_tag = &lower[tag_start..open_tag_end];
+
+        let Some(rel_close) = lower[open_tag_end..].find("</script>") else {
+            break;
+        };
+        let body_end = open_tag_end + rel_close;
+        let body = &source[open_tag_end..body_end];
+
+        let (lang_kind, language): (LangKind, Language) =
+            if open_tag.contains("lang=\"tsx\"") || open_tag.contains("lang='tsx'") {
+                (LangKind::Tsx, tree_sitter_typescript::LANGUAGE_TSX.into())
+            } else if open_tag.contains("lang=\"ts\"") || open_tag.contains("lang='ts'") {
+                (
+                    LangKind::TypeScript,
+                    tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+                )
+            } else {
+                (LangKind::JavaScript, tree_sitter_javascript::LANGUAGE.into())
+            };
+
+        let start_row = source[..tag_start].bytes().filter(|&b| b == b'\n').count();
+        let body_start_row = source[..open_tag_end].bytes().filter(|&b| b == b'\n').count();
+        let mut padded_source = "\n".repeat(body_start_row);
+        padded_source.push_str(body);
+
+        blocks.push(VueScriptBlock {
+            lang_kind,
+            language,
+            padded_source,
+            start_row,
+        });
+
+        search_from = body_end + "</script>".len();
+    }
+
+    blocks
+}
+
+fn extract_vue_html_doc_comment(lines: &[&str], tag_row: usize) -> Option<String> {
+    if tag_row == 0 {
+        return None;
+    }
+    let mut i = tag_row - 1;
+    if lines.get(i).map(|l| l.trim().is_empty()).unwrap_or(true) {
+        return None;
+    }
+    if !lines[i].trim().ends_with("-->") {
+        return None;
+    }
+    let mut collected = Vec::new();
+    loop {
+        collected.push(lines[i]);
+        if lines[i].trim().starts_with("<!--") || i == 0 {
+            break;
+        }
+        i -= 1;
+    }
+    collected.reverse();
+    Some(collected.join("\n").trim().to_string())
+}
+
+fn extract_vue_symbol(
+    source: &str,
+    file_path: &Path,
+    rel_path: &str,
+    symbol_name: &str,
+    allow_component_fallback: bool,
+) -> Result<Option<ResolvedRepoSymbol>, String> {
+    let lines: Vec<&str> = source.lines().collect();
+    let blocks = extract_vue_script_blocks(source);
+
+    for block in &blocks {
+        let mut parser = Parser::new();
+        parser
+            .set_language(&block.language)
+            .map_err(|e| format!("Failed to set tree-sitter language: {e}"))?;
+
+        if let Some(tree) = parser.parse(&block.padded_source, None) {
+            let root = tree.root_node();
+            let bytes = block.padded_source.as_bytes();
+            let _ = block.lang_kind;
+            if let Some(decl) = find_ts_js_decl(root, bytes, symbol_name, None) {
+                if decl.start_row < lines.len() {
+                    return Ok(Some(ResolvedRepoSymbol {
+                        name: symbol_name.to_string(),
+                        kind: decl.kind.to_string(),
+                        path: rel_path.to_string(),
+                        line: decl.start_row + 1,
+                        language: "vue".to_string(),
+                        doc_comment: extract_leading_doc_comment(&lines, decl.start_row),
+                        snippet: extract_snippet(&lines, decl.start_row, decl.end_row),
+                    }));
+                }
+            }
+        }
+    }
+
+    if allow_component_fallback || vue_component_matches_symbol(file_path, symbol_name) {
+        let start_row = blocks.first().map(|b| b.start_row).unwrap_or(0);
+        let end_row = (start_row + 15).min(lines.len().saturating_sub(1));
+        if start_row < lines.len() {
+            let doc_comment = extract_vue_html_doc_comment(&lines, start_row)
+                .or_else(|| extract_leading_doc_comment(&lines, start_row));
+            return Ok(Some(ResolvedRepoSymbol {
+                name: symbol_name.to_string(),
+                kind: "component".to_string(),
+                path: rel_path.to_string(),
+                line: start_row + 1,
+                language: "vue".to_string(),
+                doc_comment,
+                snippet: extract_snippet(&lines, start_row, end_row),
+            }));
+        }
+    }
+
+    Ok(None)
+}
+
 /// Parses `source` with `tree-sitter` and extracts the matching declaration for `symbol_name`.
 pub fn extract_symbol_from_source(
     source: &str,
@@ -485,6 +1029,10 @@ pub fn extract_symbol_from_source(
     rel_path: &str,
     symbol_name: &str,
 ) -> Result<Option<ResolvedRepoSymbol>, String> {
+    if is_vue_file(file_path) {
+        return extract_vue_symbol(source, file_path, rel_path, symbol_name, false);
+    }
+
     let Some((lang_kind, language, lang_label)) = detect_language(file_path) else {
         return Ok(None);
     };
@@ -530,6 +1078,117 @@ pub fn extract_symbol_from_source(
     }))
 }
 
+fn find_ts_reexport_targets(source: &str, symbol_name: &str) -> Vec<(String, String)> {
+    let mut targets = Vec::new();
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with("export ") || !trimmed.contains(" from ") {
+            continue;
+        }
+        let Some(from_idx) = trimmed.find(" from ") else {
+            continue;
+        };
+        let export_clause = &trimmed["export ".len()..from_idx];
+        let Some(spec) = extract_quoted_literal(&trimmed[from_idx + 6..]) else {
+            continue;
+        };
+
+        if export_clause.trim().starts_with('*') {
+            targets.push((spec.to_string(), symbol_name.to_string()));
+            continue;
+        }
+
+        if let (Some(open), Some(close)) = (export_clause.find('{'), export_clause.find('}')) {
+            let inside = &export_clause[open + 1..close];
+            for item in inside.split(',') {
+                let item = item.trim().trim_start_matches("type ").trim();
+                if item.is_empty() {
+                    continue;
+                }
+                if let Some((orig, alias)) = item.split_once(" as ") {
+                    if alias.trim() == symbol_name {
+                        let orig_name = orig.trim();
+                        let lookup = if orig_name == "default" {
+                            symbol_name
+                        } else {
+                            orig_name
+                        };
+                        targets.push((spec.to_string(), lookup.to_string()));
+                    }
+                } else if item == symbol_name {
+                    targets.push((spec.to_string(), symbol_name.to_string()));
+                }
+            }
+        }
+    }
+    targets
+}
+
+fn resolve_symbol_in_file(
+    canonical_root: &Path,
+    target_file: &Path,
+    symbol_name: &str,
+    from_explicit_import: bool,
+    visited: &mut HashSet<PathBuf>,
+    depth: usize,
+) -> Result<Option<ResolvedRepoSymbol>, String> {
+    if depth > 3 || !visited.insert(target_file.to_path_buf()) {
+        return Ok(None);
+    }
+
+    let rel_path = target_file
+        .strip_prefix(canonical_root)
+        .map(normalize_slashes)
+        .unwrap_or_else(|_| normalize_slashes(target_file));
+
+    let source = fs::read_to_string(target_file)
+        .map_err(|e| format!("Failed to read {}: {e}", rel_path))?;
+
+    if is_vue_file(target_file) {
+        return extract_vue_symbol(
+            &source,
+            target_file,
+            &rel_path,
+            symbol_name,
+            from_explicit_import,
+        );
+    }
+
+    if let Some(found) = extract_symbol_from_source(&source, target_file, &rel_path, symbol_name)? {
+        return Ok(Some(found));
+    }
+
+    // Follow barrel re-exports in TS/JS files (e.g. `export { default as MyButton } from './MyButton.vue'`)
+    let ext = target_file
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    if matches!(
+        ext.as_str(),
+        "ts" | "tsx" | "mts" | "cts" | "js" | "jsx" | "mjs" | "cjs"
+    ) {
+        for (reexport_spec, next_symbol) in find_ts_reexport_targets(&source, symbol_name) {
+            if let Some(next_file) =
+                resolve_target_file(canonical_root, &rel_path, Some(&reexport_spec))
+            {
+                if let Some(found) = resolve_symbol_in_file(
+                    canonical_root,
+                    &next_file,
+                    &next_symbol,
+                    true,
+                    visited,
+                    depth + 1,
+                )? {
+                    return Ok(Some(found));
+                }
+            }
+        }
+    }
+
+    Ok(None)
+}
+
 #[tauri::command]
 pub fn resolve_repo_symbol(
     request: ResolveRepoSymbolRequest,
@@ -564,15 +1223,21 @@ pub fn resolve_repo_symbol(
         return Ok(None);
     };
 
-    let rel_path = target_file
-        .strip_prefix(&canonical_root)
-        .map(normalize_slashes)
-        .unwrap_or_else(|_| normalize_slashes(&target_file));
+    let from_explicit_import = request
+        .import_specifier
+        .as_deref()
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+    let mut visited = HashSet::new();
 
-    let source = fs::read_to_string(&target_file)
-        .map_err(|e| format!("Failed to read {}: {e}", rel_path))?;
-
-    extract_symbol_from_source(&source, &target_file, &rel_path, &request.symbol_name)
+    resolve_symbol_in_file(
+        &canonical_root,
+        &target_file,
+        &request.symbol_name,
+        from_explicit_import,
+        &mut visited,
+        0,
+    )
 }
 
 #[cfg(test)]
@@ -827,6 +1492,176 @@ public sealed class OrderService : IOrderService
         assert_eq!(res.kind, "class");
         assert_eq!(res.language, "csharp");
         assert_eq!(res.path, "src/Services/OrderService.cs");
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn extracts_vue_sfc_script_setup_symbols_and_component() {
+        let src = r#"<template>
+  <button>{{ label }}</button>
+</template>
+
+<!-- Reusable primary button -->
+<script setup lang="ts">
+/**
+ * Props for PrimaryButton.
+ */
+export interface ButtonProps {
+  label: string
+}
+
+const props = defineProps<ButtonProps>()
+</script>
+"#;
+        let iface = extract_symbol_from_source(
+            src,
+            Path::new("src/components/PrimaryButton.vue"),
+            "src/components/PrimaryButton.vue",
+            "ButtonProps",
+        )
+        .unwrap()
+        .expect("should find ButtonProps inside <script setup lang=\"ts\">");
+        assert_eq!(iface.kind, "interface");
+        assert_eq!(iface.language, "vue");
+        assert_eq!(iface.line, 10);
+        assert!(iface
+            .doc_comment
+            .as_deref()
+            .unwrap()
+            .contains("Props for PrimaryButton."));
+
+        let comp = extract_symbol_from_source(
+            src,
+            Path::new("src/components/PrimaryButton.vue"),
+            "src/components/PrimaryButton.vue",
+            "PrimaryButton",
+        )
+        .unwrap()
+        .expect("should resolve PrimaryButton component");
+        assert_eq!(comp.kind, "component");
+        assert_eq!(comp.language, "vue");
+        assert_eq!(comp.line, 6);
+        assert!(comp
+            .doc_comment
+            .as_deref()
+            .unwrap()
+            .contains("Reusable primary button"));
+    }
+
+    #[test]
+    fn resolves_vue_aliases_from_tsconfig_vite_monorepo_and_barrels() {
+        let tmp = std::env::temp_dir().join(format!(
+            "stroll_vue_alias_test_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&tmp);
+
+        // Monorepo layout: apps/web/ with tsconfig.json -> references tsconfig.app.json
+        let web_root = tmp.join("apps/web");
+        fs::create_dir_all(web_root.join("src/components/ui")).unwrap();
+        fs::create_dir_all(web_root.join("src/composables")).unwrap();
+        fs::create_dir_all(web_root.join("src/views")).unwrap();
+
+        fs::write(
+            web_root.join("tsconfig.json"),
+            r#"{
+  // Root tsconfig with project reference (create-vue style)
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+  ],
+}"#,
+        )
+        .unwrap();
+
+        fs::write(
+            web_root.join("tsconfig.app.json"),
+            r#"{
+  /* App paths */
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@ui/*": ["./src/components/ui/*"],
+    },
+  }
+}"#,
+        )
+        .unwrap();
+
+        fs::write(
+            web_root.join("vite.config.ts"),
+            r#"import { fileURLToPath, URL } from 'node:url'
+export default {
+  resolve: {
+    alias: {
+      '~composables': fileURLToPath(new URL('./src/composables', import.meta.url)),
+    },
+  },
+}"#,
+        )
+        .unwrap();
+
+        fs::write(
+            web_root.join("src/components/ui/ActionCard.vue"),
+            "<script setup lang=\"ts\">\ndefineProps<{ title: string }>()\n</script>\n<template><div /></template>\n",
+        )
+        .unwrap();
+
+        fs::write(
+            web_root.join("src/components/ui/index.ts"),
+            "export { default as ActionCard } from './ActionCard.vue'\n",
+        )
+        .unwrap();
+
+        fs::write(
+            web_root.join("src/composables/useSession.ts"),
+            "/** Returns current user session. */\nexport function useSession() {\n  return { active: true }\n}\n",
+        )
+        .unwrap();
+
+        fs::write(
+            web_root.join("src/views/HomeView.vue"),
+            "<script setup lang=\"ts\">\nimport ActionCard from '@ui/ActionCard.vue'\nimport { useSession } from '~composables/useSession'\n</script>\n",
+        )
+        .unwrap();
+
+        // 1. Custom `@ui/ActionCard.vue` via tsconfig.json -> references -> tsconfig.app.json
+        let card = resolve_repo_symbol(ResolveRepoSymbolRequest {
+            repo_path: tmp.to_string_lossy().to_string(),
+            importer_path: "apps/web/src/views/HomeView.vue".to_string(),
+            symbol_name: "ActionCard".to_string(),
+            import_specifier: Some("@ui/ActionCard.vue".to_string()),
+        })
+        .unwrap()
+        .expect("should resolve @ui/ActionCard.vue via tsconfig.app.json");
+        assert_eq!(card.kind, "component");
+        assert_eq!(card.language, "vue");
+        assert_eq!(card.path, "apps/web/src/components/ui/ActionCard.vue");
+
+        // 2. Barrel re-export `@/components/ui` -> `index.ts` -> `ActionCard.vue`
+        let barrel = resolve_repo_symbol(ResolveRepoSymbolRequest {
+            repo_path: tmp.to_string_lossy().to_string(),
+            importer_path: "apps/web/src/views/HomeView.vue".to_string(),
+            symbol_name: "ActionCard".to_string(),
+            import_specifier: Some("@/components/ui".to_string()),
+        })
+        .unwrap()
+        .expect("should resolve ActionCard through barrel index.ts");
+        assert_eq!(barrel.path, "apps/web/src/components/ui/ActionCard.vue");
+
+        // 3. Vite config `~composables/useSession`
+        let composable = resolve_repo_symbol(ResolveRepoSymbolRequest {
+            repo_path: tmp.to_string_lossy().to_string(),
+            importer_path: "apps/web/src/views/HomeView.vue".to_string(),
+            symbol_name: "useSession".to_string(),
+            import_specifier: Some("~composables/useSession".to_string()),
+        })
+        .unwrap()
+        .expect("should resolve ~composables/useSession via vite.config.ts");
+        assert_eq!(composable.kind, "function");
+        assert_eq!(composable.path, "apps/web/src/composables/useSession.ts");
 
         let _ = fs::remove_dir_all(&tmp);
     }
