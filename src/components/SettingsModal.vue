@@ -954,8 +954,8 @@ async function handleResetDefaults() {
             <template v-else-if="settings.activeSection === 'updates'">
               <div class="space-y-4">
                 <div class="rounded-xl border border-border bg-canvas/60 p-4">
-                  <div class="flex flex-wrap items-center justify-between gap-3">
-                    <div>
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="min-w-0 flex-1">
                       <p class="text-xs font-medium text-ink">Stroll v{{ appVersion }}</p>
                       <p v-if="updateState === 'up-to-date'" class="mt-0.5 text-[11px] text-pine-text">
                         You're on the latest version.
@@ -980,7 +980,7 @@ async function handleResetDefaults() {
                     <button
                       v-if="updateState === 'available'"
                       type="button"
-                      class="inline-flex items-center gap-1.5 rounded-xl bg-terra px-3 py-1.5 text-xs font-semibold text-white hover:bg-terra-hover"
+                      class="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-terra px-3 py-1.5 text-xs font-semibold text-white hover:bg-terra-hover"
                       @click="handleInstallUpdate"
                     >
                       <Download class="h-3.5 w-3.5" />
@@ -989,7 +989,7 @@ async function handleResetDefaults() {
                     <button
                       v-else
                       type="button"
-                      class="inline-flex items-center gap-1.5 rounded-xl border border-border bg-canvas-subtle px-3 py-1.5 text-xs text-ink-secondary hover:bg-canvas-elevated disabled:opacity-50"
+                      class="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-border bg-canvas-subtle px-3 py-1.5 text-xs text-ink-secondary hover:bg-canvas-elevated disabled:opacity-50"
                       :disabled="updateState === 'checking' || updateState === 'installing'"
                       @click="handleCheckForUpdates"
                     >
