@@ -100,7 +100,7 @@ const items = computed<PaletteItem[]>(() => {
         results.push({
           id: `thread:${thread.id}`,
           kind: 'thread',
-          title: `${thread.path}:${thread.line}`,
+          title: thread.subjectType === 'FILE' ? `${thread.path} (file)` : `${thread.path}:${thread.line}`,
           subtitle: body.slice(0, 90),
           path: thread.path,
         })

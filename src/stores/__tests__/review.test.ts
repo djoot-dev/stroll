@@ -20,6 +20,11 @@ const setFileViewedStateMock = vi.fn<
   (pat: string, pullRequestId: string, path: string, viewed: boolean) => Promise<'VIEWED' | 'UNVIEWED'>
 >(async (_pat, _prId, _path, viewed) => (viewed ? 'VIEWED' : 'UNVIEWED'))
 
+const createPendingReviewMock = vi.fn(async () => 'review_1')
+const submitReviewMock = vi.fn(async () => undefined)
+const addReviewThreadMock = vi.fn(async () => 'thread_line')
+const addFileReviewThreadMock = vi.fn(async () => 'thread_file')
+
 vi.mock('@/services/github', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/github')>()
   return {
@@ -37,6 +42,10 @@ vi.mock('@/services/github', async (importOriginal) => {
       path: string,
       viewed: boolean,
     ) => setFileViewedStateMock(pat, pullRequestId, path, viewed),
+    createPendingReview: (...args: unknown[]) => createPendingReviewMock(...(args as [])),
+    submitReview: (...args: unknown[]) => submitReviewMock(...(args as [])),
+    addReviewThread: (...args: unknown[]) => addReviewThreadMock(...(args as [])),
+    addFileReviewThread: (...args: unknown[]) => addFileReviewThreadMock(...(args as [])),
   }
 })
 
@@ -419,5 +428,70 @@ describe('useReviewStore refreshCurrentPR and PR overview comments', () => {
     expect(store.isLoadingPR).toBe(false)
     expect(store.loadingPRKey).toBeNull()
     expect(store.prError).toBe('Network timeout')
+  })
+})
+
+describe('useReviewStore file-level comments', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.stubGlobal('localStorage', createMemoryStorage())
+    fetchPullRequestMock.mockReset()
+    createPendingReviewMock.mockClear()
+    submitReviewMock.mockClear()
+    addReviewThreadMock.mockClear()
+    addFileReviewThreadMock.mockClear()
+  })
+
+  it('queues a file-level draft and turns it into a FILE thread in Demo PR mode', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+    const path = store.tourSteps[0].file.path
+
+    await store.addFileDraftComment(path, '   ')
+    expect(store.draftComments).toHaveLength(0)
+
+    await store.addFileDraftComment(path, '  Consider splitting this file.  ')
+    expect(store.draftComments).toHaveLength(1)
+    expect(store.draftComments[0]).toMatchObject({
+      path,
+      subjectType: 'FILE',
+      line: 0,
+      body: 'Consider splitting this file.',
+    })
+
+    const ok = await store.submitCompleteReview('COMMENT', '')
+    expect(ok).toBe(true)
+    const created = store.pr?.threads.find(
+      (t) => t.path === path && t.subjectType === 'FILE',
+    )
+    expect(created?.comments[0].body).toBe('Consider splitting this file.')
+  })
+
+  it('submits file-level drafts via addFileReviewThread and line drafts via addReviewThread', async () => {
+    fetchPullRequestMock.mockResolvedValueOnce(
+      makePR({ owner: 'acme', repo: 'stroll', number: 7, pendingReviewId: null }),
+    )
+    const auth = useAuthStore()
+    auth.pat = 'ghp_test_token'
+
+    const store = useReviewStore()
+    await store.loadPRByRepo('acme', 'stroll', 7)
+    const path = store.tourSteps[0].file.path
+
+    await store.addFileDraftComment(path, 'File-wide note')
+    await store.addDraftComment(path, 3, 'RIGHT', 'Line note')
+
+    const ok = await store.submitCompleteReview('COMMENT', 'summary')
+    expect(ok).toBe(true)
+    expect(addFileReviewThreadMock).toHaveBeenCalledTimes(1)
+    expect(addFileReviewThreadMock).toHaveBeenCalledWith(
+      'ghp_test_token',
+      store.pr?.id,
+      'review_1',
+      path,
+      'File-wide note',
+    )
+    expect(addReviewThreadMock).toHaveBeenCalledTimes(1)
+    expect(store.draftComments).toHaveLength(0)
   })
 })
