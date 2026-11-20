@@ -518,17 +518,42 @@ export function applyInlineDiffsToHunk<T extends DiffLineLike>(lines: T[]): void
   }
 }
 
+const QUALIFIER_BEFORE_RE = /([A-Za-z_$][\w$]*)[ \t]*(\.|::)[ \t]*$/
+const CALL_OR_GENERIC_AFTER_RE = /^[ \t]*[(<]/
+
+/**
+ * Hover key for the identifier `piece` at [start, end) in `lineText`. Member accesses
+ * (`Status.Active`, `Limits::MAX`) that aren't calls try the qualified name first so
+ * enum members and type-scoped constants resolve; otherwise the bare name is used.
+ */
+function resolveHoverIdent(
+  lineText: string,
+  start: number,
+  end: number,
+  piece: string,
+  symbolIndex: { has(name: string): boolean },
+): string | null {
+  const before = lineText.slice(Math.max(0, start - 128), start)
+  const q = QUALIFIER_BEFORE_RE.exec(before)
+  if (q && !CALL_OR_GENERIC_AFTER_RE.test(lineText.slice(end))) {
+    const qualified = `${q[1]}${q[2]}${piece}`
+    if (symbolIndex.has(qualified)) return qualified
+  }
+  return piece.length >= 2 && symbolIndex.has(piece) ? piece : null
+}
+
 /**
  * Composes CodeMirror syntax highlight spans, hoverable PR identifiers, and
  * intra-line changed character ranges into renderable `DiffTokenPart` slices.
  */
 export function buildLineTokenParts(
   spans: HighlightSpan[],
-  symbolIndex: ReadonlyMap<string, unknown>,
+  symbolIndex: { has(name: string): boolean },
   inlineChanges?: InlineChangeRange[],
 ): DiffTokenPart[] {
   const parts: DiffTokenPart[] = []
   const ranges = inlineChanges && inlineChanges.length > 0 ? inlineChanges : null
+  const lineText = spans.map((sp) => sp.text).join('')
   let charOffset = 0
   let rangeIdx = 0
 
@@ -540,9 +565,9 @@ export function buildLineTokenParts(
       const pieceEnd = charOffset + piece.length
       charOffset = pieceEnd
 
-      const isIdent =
-        piece.length >= 2 && IDENT_TEST_RE.test(piece) && symbolIndex.has(piece)
-      const ident = isIdent ? piece : null
+      const ident = IDENT_TEST_RE.test(piece)
+        ? resolveHoverIdent(lineText, pieceStart, pieceEnd, piece, symbolIndex)
+        : null
 
       if (!ranges) {
         parts.push({

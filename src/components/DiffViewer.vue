@@ -23,10 +23,12 @@ import {
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import {
   buildPRSymbolIndex,
+  createHoverableSymbols,
   extractImportedSymbolNames,
   getEnclosingScope,
   getReplacedLinesForAddedLine,
   resolveHoverSymbolWithRepoFallback,
+  type HoverableSymbols,
   type HoverSymbolInfo,
 } from '@/services/codeContext'
 import { isCSharpPath, loadCSharpTypeIndex, type CSharpTypeIndex } from '@/services/csharpIndex'
@@ -313,26 +315,21 @@ watch(
   { immediate: true },
 )
 
-const hoverableSymbols = computed<ReadonlyMap<string, unknown>>(() => {
-  const base = symbolIndex.value
-  if (!review.currentRepoPath || !isTauriRuntime()) return base
+const hoverableSymbols = computed<HoverableSymbols>(() => {
+  const index = symbolIndex.value
+  const currentPath = props.step.file.path
+  if (!review.currentRepoPath || !isTauriRuntime()) {
+    return createHoverableSymbols({ index, currentPath })
+  }
 
   const content = props.step.file.headContent ?? props.step.file.baseContent
-  const imported = extractImportedSymbolNames(content)
-  const csharpTypes = csharpTypeIndex.value
-  if (imported.size === 0 && !csharpTypes) return base
-
-  const merged = new Map<string, unknown>(base)
-  for (const name of imported) {
-    if (!merged.has(name)) merged.set(name, true)
-  }
+  const repoNames = new Set(extractImportedSymbolNames(content))
   // C# `using` imports namespaces, so any type declared anywhere in the repo may be in scope.
+  const csharpTypes = csharpTypeIndex.value
   if (csharpTypes) {
-    for (const name of csharpTypes.keys()) {
-      if (!merged.has(name)) merged.set(name, true)
-    }
+    for (const name of csharpTypes.keys()) repoNames.add(name)
   }
-  return merged
+  return createHoverableSymbols({ index, currentPath, repoNames })
 })
 
 

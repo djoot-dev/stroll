@@ -15,6 +15,10 @@ pub struct ResolveRepoSymbolRequest {
     /// When set, path resolution from `import_specifier` is skipped.
     #[serde(default)]
     pub target_path: Option<String>,
+    /// When set, `symbol_name` is a member (enum member, constant, ...) looked up inside the
+    /// type/enum/impl named `container` (e.g. `Status.Active`, `Limits::MAX`).
+    #[serde(default)]
+    pub container: Option<String>,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -698,6 +702,27 @@ fn find_ts_js_decl(node: Node, source: &[u8], target: &str, outer_node: Option<N
         }
     }
 
+    if kind == "enum_body" {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            let name_node = match child.kind() {
+                "property_identifier" => Some(child),
+                "enum_assignment" => child.child_by_field_name("name"),
+                _ => None,
+            };
+            if let Some(name_node) = name_node {
+                if node_text(name_node, source) == Some(target) {
+                    return Some(FoundDecl {
+                        kind: "enumMember",
+                        start_row: child.start_position().row,
+                        end_row: child.end_position().row,
+                    });
+                }
+            }
+        }
+        return None;
+    }
+
     if kind == "lexical_declaration" || kind == "variable_declaration" {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -743,6 +768,7 @@ fn find_rust_decl(node: Node, source: &[u8], target: &str) -> Option<FoundDecl> 
         "type_item" => Some("type"),
         "function_item" => Some("fn"),
         "const_item" | "static_item" => Some("const"),
+        "enum_variant" => Some("enumMember"),
         _ => None,
     };
 
@@ -829,8 +855,15 @@ fn find_csharp_decl(node: Node, source: &[u8], target: &str) -> Option<FoundDecl
         "interface_declaration" => Some("interface"),
         "enum_declaration" => Some("enum"),
         "method_declaration" => Some("method"),
+        "enum_member_declaration" => Some("enumMember"),
         _ => None,
     };
+
+    if node.kind() == "field_declaration" {
+        if let Some(found) = find_csharp_constant_field(node, source, target) {
+            return Some(found);
+        }
+    }
 
     if let Some(kind) = decl_kind {
         if let Some(name_node) = node.child_by_field_name("name") {
@@ -852,6 +885,136 @@ fn find_csharp_decl(node: Node, source: &[u8], target: &str) -> Option<FoundDecl
     }
 
     None
+}
+
+/// Matches `const` and `static readonly` C# fields named `target`.
+fn find_csharp_constant_field(node: Node, source: &[u8], target: &str) -> Option<FoundDecl> {
+    let mut is_const = false;
+    let mut is_static = false;
+    let mut is_readonly = false;
+    let mut declaration = None;
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "modifier" => match node_text(child, source).map(str::trim) {
+                Some("const") => is_const = true,
+                Some("static") => is_static = true,
+                Some("readonly") => is_readonly = true,
+                _ => {}
+            },
+            "variable_declaration" => declaration = Some(child),
+            _ => {}
+        }
+    }
+    if !(is_const || (is_static && is_readonly)) {
+        return None;
+    }
+    let declaration = declaration?;
+    let mut cursor = declaration.walk();
+    for declarator in declaration.children(&mut cursor) {
+        if declarator.kind() != "variable_declarator" {
+            continue;
+        }
+        if let Some(name_node) = declarator.child_by_field_name("name") {
+            if node_text(name_node, source) == Some(target) {
+                return Some(FoundDecl {
+                    kind: "const",
+                    start_row: node.start_position().row,
+                    end_row: node.end_position().row,
+                });
+            }
+        }
+    }
+    None
+}
+
+/// Collects nodes declaring a type-like container named `name` (class, struct, enum, record,
+/// interface, Rust `impl Name`, ...) in document order.
+fn collect_container_nodes<'a>(node: Node<'a>, source: &[u8], name: &str, out: &mut Vec<Node<'a>>) {
+    let kind = node.kind();
+    let is_container_kind = matches!(
+        kind,
+        "class_declaration"
+            | "abstract_class_declaration"
+            | "struct_declaration"
+            | "record_declaration"
+            | "interface_declaration"
+            | "enum_declaration"
+            | "class_definition"
+            | "struct_item"
+            | "enum_item"
+            | "trait_item"
+            | "impl_item"
+    );
+    if is_container_kind {
+        let name_node = if kind == "impl_item" {
+            node.child_by_field_name("type")
+        } else {
+            node.child_by_field_name("name")
+        };
+        if name_node.and_then(|n| node_text(n, source)).map(str::trim) == Some(name) {
+            out.push(node);
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_container_nodes(child, source, name, out);
+    }
+}
+
+/// Finds `member` declared inside a container named `container` (e.g. enum member `Active` of
+/// `enum Status`, or `const MaxRetries` in `class Limits`).
+pub fn extract_member_from_source(
+    source: &str,
+    file_path: &Path,
+    rel_path: &str,
+    container: &str,
+    member: &str,
+) -> Result<Option<ResolvedRepoSymbol>, String> {
+    if is_vue_file(file_path) {
+        return Ok(None);
+    }
+    let Some((lang_kind, language, lang_label)) = detect_language(file_path) else {
+        return Ok(None);
+    };
+
+    let mut parser = Parser::new();
+    parser
+        .set_language(&language)
+        .map_err(|e| format!("Failed to set tree-sitter language: {e}"))?;
+    let tree = parser
+        .parse(source, None)
+        .ok_or_else(|| "tree-sitter failed to parse file".to_string())?;
+    let bytes = source.as_bytes();
+
+    let mut containers = Vec::new();
+    collect_container_nodes(tree.root_node(), bytes, container, &mut containers);
+
+    let lines: Vec<&str> = source.lines().collect();
+    for node in containers {
+        let found = match lang_kind {
+            LangKind::TypeScript | LangKind::Tsx | LangKind::JavaScript => {
+                find_ts_js_decl(node, bytes, member, None)
+            }
+            LangKind::Rust => find_rust_decl(node, bytes, member),
+            LangKind::Python => find_python_decl(node, bytes, member, None),
+            LangKind::CSharp => find_csharp_decl(node, bytes, member),
+        };
+        let Some(decl) = found else { continue };
+        if decl.start_row >= lines.len() {
+            continue;
+        }
+        return Ok(Some(ResolvedRepoSymbol {
+            name: member.to_string(),
+            kind: decl.kind.to_string(),
+            path: rel_path.to_string(),
+            line: decl.start_row + 1,
+            language: lang_label.to_string(),
+            doc_comment: extract_leading_doc_comment(&lines, decl.start_row),
+            snippet: extract_snippet(&lines, decl.start_row, decl.end_row),
+        }));
+    }
+    Ok(None)
 }
 
 fn is_vue_file(path: &Path) -> bool {
@@ -1132,6 +1295,7 @@ fn resolve_symbol_in_file(
     canonical_root: &Path,
     target_file: &Path,
     symbol_name: &str,
+    container: Option<&str>,
     from_explicit_import: bool,
     visited: &mut HashSet<PathBuf>,
     depth: usize,
@@ -1148,7 +1312,13 @@ fn resolve_symbol_in_file(
     let source = fs::read_to_string(target_file)
         .map_err(|e| format!("Failed to read {}: {e}", rel_path))?;
 
-    if is_vue_file(target_file) {
+    if let Some(container) = container {
+        if let Some(found) =
+            extract_member_from_source(&source, target_file, &rel_path, container, symbol_name)?
+        {
+            return Ok(Some(found));
+        }
+    } else if is_vue_file(target_file) {
         return extract_vue_symbol(
             &source,
             target_file,
@@ -1156,11 +1326,14 @@ fn resolve_symbol_in_file(
             symbol_name,
             from_explicit_import,
         );
-    }
-
-    if let Some(found) = extract_symbol_from_source(&source, target_file, &rel_path, symbol_name)? {
+    } else if let Some(found) =
+        extract_symbol_from_source(&source, target_file, &rel_path, symbol_name)?
+    {
         return Ok(Some(found));
     }
+
+    // Barrels re-export the container (e.g. the enum), not its members.
+    let reexported_name = container.unwrap_or(symbol_name);
 
     // Follow barrel re-exports in TS/JS files (e.g. `export { default as MyButton } from './MyButton.vue'`)
     let ext = target_file
@@ -1172,14 +1345,19 @@ fn resolve_symbol_in_file(
         ext.as_str(),
         "ts" | "tsx" | "mts" | "cts" | "js" | "jsx" | "mjs" | "cjs"
     ) {
-        for (reexport_spec, next_symbol) in find_ts_reexport_targets(&source, symbol_name) {
+        for (reexport_spec, next_symbol) in find_ts_reexport_targets(&source, reexported_name) {
             if let Some(next_file) =
                 resolve_target_file(canonical_root, &rel_path, Some(&reexport_spec))
             {
+                let (next_name, next_container) = match container {
+                    Some(_) => (symbol_name, Some(next_symbol.as_str())),
+                    None => (next_symbol.as_str(), None),
+                };
                 if let Some(found) = resolve_symbol_in_file(
                     canonical_root,
                     &next_file,
-                    &next_symbol,
+                    next_name,
+                    next_container,
                     true,
                     visited,
                     depth + 1,
@@ -1209,6 +1387,12 @@ pub fn resolve_repo_symbol(
         .canonicalize()
         .map_err(|e| format!("Failed to canonicalize repo path: {e}"))?;
 
+    let container = request
+        .container
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
     if let Some(target) = request
         .target_path
         .as_deref()
@@ -1226,6 +1410,7 @@ pub fn resolve_repo_symbol(
             &canonical_root,
             &target_file,
             &request.symbol_name,
+            container,
             true,
             &mut visited,
             0,
@@ -1242,7 +1427,7 @@ pub fn resolve_repo_symbol(
             &canonical_root,
             &request.importer_path,
             request.import_specifier.as_deref(),
-            &request.symbol_name,
+            container.unwrap_or(&request.symbol_name),
         )
     });
 
@@ -1261,6 +1446,7 @@ pub fn resolve_repo_symbol(
         &canonical_root,
         &target_file,
         &request.symbol_name,
+        container,
         from_explicit_import,
         &mut visited,
         0,
@@ -1512,6 +1698,7 @@ public sealed class OrderService : IOrderService
             symbol_name: "OrderService".to_string(),
             import_specifier: Some("MyApp.Services".to_string()),
             target_path: None,
+            container: None,
         })
         .unwrap()
         .expect("should resolve OrderService across C# namespace");
@@ -1550,6 +1737,7 @@ public sealed class OrderService : IOrderService
             symbol_name: "IBillingService".to_string(),
             import_specifier: Some("MyApp.Domain.Services.Billing".to_string()),
             target_path: Some(target.to_string()),
+            container: None,
         };
 
         let res = resolve_repo_symbol(request("src/MyApp.Domain/Services/Billing/Contracts.cs"))
@@ -1563,6 +1751,92 @@ public sealed class OrderService : IOrderService
         assert!(resolve_repo_symbol(request("../outside.cs")).unwrap().is_none());
 
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn extracts_csharp_constant_fields_and_enum_members() {
+        let src = r#"
+namespace Stroll.Limits;
+
+public static class RetryLimits
+{
+    /// <summary>Maximum attempts.</summary>
+    public const int MaxRetries = 5;
+    public static readonly TimeSpan Backoff = TimeSpan.FromSeconds(2);
+    public static int Mutable = 3;
+}
+
+public enum OrderStatus
+{
+    Pending = 1,
+    Completed
+}
+"#;
+        let path = Path::new("src/Limits.cs");
+        let max = extract_member_from_source(src, path, "src/Limits.cs", "RetryLimits", "MaxRetries")
+            .unwrap()
+            .expect("const field");
+        assert_eq!(max.kind, "const");
+        assert_eq!(max.line, 7);
+        assert!(max.snippet.contains("MaxRetries = 5"));
+        assert!(max.doc_comment.as_deref().unwrap().contains("Maximum attempts"));
+
+        let backoff = extract_member_from_source(src, path, "src/Limits.cs", "RetryLimits", "Backoff")
+            .unwrap()
+            .expect("static readonly field");
+        assert_eq!(backoff.kind, "const");
+
+        // Mutable statics are not constants.
+        assert!(extract_member_from_source(src, path, "src/Limits.cs", "RetryLimits", "Mutable")
+            .unwrap()
+            .is_none());
+
+        let completed =
+            extract_member_from_source(src, path, "src/Limits.cs", "OrderStatus", "Completed")
+                .unwrap()
+                .expect("enum member");
+        assert_eq!(completed.kind, "enumMember");
+        assert_eq!(completed.snippet.trim(), "Completed");
+
+        // Members are only found inside the named container.
+        assert!(extract_member_from_source(src, path, "src/Limits.cs", "OrderStatus", "MaxRetries")
+            .unwrap()
+            .is_none());
+
+        // Bare lookup also finds constant fields now.
+        let bare = extract_symbol_from_source(src, path, "src/Limits.cs", "MaxRetries")
+            .unwrap()
+            .expect("bare const field");
+        assert_eq!(bare.kind, "const");
+    }
+
+    #[test]
+    fn extracts_enum_members_and_associated_consts_for_ts_rust_python() {
+        let ts = "export enum Status {\n  Active = 2,\n  Inactive,\n}\n";
+        let m = extract_member_from_source(ts, Path::new("a.ts"), "a.ts", "Status", "Inactive")
+            .unwrap()
+            .expect("ts bare enum member");
+        assert_eq!((m.kind.as_str(), m.line), ("enumMember", 3));
+        let m = extract_member_from_source(ts, Path::new("a.ts"), "a.ts", "Status", "Active")
+            .unwrap()
+            .expect("ts assigned enum member");
+        assert_eq!(m.snippet.trim(), "Active = 2,");
+
+        let rs = "pub enum Mode {\n    Fast = 1,\n    Slow,\n}\n\npub struct Limits;\n\nimpl Limits {\n    pub const MAX: u32 = 10;\n}\n";
+        let m = extract_member_from_source(rs, Path::new("a.rs"), "a.rs", "Mode", "Slow")
+            .unwrap()
+            .expect("rust variant");
+        assert_eq!(m.kind, "enumMember");
+        let m = extract_member_from_source(rs, Path::new("a.rs"), "a.rs", "Limits", "MAX")
+            .unwrap()
+            .expect("rust associated const via impl");
+        assert_eq!((m.kind.as_str(), m.line), ("const", 9));
+
+        let py = "from enum import Enum\n\nclass Color(Enum):\n    RED = 1\n    GREEN = 2\n";
+        let m = extract_member_from_source(py, Path::new("a.py"), "a.py", "Color", "GREEN")
+            .unwrap()
+            .expect("python enum member");
+        assert_eq!((m.kind.as_str(), m.line), ("const", 5));
     }
 
     #[test]
@@ -1703,6 +1977,7 @@ export default {
             symbol_name: "ActionCard".to_string(),
             import_specifier: Some("@ui/ActionCard.vue".to_string()),
             target_path: None,
+            container: None,
         })
         .unwrap()
         .expect("should resolve @ui/ActionCard.vue via tsconfig.app.json");
@@ -1717,6 +1992,7 @@ export default {
             symbol_name: "ActionCard".to_string(),
             import_specifier: Some("@/components/ui".to_string()),
             target_path: None,
+            container: None,
         })
         .unwrap()
         .expect("should resolve ActionCard through barrel index.ts");
@@ -1729,6 +2005,7 @@ export default {
             symbol_name: "useSession".to_string(),
             import_specifier: Some("~composables/useSession".to_string()),
             target_path: None,
+            container: None,
         })
         .unwrap()
         .expect("should resolve ~composables/useSession via vite.config.ts");
