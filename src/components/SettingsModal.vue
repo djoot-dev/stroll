@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { getVersion } from '@tauri-apps/api/app'
 import {
   AlertCircle,
   CheckCircle2,
@@ -28,6 +27,7 @@ import {
   Trash2,
   X,
 } from '@lucide/vue'
+import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, watch } from 'vue'
 import {
   inspectLocalRepo,
@@ -36,12 +36,12 @@ import {
   pickLocalDirectory,
   requestNotificationPermission,
 } from '@/services/native'
-import { fetchReleaseNotes, RELEASES_PAGE_URL, type ReleaseNote } from '@/services/releaseNotes'
-import { checkForAppUpdate, type AvailableUpdate } from '@/services/updater'
+import { RELEASES_PAGE_URL } from '@/services/releaseNotes'
 import { useAuthStore } from '@/stores/auth'
 import MarkdownContent from './MarkdownContent.vue'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore, type SettingsSection, type ThemeMode } from '@/stores/settings'
+import { useUpdatesStore } from '@/stores/updates'
 import type { TourDirection } from '@/types/pr'
 
 const auth = useAuthStore()
@@ -58,59 +58,31 @@ const pathInput = ref('')
 const pathValidationError = ref<string | null>(null)
 const detectedOwnerRepo = ref<string | null>(null)
 const isInspectingPath = ref(false)
-const appVersion = ref('0.1.0')
-const updateState = ref<'idle' | 'checking' | 'up-to-date' | 'available' | 'installing' | 'error'>('idle')
-const availableUpdate = ref<AvailableUpdate | null>(null)
-const updateMessage = ref('')
-const releaseNotes = ref<ReleaseNote[]>([])
-const isLoadingReleaseNotes = ref(false)
+const updates = useUpdatesStore()
+const {
+  appVersion,
+  state: updateState,
+  availableUpdate,
+  message: updateMessage,
+  releaseNotes,
+  isLoadingReleaseNotes,
+} = storeToRefs(updates)
 
 const linkedRepos = computed(() => Object.entries(review.repoPaths))
 const activePRRepo = computed(() =>
   review.pr ? `${review.pr.owner}/${review.pr.repo}` : '',
 )
 
-onMounted(async () => {
-  if (isTauriRuntime()) {
-    try {
-      appVersion.value = await getVersion()
-    } catch {
-      // Fallback to default version
-    }
-  }
+onMounted(() => {
+  void updates.loadAppVersion()
 })
 
-async function handleCheckForUpdates() {
-  updateState.value = 'checking'
-  updateMessage.value = ''
-  availableUpdate.value = null
-  releaseNotes.value = []
-  try {
-    const result = await checkForAppUpdate()
-    if (result.available) {
-      availableUpdate.value = result
-      updateState.value = 'available'
-      void loadReleaseNotes(result)
-    } else {
-      updateState.value = 'up-to-date'
-    }
-  } catch (err) {
-    updateState.value = 'error'
-    updateMessage.value = err instanceof Error ? err.message : 'Unable to check for updates.'
-  }
+function handleCheckForUpdates() {
+  void updates.checkForUpdates()
 }
 
-async function loadReleaseNotes(update: AvailableUpdate) {
-  isLoadingReleaseNotes.value = true
-  try {
-    const notes = await fetchReleaseNotes(appVersion.value, update.version, update.body)
-    // Ignore results from a stale check if the user re-checked meanwhile.
-    if (availableUpdate.value === update) {
-      releaseNotes.value = notes
-    }
-  } finally {
-    isLoadingReleaseNotes.value = false
-  }
+function handleInstallUpdate() {
+  void updates.installUpdate()
 }
 
 function formatReleaseDate(iso?: string): string {
@@ -119,23 +91,6 @@ function formatReleaseDate(iso?: string): string {
   return Number.isNaN(date.getTime())
     ? ''
     : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
-}
-
-async function handleInstallUpdate() {
-  if (!availableUpdate.value) return
-  updateState.value = 'installing'
-  updateMessage.value = 'Downloading update...'
-  try {
-    await availableUpdate.value.install((downloaded, total) => {
-      if (total && total > 0) {
-        const pct = Math.round((downloaded / total) * 100)
-        updateMessage.value = `Downloading update (${pct}%)...`
-      }
-    })
-  } catch (err) {
-    updateState.value = 'error'
-    updateMessage.value = err instanceof Error ? err.message : 'Failed to install update.'
-  }
 }
 
 watch(
@@ -408,7 +363,7 @@ async function handleResetDefaults() {
           </nav>
 
           <div class="hidden border-t border-border-muted px-4 py-2.5 text-[10px] text-ink-faint sm:block">
-            Stroll v{{ appVersion }}
+            Stroll<template v-if="appVersion"> v{{ appVersion }}</template>
           </div>
         </aside>
 
@@ -956,7 +911,7 @@ async function handleResetDefaults() {
                 <div class="rounded-xl border border-border bg-canvas/60 p-4">
                   <div class="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <p class="text-xs font-medium text-ink">Stroll v{{ appVersion }}</p>
+                      <p class="text-xs font-medium text-ink">Stroll<template v-if="appVersion"> v{{ appVersion }}</template></p>
                       <p v-if="updateState === 'up-to-date'" class="mt-0.5 text-[11px] text-pine-text">
                         You're on the latest version.
                       </p>
