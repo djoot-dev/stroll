@@ -68,6 +68,7 @@ function isItemLoading(owner: string, repo: string, number: number): boolean {
               <button
                 class="inline-flex items-center gap-1.5 rounded-xl bg-terra px-4 py-2 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-terra-hover disabled:opacity-40"
                 :disabled="review.isLoadingPR || !urlInput.trim()"
+                :aria-busy="review.isLoadingPR"
                 @click="handleLoadUrl"
               >
                 <Loader2 v-if="review.isLoadingPR" class="h-3.5 w-3.5 animate-spin" />

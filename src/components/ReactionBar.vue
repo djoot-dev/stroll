@@ -55,6 +55,7 @@ async function handleToggle(content: ReactionContent) {
           : 'border-border bg-canvas text-ink-secondary hover:bg-canvas-elevated'
       "
       :disabled="isUpdating"
+      :aria-busy="isUpdating"
       @click="handleToggle(reaction.content)"
     >
       <span>{{ emojiFor(reaction.content) }}</span>

@@ -123,8 +123,9 @@ onBeforeUnmount(() => window.removeEventListener('focus', onWindowFocus))
         <button
           v-if="showAction"
           type="button"
-          class="inline-flex items-center gap-1 rounded-md border border-terra-border bg-terra-soft px-2 py-0.5 font-semibold text-terra-text transition-colors hover:bg-terra/20 disabled:cursor-not-allowed disabled:opacity-40"
+          class="inline-flex items-center gap-1 rounded-md border border-terra-border bg-terra-soft px-2 py-0.5 font-semibold text-terra-text transition-colors hover:bg-terra/20 disabled:opacity-40"
           :disabled="isBusy || !!actionDisabledReason"
+          :aria-busy="isBusy"
           :title="actionDisabledReason ?? `Fetch and switch the linked checkout to ${localBranch}`"
           @click="runCheckout"
         >
@@ -139,6 +140,7 @@ onBeforeUnmount(() => window.removeEventListener('focus', onWindowFocus))
           class="rounded p-0.5 text-ink-faint transition-colors hover:text-ink disabled:opacity-40"
           title="Re-read local checkout status"
           :disabled="isBusy"
+          :aria-busy="isBusy"
           @click="refresh"
         >
           <RefreshCw class="h-3 w-3" />
