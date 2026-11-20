@@ -11,11 +11,65 @@ import {
   Pin,
   RotateCcw,
 } from '@lucide/vue'
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { isLockfile, LAYER_META } from '@/services/readingOrder'
+import { computeRevealScrollTop } from '@/services/scrollReveal'
 import { useReviewStore } from '@/stores/review'
 
 const review = useReviewStore()
+const stepListRef = ref<HTMLElement | null>(null)
+
+/**
+ * Scrolls the step list so the active step — plus the step directly above and
+ * below it — is visible. Only scrolls as much as needed.
+ */
+function revealActiveStep(behavior: ScrollBehavior) {
+  const container = stepListRef.value
+  if (!container || review.activeView !== 'step') return
+
+  const idx = review.currentStepIndex
+  const find = (i: number) => container.querySelector<HTMLElement>(`[data-step-index="${i}"]`)
+  const active = find(idx)
+  if (!active) return
+
+  const containerTop = container.getBoundingClientRect().top - container.scrollTop
+  const toContent = (el: HTMLElement) => {
+    const rect = el.getBoundingClientRect()
+    return { top: rect.top - containerTop, bottom: rect.bottom - containerTop }
+  }
+
+  const activeRect = toContent(active)
+  const prev = find(idx - 1)
+  const next = find(idx + 1)
+  const target = computeRevealScrollTop({
+    scrollTop: container.scrollTop,
+    viewportHeight: container.clientHeight,
+    scrollHeight: container.scrollHeight,
+    activeTop: activeRect.top,
+    activeBottom: activeRect.bottom,
+    rangeTop: prev ? toContent(prev).top : undefined,
+    rangeBottom: next ? toContent(next).bottom : undefined,
+    margin: 8,
+  })
+
+  if (Math.abs(target - container.scrollTop) >= 1) {
+    container.scrollTo({ top: target, behavior })
+  }
+}
+
+// Navigating between steps: smooth-scroll the list to follow along.
+watch(
+  () => [review.currentStepIndex, review.activeView] as const,
+  () => revealActiveStep('smooth'),
+  { flush: 'post' },
+)
+
+// Sidebar (re)mounted or tour order changed: jump straight to the active step.
+watch(
+  () => [stepListRef.value, review.tourSteps.map((s) => s.file.path).join('\n')] as const,
+  () => revealActiveStep('auto'),
+  { flush: 'post' },
+)
 
 const overviewCommentCount = computed(() => {
   if (!review.pr) return 0
@@ -149,7 +203,7 @@ function dirOnly(path: string): string {
       </div>
 
       <!-- Ordered Tour Steps — Connected Stepping-Stone Trail -->
-      <div class="relative flex-1 overflow-y-auto px-2.5 py-2.5">
+      <div ref="stepListRef" class="relative flex-1 overflow-y-auto px-2.5 py-2.5">
         <div class="relative space-y-1">
           <!-- Subtle vertical trail rail connecting the stepping stones -->
           <div
@@ -160,6 +214,7 @@ function dirOnly(path: string): string {
           <button
             v-for="step in review.tourSteps"
             :key="step.file.path"
+            :data-step-index="step.stepIndex"
             class="group relative flex w-full items-start gap-2.5 rounded-xl border px-2 py-2 text-left transition-all"
             :class="
               review.activeView === 'step' && step.stepIndex === review.currentStepIndex
