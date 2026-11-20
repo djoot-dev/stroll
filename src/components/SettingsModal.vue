@@ -85,6 +85,8 @@ async function handleCheckForUpdates() {
   updateMessage.value = ''
   availableUpdate.value = null
   releaseNotes.value = []
+  releaseNotesRequestId++
+  isLoadingReleaseNotes.value = false
   try {
     const result = await checkForAppUpdate()
     if (result.available) {
@@ -100,16 +102,23 @@ async function handleCheckForUpdates() {
   }
 }
 
+// Incremented per release-notes request so results from a stale check are ignored.
+// (Comparing `availableUpdate.value === update` doesn't work: the ref holds a reactive
+// proxy of the update, which never equals the raw object.)
+let releaseNotesRequestId = 0
+
 async function loadReleaseNotes(update: AvailableUpdate) {
+  const requestId = ++releaseNotesRequestId
   isLoadingReleaseNotes.value = true
   try {
     const notes = await fetchReleaseNotes(appVersion.value, update.version, update.body)
-    // Ignore results from a stale check if the user re-checked meanwhile.
-    if (availableUpdate.value === update) {
+    if (requestId === releaseNotesRequestId) {
       releaseNotes.value = notes
     }
   } finally {
-    isLoadingReleaseNotes.value = false
+    if (requestId === releaseNotesRequestId) {
+      isLoadingReleaseNotes.value = false
+    }
   }
 }
 
