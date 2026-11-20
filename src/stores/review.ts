@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { MOCK_PR } from '@/data/mockPR'
+import { MOCK_COMMIT_BODIES, MOCK_FILE_COMMIT_OIDS, MOCK_PR } from '@/data/mockPR'
 import {
   addPRComment,
   addPullRequestLabels,
@@ -12,6 +12,7 @@ import {
   deleteReviewComment as apiDeleteReviewComment,
   fetchCommitDiffFiles,
   fetchCompareDiffFiles,
+  fetchFileCommitHistory,
   fetchPRHeadPulse,
   fetchPullRequest,
   mergePullRequest,
@@ -44,6 +45,7 @@ import type {
   DiffSide,
   DraftComment,
   PRFile,
+  PRFileCommit,
   PRIssueComment,
   PRMergeMethod,
   PullRequestData,
@@ -100,6 +102,11 @@ export const useReviewStore = defineStore('review', () => {
   const customOrderPaths = ref<string[]>([])
   const showLoaderModal = ref(false)
   const showFinishModal = ref(false)
+  /** PR commits that touched each file path, loaded lazily per tour step. */
+  const fileCommits = ref<Record<string, PRFileCommit[]>>({})
+  const fileCommitsLoading = ref<Set<string>>(new Set())
+  const fileCommitsError = ref<string | null>(null)
+  let fileCommitsHeadOid: string | null = null
 
   const prKey = computed(() =>
     pr.value ? `${pr.value.owner}/${pr.value.repo}#${pr.value.number}` : '',
@@ -598,6 +605,78 @@ export const useReviewStore = defineStore('review', () => {
     if (activePath) {
       const idx = tourSteps.value.findIndex((s) => s.file.path === activePath)
       if (idx >= 0) currentStepIndex.value = idx
+    }
+  }
+
+  /** Files after the current step whose commit history is loaded along with it. */
+  const FILE_COMMITS_PREFETCH = 8
+
+  function resetFileCommitsIfStale(): void {
+    const headOid = pr.value?.headRefOid ?? null
+    if (headOid === fileCommitsHeadOid) return
+    fileCommitsHeadOid = headOid
+    fileCommits.value = {}
+    fileCommitsLoading.value = new Set()
+    fileCommitsError.value = null
+  }
+
+  /**
+   * Ensures the PR commits touching the file at `index` (and a few files after
+   * it in tour order) are loaded. Results are cached per PR head commit.
+   */
+  async function ensureFileCommitsForStep(index: number = currentStepIndex.value): Promise<void> {
+    if (!pr.value) return
+    resetFileCommitsIfStale()
+    const files = tourSteps.value
+      .slice(Math.max(0, index), Math.max(0, index) + 1 + FILE_COMMITS_PREFETCH)
+      .map((s) => s.file)
+      .filter((f) => !(f.path in fileCommits.value) && !fileCommitsLoading.value.has(f.path))
+    if (files.length === 0) return
+
+    if (pr.value.isMock) {
+      const next = { ...fileCommits.value }
+      for (const file of files) {
+        const oids = MOCK_FILE_COMMIT_OIDS[file.path] ?? []
+        next[file.path] = oids.flatMap((oid) => {
+          const c = pr.value?.commits.find((pc) => pc.oid === oid)
+          return c ? [{ ...c, messageBody: MOCK_COMMIT_BODIES[oid] ?? '', isMerge: false }] : []
+        })
+      }
+      fileCommits.value = next
+      return
+    }
+
+    const auth = useAuthStore()
+    if (!auth.pat) return
+
+    const { owner, repo, headRefOid } = pr.value
+    const prCommitOids = new Set(pr.value.commits.map((c) => c.oid))
+    const paths = files.map((f) => f.path)
+    fileCommitsLoading.value = new Set([...fileCommitsLoading.value, ...paths])
+    try {
+      const result = await fetchFileCommitHistory(
+        auth.pat,
+        owner,
+        repo,
+        headRefOid,
+        files.map((f) => ({ path: f.path, previousPath: f.previousPath })),
+        prCommitOids,
+      )
+      if (fileCommitsHeadOid !== headRefOid) return
+      const next = { ...fileCommits.value }
+      for (const path of paths) next[path] = result.get(path) ?? []
+      fileCommits.value = next
+      fileCommitsError.value = null
+    } catch (err) {
+      if (fileCommitsHeadOid !== headRefOid) return
+      fileCommitsError.value =
+        err instanceof Error ? err.message : 'Failed to load file commit history'
+    } finally {
+      if (fileCommitsHeadOid === headRefOid) {
+        const loading = new Set(fileCommitsLoading.value)
+        for (const path of paths) loading.delete(path)
+        fileCommitsLoading.value = loading
+      }
     }
   }
 
@@ -1209,6 +1288,10 @@ export const useReviewStore = defineStore('review', () => {
     isStepReviewed,
     toggleIgnoreWhitespace,
     setCommitFilter,
+    fileCommits,
+    fileCommitsLoading,
+    fileCommitsError,
+    ensureFileCommitsForStep,
     togglePinStep,
     toggleHideStep,
     moveStep,
