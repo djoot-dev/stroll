@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import {
-  ArrowDown,
   ArrowRight,
   ArrowRightLeft,
-  ArrowUp,
   CheckCircle2,
   ChevronsUpDown,
   ChevronRight,
@@ -19,7 +17,6 @@ import {
   Search,
   Sparkles,
   Trash2,
-  X,
 } from '@lucide/vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import {
@@ -35,6 +32,11 @@ import {
 import { isCSharpPath, loadCSharpTypeIndex, type CSharpTypeIndex } from '@/services/csharpIndex'
 import { buildDiffSegments, isPureRename, type DiffLine } from '@/services/diffParser'
 import {
+  computeCenteredRevealDelta,
+  findDiffMatches,
+  pickStartMatchIndex,
+} from '@/services/diffSearch'
+import {
   fetchFileBlobDataUrl,
   isBinaryFilePath,
   isImageFilePath,
@@ -49,6 +51,7 @@ import { useSettingsStore } from '@/stores/settings'
 import type { DiffSide, DraftComment, ReviewThread, TourStep } from '@/types/pr'
 import CodeHoverPopover from './CodeHoverPopover.vue'
 import CommentComposer from './CommentComposer.vue'
+import DiffSearchPalette from './DiffSearchPalette.vue'
 import MarkdownContent from './MarkdownContent.vue'
 import ReferencedContextCard from './ReferencedContextCard.vue'
 import ReviewThreadCard from './ReviewThreadCard.vue'
@@ -342,60 +345,225 @@ const segments = computed(() =>
   buildDiffSegments(props.step.file, { ignoreWhitespace: review.ignoreWhitespace }),
 )
 
+// ── Find-in-file palette ────────────────────────────────────────────────────
+// Searches every line of the file (collapsed gaps included). Opening it never
+// moves the page: the first match is the one nearest the reader's position,
+// and the diff only scrolls when the active match is off-screen.
+const diffSurfaceRef = ref<HTMLElement | null>(null)
+const searchPaletteRef = ref<InstanceType<typeof DiffSearchPalette> | null>(null)
 const searchOpen = ref(false)
 const searchQuery = ref('')
 const activeMatchIdx = ref(0)
-const searchInputRef = ref<HTMLInputElement | null>(null)
+const lingerMatchKey = ref<string | null>(null)
+let lingerTimer: ReturnType<typeof setTimeout> | null = null
 
-const searchMatches = computed<string[]>(() => {
-  const q = searchQuery.value.trim().toLowerCase()
-  if (!q) return []
-  const keys: string[] = []
-  for (const seg of segments.value) {
-    if (seg.kind === 'gap' && !expandedGaps.value.has(seg.id)) continue
-    for (const line of seg.lines) {
-      if (line.content.toLowerCase().includes(q)) {
-        keys.push(line.key)
-      }
-    }
-  }
-  return keys
+interface SearchSession {
+  scroller: HTMLElement
+  scrollTop: number
+  anchorLineIdx: number
+  expandedGaps: Set<string>
+  generatedExpanded: boolean
+  markdownPreview: boolean
+  svgSource: boolean
+}
+let searchSession: SearchSession | null = null
+
+const allDiffLines = computed<DiffLine[]>(() => segments.value.flatMap((seg) => seg.lines))
+
+const lineIndexByKey = computed(() => {
+  const map = new Map<string, number>()
+  allDiffLines.value.forEach((line, idx) => map.set(line.key, idx))
+  return map
 })
 
-const searchMatchSet = computed(() => new Set(searchMatches.value))
-const activeMatchKey = computed(() => searchMatches.value[activeMatchIdx.value] ?? null)
+const gapIdByLineKey = computed(() => {
+  const map = new Map<string, string>()
+  for (const seg of segments.value) {
+    if (seg.kind !== 'gap') continue
+    for (const line of seg.lines) map.set(line.key, seg.id)
+  }
+  return map
+})
 
-function scrollToMatch(key: string | null) {
-  if (!key) return
-  nextTick(() => {
-    const el = document.querySelector(`[data-diff-line-key="${CSS.escape(key)}"]`)
-    el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+const searchMatches = computed(() =>
+  searchOpen.value ? findDiffMatches(allDiffLines.value, searchQuery.value) : [],
+)
+const searchMatchSet = computed(() => new Set(searchMatches.value.map((m) => m.line.key)))
+const activeMatchKey = computed(
+  () => searchMatches.value[activeMatchIdx.value]?.line.key ?? lingerMatchKey.value,
+)
+
+function getScrollParent(el: HTMLElement | null): HTMLElement {
+  let node = el?.parentElement ?? null
+  while (node) {
+    const { overflowY } = getComputedStyle(node)
+    if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) {
+      return node
+    }
+    node = node.parentElement
+  }
+  return (document.scrollingElement as HTMLElement | null) ?? document.documentElement
+}
+
+function scrollerBounds(scroller: HTMLElement) {
+  if (scroller === document.scrollingElement) return { top: 0, bottom: window.innerHeight }
+  const rect = scroller.getBoundingClientRect()
+  return { top: rect.top, bottom: rect.bottom }
+}
+
+function findLineRow(key: string): HTMLElement | null {
+  return (
+    diffSurfaceRef.value?.querySelector<HTMLElement>(`[data-diff-line-key="${CSS.escape(key)}"]`) ??
+    null
+  )
+}
+
+/** Index (in display order) of the first line row visible at the top of the viewport. */
+function findAnchorLineIdx(scroller: HTMLElement): number {
+  const rows = diffSurfaceRef.value?.querySelectorAll<HTMLElement>('[data-diff-line-key]') ?? []
+  const { top } = scrollerBounds(scroller)
+  for (const row of rows) {
+    if (row.getBoundingClientRect().bottom > top) {
+      return lineIndexByKey.value.get(row.dataset.diffLineKey ?? '') ?? 0
+    }
+  }
+  // Scrolled past every row (or nothing rendered): wrap to the start.
+  return rows.length > 0 ? Number.POSITIVE_INFINITY : 0
+}
+
+/** Switch views / unfold the gap needed for a line to be rendered as a diff row. */
+function ensureLineRendered(key: string) {
+  if (isCollapsedGenerated.value) isGeneratedExpanded.value = true
+  if (showMarkdownPreview.value) showMarkdownPreview.value = false
+  if (isSvgFile.value && !showSvgSource.value) showSvgSource.value = true
+  const gapId = gapIdByLineKey.value.get(key)
+  if (gapId && !expandedGaps.value.has(gapId)) {
+    expandedGaps.value = new Set([...expandedGaps.value, gapId])
+  }
+}
+
+async function revealActiveMatch() {
+  const key = activeMatchKey.value
+  if (!key || !searchSession) return
+  ensureLineRendered(key)
+  await nextTick()
+  const row = findLineRow(key)
+  if (!row) return
+  const bounds = scrollerBounds(searchSession.scroller)
+  const paletteBottom =
+    document.querySelector('[data-diff-search-palette]')?.getBoundingClientRect().bottom ?? bounds.top
+  let visibleTop = Math.max(bounds.top, paletteBottom) + 12
+  let visibleBottom = bounds.bottom - 12
+  if (visibleBottom - visibleTop < 60) {
+    visibleTop = bounds.top
+    visibleBottom = bounds.bottom
+  }
+  const rect = row.getBoundingClientRect()
+  const delta = computeCenteredRevealDelta({
+    itemTop: rect.top,
+    itemBottom: rect.bottom,
+    visibleTop,
+    visibleBottom,
   })
+  if (delta !== 0) searchSession.scroller.scrollBy({ top: delta, behavior: 'smooth' })
 }
 
 watch(searchMatches, (matches) => {
-  activeMatchIdx.value = 0
-  if (matches.length > 0) scrollToMatch(matches[0])
+  if (!searchSession || matches.length === 0) {
+    activeMatchIdx.value = 0
+    return
+  }
+  activeMatchIdx.value = pickStartMatchIndex(
+    matches.map((m) => lineIndexByKey.value.get(m.line.key) ?? 0),
+    searchSession.anchorLineIdx,
+  )
 })
 
-function stepSearchMatch(delta: -1 | 1) {
-  if (searchMatches.value.length === 0) return
-  activeMatchIdx.value =
-    (activeMatchIdx.value + delta + searchMatches.value.length) % searchMatches.value.length
-  scrollToMatch(activeMatchKey.value)
+watch(activeMatchKey, (key) => {
+  if (searchOpen.value && key) void revealActiveMatch()
+})
+
+function selectedTextInDiff(): string {
+  const sel = window.getSelection()
+  const text = sel?.toString().trim() ?? ''
+  if (!text || text.includes('\n') || text.length > 200) return ''
+  const anchor = sel?.anchorNode ?? null
+  return anchor && diffSurfaceRef.value?.contains(anchor) ? text : ''
 }
 
-async function openDiffSearch() {
+function openDiffSearch() {
+  if (searchOpen.value) {
+    searchPaletteRef.value?.focusInput()
+    return
+  }
+  const prefill = selectedTextInDiff()
+  if (prefill) searchQuery.value = prefill
+
+  const scroller = getScrollParent(diffSurfaceRef.value)
+  searchSession = {
+    scroller,
+    scrollTop: scroller.scrollTop,
+    anchorLineIdx: findAnchorLineIdx(scroller),
+    expandedGaps: new Set(expandedGaps.value),
+    generatedExpanded: isGeneratedExpanded.value,
+    markdownPreview: showMarkdownPreview.value,
+    svgSource: showSvgSource.value,
+  }
+  if (lingerTimer) clearTimeout(lingerTimer)
+  lingerMatchKey.value = null
   searchOpen.value = true
+}
+
+/**
+ * confirm: stay at the active match (briefly keep it highlighted).
+ * dismiss: close where you are.
+ * cancel: undo every unfold/view switch and return to the original scroll position.
+ */
+async function closeDiffSearch(mode: 'confirm' | 'dismiss' | 'cancel') {
+  const session = searchSession
+  if (!session) return
+  const keepKey = mode === 'cancel' ? null : (activeMatchKey.value ?? null)
+  const keepGap = keepKey ? gapIdByLineKey.value.get(keepKey) : undefined
+  const keepRow = keepKey ? findLineRow(keepKey) : null
+  const keepTopBefore = keepRow?.getBoundingClientRect().top ?? null
+
+  searchOpen.value = false
+  searchSession = null
+
+  // Fold back the gaps that were only opened to preview other matches.
+  const gaps = new Set(session.expandedGaps)
+  if (keepGap) gaps.add(keepGap)
+  expandedGaps.value = gaps
+  if (!keepKey) {
+    isGeneratedExpanded.value = session.generatedExpanded
+    showMarkdownPreview.value = session.markdownPreview
+    showSvgSource.value = session.svgSource
+  }
+
   await nextTick()
-  searchInputRef.value?.focus()
-  searchInputRef.value?.select()
+  if (mode === 'cancel') {
+    session.scroller.scrollTo({ top: session.scrollTop })
+    return
+  }
+  // Collapsing gaps above the kept match shifts it; compensate so it stays put.
+  if (keepKey && keepTopBefore !== null) {
+    const keepTopAfter = findLineRow(keepKey)?.getBoundingClientRect().top
+    if (keepTopAfter !== undefined && keepTopAfter !== keepTopBefore) {
+      session.scroller.scrollBy({ top: keepTopAfter - keepTopBefore })
+    }
+  }
+  if (mode === 'confirm' && keepKey) {
+    lingerMatchKey.value = keepKey
+    lingerTimer = setTimeout(() => {
+      lingerMatchKey.value = null
+    }, 1500)
+  }
 }
 
 function handleDiffKeydown(e: KeyboardEvent) {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
     e.preventDefault()
-    void openDiffSearch()
+    openDiffSearch()
   }
 }
 
@@ -405,6 +573,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleDiffKeydown)
+  if (lingerTimer) clearTimeout(lingerTimer)
 })
 
 const showImagePreview = computed(
@@ -812,14 +981,15 @@ function statusBadgeClass(status: string): string {
 
           <button
             type="button"
-            title="Search in diff (Cmd+F)"
+            title="Find in file (Cmd+F)"
+            data-diff-search-toggle
             class="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors"
             :class="
               searchOpen
                 ? 'border-terra-border bg-terra-soft text-terra-text'
                 : 'border-border bg-canvas text-ink-muted hover:bg-canvas-elevated hover:text-ink'
             "
-            @click="searchOpen ? (searchOpen = false) : openDiffSearch()"
+            @click="searchOpen ? closeDiffSearch('dismiss') : openDiffSearch()"
           >
             <Search class="h-3 w-3" />
           </button>
@@ -935,51 +1105,22 @@ function statusBadgeClass(status: string): string {
     </div>
 
     <!-- Isolated Diff Surface -->
-    <div class="stroll-card relative overflow-hidden rounded-2xl border border-border bg-code">
-      <!-- Floating In-Diff Search Bar -->
-      <div
-        v-if="searchOpen"
-        class="animate-pop-in sticky top-2 z-20 mx-3 mt-2 flex items-center gap-2 rounded-xl border border-terra-border bg-canvas-subtle px-3 py-1.5 shadow-lg"
-      >
-        <Search class="h-3.5 w-3.5 shrink-0 text-ink-muted" />
-        <input
-          ref="searchInputRef"
-          v-model="searchQuery"
-          type="text"
-          placeholder="Find in diff…"
-          class="min-w-0 flex-1 bg-transparent text-xs text-ink placeholder-ink-faint focus:outline-none"
-          @keydown.enter.exact.prevent="stepSearchMatch(1)"
-          @keydown.shift.enter.prevent="stepSearchMatch(-1)"
-          @keydown.esc.prevent="searchOpen = false; searchQuery = ''"
-        />
-        <span v-if="searchQuery.trim()" class="font-mono text-[10.5px] text-ink-muted">
-          {{ searchMatches.length > 0 ? `${activeMatchIdx + 1}/${searchMatches.length}` : '0/0' }}
-        </span>
-        <button
-          type="button"
-          class="rounded p-0.5 text-ink-muted hover:bg-canvas-elevated hover:text-ink"
-          title="Previous match"
-          @click="stepSearchMatch(-1)"
-        >
-          <ArrowUp class="h-3.5 w-3.5" />
-        </button>
-        <button
-          type="button"
-          class="rounded p-0.5 text-ink-muted hover:bg-canvas-elevated hover:text-ink"
-          title="Next match"
-          @click="stepSearchMatch(1)"
-        >
-          <ArrowDown class="h-3.5 w-3.5" />
-        </button>
-        <button
-          type="button"
-          class="rounded p-0.5 text-ink-muted hover:bg-canvas-elevated hover:text-ink"
-          title="Close search"
-          @click="searchOpen = false; searchQuery = ''"
-        >
-          <X class="h-3.5 w-3.5" />
-        </button>
-      </div>
+    <!-- Find-in-file palette (teleported, floats over the diff) -->
+    <DiffSearchPalette
+      ref="searchPaletteRef"
+      v-model:query="searchQuery"
+      v-model:active-index="activeMatchIdx"
+      :open="searchOpen"
+      :matches="searchMatches"
+      @confirm="closeDiffSearch('confirm')"
+      @dismiss="closeDiffSearch('dismiss')"
+      @cancel="closeDiffSearch('cancel')"
+    />
+
+    <div
+      ref="diffSurfaceRef"
+      class="stroll-card relative overflow-hidden rounded-2xl border border-border bg-code"
+    >
       <!-- Collapsed Generated / Lockfile Banner -->
       <div
         v-if="isCollapsedGenerated"
@@ -1321,12 +1462,18 @@ function statusBadgeClass(status: string): string {
               </div>
               <template v-for="(line, lIdx) in seg.lines" :key="line.key">
                 <div
+                  :data-diff-line-key="line.key"
                   class="group flex cursor-pointer items-stretch border-l-2 border-l-transparent"
-                  :class="
+                  :class="[
                     selectedRange.keys.has(line.key)
                       ? selectionRowClass(line.key)
-                      : 'hover:bg-diff-hover'
-                  "
+                      : 'hover:bg-diff-hover',
+                    activeMatchKey === line.key
+                      ? 'ring-1 ring-inset ring-terra bg-terra-soft/30'
+                      : searchMatchSet.has(line.key)
+                        ? 'bg-ochre-soft/20'
+                        : '',
+                  ]"
                   @mousedown.left="startLineDrag(line)"
                   @mouseenter="handleLineMouseEnter(line, seg.lines, lIdx)"
                 >
