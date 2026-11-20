@@ -2148,6 +2148,120 @@ async function restJsonRequest<T>(
   return (await res.json()) as T
 }
 
+export interface ReviewerCandidate {
+  login: string
+  name: string | null
+  avatarUrl: string
+  /** True when GitHub suggested this person based on the PR's changed files. */
+  suggested: boolean
+}
+
+interface RawReviewerUser {
+  login: string
+  name?: string | null
+  avatarUrl?: string | null
+}
+
+/**
+ * Merges GitHub's suggested reviewers with assignable-user search results,
+ * dropping duplicates, the PR author and anyone already requested. When a
+ * query is given, only logins/names containing it are kept, with prefix
+ * matches ranked first.
+ */
+export function mergeReviewerCandidates(
+  suggested: RawReviewerUser[],
+  assignable: RawReviewerUser[],
+  options: { query?: string; exclude?: string[]; limit?: number } = {},
+): ReviewerCandidate[] {
+  const query = options.query?.trim().replace(/^@/, '').toLowerCase() ?? ''
+  const exclude = new Set((options.exclude ?? []).map((l) => l.toLowerCase()))
+  const limit = options.limit ?? 8
+  const seen = new Set<string>()
+  const out: ReviewerCandidate[] = []
+
+  const push = (u: RawReviewerUser, isSuggested: boolean) => {
+    if (!u?.login) return
+    const key = u.login.toLowerCase()
+    if (seen.has(key) || exclude.has(key)) return
+    if (query) {
+      const name = (u.name ?? '').toLowerCase()
+      if (!key.includes(query) && !name.includes(query)) return
+    }
+    seen.add(key)
+    out.push({
+      login: u.login,
+      name: u.name ?? null,
+      avatarUrl: u.avatarUrl ?? '',
+      suggested: isSuggested,
+    })
+  }
+
+  for (const u of suggested) push(u, true)
+  for (const u of assignable) push(u, false)
+
+  if (query) {
+    const rank = (c: ReviewerCandidate) => {
+      const login = c.login.toLowerCase()
+      const name = (c.name ?? '').toLowerCase()
+      if (login === query) return 0
+      if (login.startsWith(query)) return 1
+      if (name.split(/\s+/).some((w) => w.startsWith(query))) return 2
+      return 3
+    }
+    // Array.prototype.sort is stable, so suggested reviewers stay ahead within a rank.
+    out.sort((a, b) => rank(a) - rank(b))
+  }
+
+  return out.slice(0, limit)
+}
+
+/**
+ * Looks up reviewer candidates for the reviewer picker. With an empty query it
+ * returns GitHub's suggested reviewers followed by assignable users; with a
+ * query it searches the repository's assignable users by login and name.
+ */
+export async function fetchReviewerCandidates(
+  pat: string,
+  owner: string,
+  repo: string,
+  number: number,
+  query: string,
+  exclude: string[] = [],
+): Promise<ReviewerCandidate[]> {
+  const q = query.trim().replace(/^@/, '')
+  interface Resp {
+    repository: {
+      pullRequest?: {
+        suggestedReviewers: Array<{ reviewer: RawReviewerUser | null } | null>
+      } | null
+      assignableUsers: { nodes: Array<RawReviewerUser | null> }
+    } | null
+  }
+  const data = await graphql<Resp>(
+    pat,
+    `query ReviewerCandidates($owner: String!, $repo: String!, $number: Int!, $query: String, $withSuggestions: Boolean!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $number) @include(if: $withSuggestions) {
+          suggestedReviewers {
+            reviewer { login name avatarUrl }
+          }
+        }
+        assignableUsers(query: $query, first: 20) {
+          nodes { login name avatarUrl }
+        }
+      }
+    }`,
+    { owner, repo, number, query: q || null, withSuggestions: !q },
+  )
+  const suggested = (data.repository?.pullRequest?.suggestedReviewers ?? [])
+    .map((s) => s?.reviewer)
+    .filter((u): u is RawReviewerUser => Boolean(u?.login))
+  const assignable = (data.repository?.assignableUsers?.nodes ?? []).filter(
+    (u): u is RawReviewerUser => Boolean(u?.login),
+  )
+  return mergeReviewerCandidates(suggested, assignable, { query: q, exclude })
+}
+
 export async function requestPullRequestReviewers(
   pat: string,
   owner: string,

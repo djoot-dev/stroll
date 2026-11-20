@@ -852,6 +852,30 @@ const delayMs = computeBackoffMs(attempt, {
 }
 
 /**
+ * Offline stand-ins for GitHub's reviewer lookup: `suggested` mirrors
+ * `pullRequest.suggestedReviewers`, `assignable` mirrors `repository.assignableUsers`.
+ */
+export const MOCK_REVIEWER_CANDIDATES: {
+  suggested: Array<{ login: string; name: string; avatarUrl: string }>
+  assignable: Array<{ login: string; name: string; avatarUrl: string }>
+} = {
+  suggested: [
+    { login: 'marcus-chen', name: 'Marcus Chen', avatarUrl: 'https://avatars.githubusercontent.com/u/2?v=4' },
+    { login: 'samira-okafor', name: 'Samira Okafor', avatarUrl: 'https://avatars.githubusercontent.com/u/4?v=4' },
+  ],
+  assignable: [
+    { login: 'elena-rostova', name: 'Elena Rostova', avatarUrl: 'https://avatars.githubusercontent.com/u/1?v=4' },
+    { login: 'marcus-chen', name: 'Marcus Chen', avatarUrl: 'https://avatars.githubusercontent.com/u/2?v=4' },
+    { login: 'priya-nair', name: 'Priya Nair', avatarUrl: 'https://avatars.githubusercontent.com/u/3?v=4' },
+    { login: 'samira-okafor', name: 'Samira Okafor', avatarUrl: 'https://avatars.githubusercontent.com/u/4?v=4' },
+    { login: 'jonas-berg', name: 'Jonas Berg', avatarUrl: '' },
+    { login: 'ana-lima', name: 'Ana Lima', avatarUrl: '' },
+    { login: 'kenji-watanabe', name: 'Kenji Watanabe', avatarUrl: '' },
+    { login: 'tomas-novak', name: 'Tomáš Novák', avatarUrl: '' },
+  ],
+}
+
+/**
  * Which mock commits touched each mock file, with full commit messages, so the
  * per-file commit panel can be demoed offline. Newest commit first.
  */

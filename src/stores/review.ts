@@ -1,6 +1,11 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { MOCK_COMMIT_BODIES, MOCK_FILE_COMMIT_OIDS, MOCK_PR } from '@/data/mockPR'
+import {
+  MOCK_COMMIT_BODIES,
+  MOCK_FILE_COMMIT_OIDS,
+  MOCK_PR,
+  MOCK_REVIEWER_CANDIDATES,
+} from '@/data/mockPR'
 import {
   addPRComment,
   addPullRequestLabels,
@@ -15,7 +20,9 @@ import {
   fetchFileCommitHistory,
   fetchPRHeadPulse,
   fetchPullRequest,
+  fetchReviewerCandidates,
   mergePullRequest,
+  mergeReviewerCandidates,
   parsePRUrl,
   removePullRequestLabel,
   removePullRequestReviewers,
@@ -31,7 +38,7 @@ import {
   updatePullRequestBody,
   updateReviewComment as apiUpdateReviewComment,
 } from '@/services/github'
-import type { PRHeadPulse } from '@/services/github'
+import type { PRHeadPulse, ReviewerCandidate } from '@/services/github'
 import {
   baselineFromPR,
   baselineFromPulse,
@@ -1194,6 +1201,29 @@ export const useReviewStore = defineStore('review', () => {
     pr.value = { ...pr.value, isDraft: nextDraft }
   }
 
+  /**
+   * Reviewer autocomplete lookup. Excludes the PR author and users who are
+   * already requested; falls back to mock candidates in offline demo mode.
+   */
+  async function searchReviewerCandidates(query: string): Promise<ReviewerCandidate[]> {
+    if (!pr.value) return []
+    const exclude = [
+      pr.value.author.login,
+      ...pr.value.requestedReviewers.filter((r) => r.type === 'user').map((r) => r.login),
+    ]
+    if (pr.value.isMock) {
+      return mergeReviewerCandidates(
+        MOCK_REVIEWER_CANDIDATES.suggested,
+        MOCK_REVIEWER_CANDIDATES.assignable,
+        { query, exclude },
+      )
+    }
+    const auth = useAuthStore()
+    if (!auth.pat) return []
+    const { owner, repo, number } = pr.value
+    return fetchReviewerCandidates(auth.pat, owner, repo, number, query, exclude)
+  }
+
   async function addReviewer(login: string): Promise<void> {
     const clean = login.trim().replace(/^@/, '')
     if (!pr.value || !clean) return
@@ -1347,6 +1377,7 @@ export const useReviewStore = defineStore('review', () => {
     setPRDraft,
     editPRDescription,
     addReviewer,
+    searchReviewerCandidates,
     removeReviewer,
     addLabels,
     removeLabel,
