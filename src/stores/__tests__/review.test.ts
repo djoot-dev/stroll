@@ -2,6 +2,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MOCK_PR } from '@/data/mockPR'
 import { computeFileFingerprint, loadViewedFiles } from '@/services/storage'
+import type { PRHeadPulse } from '@/services/github'
 import type { PullRequestData } from '@/types/pr'
 import { useAuthStore } from '../auth'
 import { useReviewStore } from '../review'
@@ -24,6 +25,7 @@ const createPendingReviewMock = vi.fn(async () => 'review_1')
 const submitReviewMock = vi.fn(async () => undefined)
 const addReviewThreadMock = vi.fn(async () => 'thread_line')
 const addFileReviewThreadMock = vi.fn(async () => 'thread_file')
+const fetchPRHeadPulseMock = vi.fn<() => Promise<PRHeadPulse | null>>()
 
 vi.mock('@/services/github', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/github')>()
@@ -46,6 +48,7 @@ vi.mock('@/services/github', async (importOriginal) => {
     submitReview: (...args: unknown[]) => submitReviewMock(...(args as [])),
     addReviewThread: (...args: unknown[]) => addReviewThreadMock(...(args as [])),
     addFileReviewThread: (...args: unknown[]) => addFileReviewThreadMock(...(args as [])),
+    fetchPRHeadPulse: () => fetchPRHeadPulseMock(),
   }
 })
 
@@ -516,5 +519,86 @@ describe('useReviewStore file-level comments', () => {
     )
     expect(addReviewThreadMock).toHaveBeenCalledTimes(1)
     expect(store.draftComments).toHaveLength(0)
+  })
+})
+
+describe('useReviewStore remote update banner', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.stubGlobal('localStorage', createMemoryStorage())
+    fetchPullRequestMock.mockReset()
+    fetchPRHeadPulseMock.mockReset()
+  })
+
+  async function loadLivePR() {
+    const pr = makePR({ owner: 'acme', repo: 'stroll', number: 5 })
+    fetchPullRequestMock.mockResolvedValueOnce(pr)
+    useAuthStore().pat = 'ghp_test_token'
+    const store = useReviewStore()
+    await store.loadPRByRepo('acme', 'stroll', 5)
+    return { store, pr }
+  }
+
+  function pulseFor(pr: PullRequestData, overrides: Partial<PRHeadPulse> = {}): PRHeadPulse {
+    return {
+      headRefOid: pr.headRefOid,
+      updatedAt: pr.updatedAt,
+      // Remote totals exceed the loaded (filtered/capped) lists, e.g. outdated threads
+      commentCount: pr.issueComments.length + 60,
+      threadCount: pr.threads.length + 3,
+      ...overrides,
+    }
+  }
+
+  it('does not show the banner when remote totals exceed loaded lists but nothing changed', async () => {
+    const { store, pr } = await loadLivePR()
+    fetchPRHeadPulseMock.mockResolvedValue(pulseFor(pr))
+
+    await store.checkForRemotePRUpdates()
+    await store.checkForRemotePRUpdates()
+
+    expect(store.prHasRemoteUpdates).toBe(false)
+  })
+
+  it('shows the banner for new commits', async () => {
+    const { store, pr } = await loadLivePR()
+    fetchPRHeadPulseMock.mockResolvedValue(pulseFor(pr, { headRefOid: 'newsha' }))
+
+    await store.checkForRemotePRUpdates()
+
+    expect(store.prHasRemoteUpdates).toBe(true)
+    expect(store.remoteUpdateSummary).toMatch(/New commits/)
+  })
+
+  it('shows the banner when a comment arrives after the first poll', async () => {
+    const { store, pr } = await loadLivePR()
+    const base = pulseFor(pr)
+    fetchPRHeadPulseMock.mockResolvedValueOnce(base)
+    await store.checkForRemotePRUpdates()
+    expect(store.prHasRemoteUpdates).toBe(false)
+
+    fetchPRHeadPulseMock.mockResolvedValueOnce({ ...base, commentCount: base.commentCount + 1 })
+    await store.checkForRemotePRUpdates()
+
+    expect(store.prHasRemoteUpdates).toBe(true)
+    expect(store.remoteUpdateSummary).toMatch(/comments or activity/)
+  })
+
+  it('keeps the banner dismissed until something new happens', async () => {
+    const { store, pr } = await loadLivePR()
+    const later = new Date(Date.parse(pr.updatedAt) + 60_000).toISOString()
+    const changed = pulseFor(pr, { updatedAt: later })
+    fetchPRHeadPulseMock.mockResolvedValue(changed)
+
+    await store.checkForRemotePRUpdates()
+    expect(store.prHasRemoteUpdates).toBe(true)
+
+    store.dismissRemoteUpdates()
+    await store.checkForRemotePRUpdates()
+    expect(store.prHasRemoteUpdates).toBe(false)
+
+    fetchPRHeadPulseMock.mockResolvedValue({ ...changed, threadCount: changed.threadCount + 1 })
+    await store.checkForRemotePRUpdates()
+    expect(store.prHasRemoteUpdates).toBe(true)
   })
 })
