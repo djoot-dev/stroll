@@ -13,6 +13,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_runtime_info,
             commands::ast::resolve_repo_symbol,
+            commands::checkout::git_checkout_pr,
+            commands::checkout::git_local_status,
             commands::csharp_index::index_csharp_types,
             commands::gh::get_gh_auth_token,
             commands::git::git_blame_line,

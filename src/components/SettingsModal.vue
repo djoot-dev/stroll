@@ -149,7 +149,12 @@ watch(
       notificationPermissionError.value = null
       pathValidationError.value = null
       detectedOwnerRepo.value = null
-      if (!repoInput.value && activePRRepo.value) {
+      const prefillRepo = settings.linkRepoPrefill
+      if (prefillRepo) {
+        repoInput.value = prefillRepo
+        pathInput.value = review.repoPaths[prefillRepo] ?? ''
+        settings.linkRepoPrefill = null
+      } else if (!repoInput.value && activePRRepo.value) {
         repoInput.value = activePRRepo.value
         pathInput.value = review.repoPaths[activePRRepo.value] ?? ''
       }
