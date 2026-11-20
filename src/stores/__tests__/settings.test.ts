@@ -46,6 +46,7 @@ describe('useSettingsStore', () => {
     expect(store.inboxAutoRefreshSeconds).toBe(60)
     expect(store.inboxNotificationsEnabled).toBe(false)
     expect(store.githubHost).toBe('github.com')
+    expect(store.historyOrder).toBe('newest')
   })
 
   it('persists updated settings and reloads them in a fresh store', async () => {
@@ -63,6 +64,7 @@ describe('useSettingsStore', () => {
     await store.setInboxAutoRefreshSeconds(300)
     await store.setInboxNotificationsEnabled(true)
     await store.setGithubHost('https://GHE.Company.com/')
+    await store.setHistoryOrder('oldest')
 
     setActivePinia(createPinia())
     const reloaded = useSettingsStore()
@@ -80,6 +82,7 @@ describe('useSettingsStore', () => {
     expect(reloaded.inboxAutoRefreshSeconds).toBe(300)
     expect(reloaded.inboxNotificationsEnabled).toBe(true)
     expect(reloaded.githubHost).toBe('ghe.company.com')
+    expect(reloaded.historyOrder).toBe('oldest')
   })
 
   it('opens to a specific section and resets preferences to defaults', async () => {
@@ -97,6 +100,8 @@ describe('useSettingsStore', () => {
     await store.setWrapLines(true)
     await store.setInboxNotificationsEnabled(true)
     await store.setGithubHost('ghe.acme.internal')
+    await store.toggleHistoryOrder()
+    expect(store.historyOrder).toBe('oldest')
     await store.resetToDefaults()
 
     expect(store.theme).toBe(DEFAULT_APP_SETTINGS.theme)
@@ -105,6 +110,7 @@ describe('useSettingsStore', () => {
     expect(store.wrapLines).toBe(DEFAULT_APP_SETTINGS.wrapLines)
     expect(store.inboxNotificationsEnabled).toBe(DEFAULT_APP_SETTINGS.inboxNotificationsEnabled)
     expect(store.githubHost).toBe(DEFAULT_APP_SETTINGS.githubHost)
+    expect(store.historyOrder).toBe(DEFAULT_APP_SETTINGS.historyOrder)
 
     store.closeSettings()
     expect(store.isOpen).toBe(false)

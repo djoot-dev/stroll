@@ -133,6 +133,9 @@ export async function saveDraftComments(prKey: string, drafts: DraftComment[]): 
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 
+/** Display order for the overview's commit and conversation history. */
+export type HistoryOrder = 'newest' | 'oldest'
+
 export interface PersistedAppSettings {
   theme: ThemeMode
   autoAdvanceOnReview: boolean
@@ -145,6 +148,7 @@ export interface PersistedAppSettings {
   inboxAutoRefreshSeconds: number
   inboxNotificationsEnabled: boolean
   githubHost: string
+  historyOrder: HistoryOrder
 }
 
 export async function loadAppSettings(): Promise<Partial<PersistedAppSettings>> {

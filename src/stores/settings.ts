@@ -6,12 +6,13 @@ import {
   loadTourDirection,
   saveAppSettings,
   saveTourDirection,
+  type HistoryOrder,
   type PersistedAppSettings,
   type ThemeMode,
 } from '@/services/storage'
 import type { TourDirection } from '@/types/pr'
 
-export type { ThemeMode }
+export type { HistoryOrder, ThemeMode }
 
 export type SettingsSection =
   | 'general'
@@ -48,6 +49,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   inboxAutoRefreshSeconds: 60,
   inboxNotificationsEnabled: false,
   githubHost: 'github.com',
+  historyOrder: 'newest',
 }
 
 function getSystemPrefersDark(): boolean {
@@ -73,6 +75,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const inboxAutoRefreshSeconds = ref<number>(DEFAULT_APP_SETTINGS.inboxAutoRefreshSeconds)
   const inboxNotificationsEnabled = ref<boolean>(DEFAULT_APP_SETTINGS.inboxNotificationsEnabled)
   const githubHost = ref<string>(DEFAULT_APP_SETTINGS.githubHost)
+  const historyOrder = ref<HistoryOrder>(DEFAULT_APP_SETTINGS.historyOrder)
 
   const resolvedTheme = computed<'light' | 'dark'>(() => {
     if (theme.value === 'system') {
@@ -143,6 +146,9 @@ export const useSettingsStore = defineStore('settings', () => {
     if (typeof savedSettings.githubHost === 'string') {
       githubHost.value = normalizeGitHubHost(savedSettings.githubHost)
     }
+    if (savedSettings.historyOrder === 'newest' || savedSettings.historyOrder === 'oldest') {
+      historyOrder.value = savedSettings.historyOrder
+    }
     syncGitHubHost(githubHost.value)
     applyThemeToDom()
     initialized.value = true
@@ -163,6 +169,7 @@ export const useSettingsStore = defineStore('settings', () => {
         inboxAutoRefreshSeconds: inboxAutoRefreshSeconds.value,
         inboxNotificationsEnabled: inboxNotificationsEnabled.value,
         githubHost: githubHost.value,
+        historyOrder: historyOrder.value,
       }),
     ])
   }
@@ -252,6 +259,15 @@ export const useSettingsStore = defineStore('settings', () => {
     await persist()
   }
 
+  async function setHistoryOrder(order: HistoryOrder): Promise<void> {
+    historyOrder.value = order
+    await persist()
+  }
+
+  async function toggleHistoryOrder(): Promise<void> {
+    await setHistoryOrder(historyOrder.value === 'newest' ? 'oldest' : 'newest')
+  }
+
   async function resetToDefaults(): Promise<void> {
     theme.value = DEFAULT_APP_SETTINGS.theme
     defaultTourDirection.value = DEFAULT_APP_SETTINGS.defaultTourDirection
@@ -265,6 +281,7 @@ export const useSettingsStore = defineStore('settings', () => {
     inboxAutoRefreshSeconds.value = DEFAULT_APP_SETTINGS.inboxAutoRefreshSeconds
     inboxNotificationsEnabled.value = DEFAULT_APP_SETTINGS.inboxNotificationsEnabled
     githubHost.value = DEFAULT_APP_SETTINGS.githubHost
+    historyOrder.value = DEFAULT_APP_SETTINGS.historyOrder
     syncGitHubHost(githubHost.value)
     applyThemeToDom()
     await persist()
@@ -287,6 +304,7 @@ export const useSettingsStore = defineStore('settings', () => {
     inboxAutoRefreshSeconds,
     inboxNotificationsEnabled,
     githubHost,
+    historyOrder,
     init,
     openSettings,
     closeSettings,
@@ -303,6 +321,8 @@ export const useSettingsStore = defineStore('settings', () => {
     setInboxAutoRefreshSeconds,
     setInboxNotificationsEnabled,
     setGithubHost,
+    setHistoryOrder,
+    toggleHistoryOrder,
     resetToDefaults,
   }
 })
