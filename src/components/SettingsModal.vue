@@ -171,7 +171,7 @@ const themeOptions: Array<{
   {
     value: 'system',
     label: 'System',
-    subtitle: 'Match macOS appearance',
+    subtitle: 'Match your system appearance',
     icon: Monitor,
     swatches: ['#f7f1e5', '#0f1915', '#c86130'],
   },
