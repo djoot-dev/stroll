@@ -139,6 +139,7 @@ export interface PersistedAppSettings {
   sidebarDefaultOpen: boolean
   codeFontSize: number
   requireAltForHover: boolean
+  wrapLines: boolean
   showShortcutsBar: boolean
   inboxAutoRefreshSeconds: number
   inboxNotificationsEnabled: boolean
