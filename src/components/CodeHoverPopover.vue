@@ -16,6 +16,7 @@ import {
   DEFAULT_SNIPPET_LINES,
   hiddenSnippetLines,
   type HoverSymbolInfo,
+  type SymbolUsage,
 } from '@/services/codeContext'
 import { highlightLinesWithCodeMirror } from '@/services/highlighter'
 import type { GitBlameInfo } from '@/services/native'
@@ -36,6 +37,8 @@ const emit = defineEmits<{
   (e: 'jumpToFile', path: string): void
   /** Show up to `maxLines` lines of the declaration snippet. */
   (e: 'expandSnippet', maxLines: number): void
+  /** Pointer entered (usage) or left (null) a "Used in" entry. */
+  (e: 'usageHover', usage: SymbolUsage | null): void
 }>()
 
 const showBefore = ref(false)
@@ -184,6 +187,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  emit('usageHover', null)
   window.removeEventListener('resize', handleWindowResize)
   resizeObserver?.disconnect()
   resizeObserver = null
@@ -400,6 +404,8 @@ const hasBeforeAfter = computed(
             :key="`${u.path}:${u.line}:${uIdx}`"
             class="flex w-full items-center justify-between gap-2 rounded-md px-1.5 py-0.5 text-left font-mono text-[10.5px] text-ink-secondary hover:bg-canvas-elevated"
             @click="emit('jumpToFile', u.path)"
+            @mouseenter="emit('usageHover', u)"
+            @mouseleave="emit('usageHover', null)"
           >
             <span class="shrink-0 text-terra-text">{{ u.path.split('/').pop() }}:{{ u.line }}</span>
             <span class="truncate text-ink-faint">{{ u.preview }}</span>
