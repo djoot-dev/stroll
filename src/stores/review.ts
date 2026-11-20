@@ -810,10 +810,44 @@ export const useReviewStore = defineStore('review', () => {
   async function updateDraftComment(id: string, body: string): Promise<void> {
     if (!pr.value || !body.trim()) return
     const trimmed = body.trim()
+    const draft = draftComments.value.find((d) => d.id === id)
+    if (!draft || draft.body === trimmed) return
+
+    // A failed submit can leave drafts already pushed into the pending GitHub
+    // review; keep that copy in sync so the edit isn't lost on the next submit.
+    if (draft.syncedCommentId && !pr.value.isMock) {
+      const auth = useAuthStore()
+      if (!auth.pat) {
+        throw new Error('GitHub PAT is required to edit a pending comment.')
+      }
+      await apiUpdateReviewComment(auth.pat, draft.syncedCommentId, trimmed)
+    }
+
     draftComments.value = draftComments.value.map((d) =>
       d.id === id ? { ...d, body: trimmed } : d,
     )
     await saveDraftComments(prKey.value, draftComments.value)
+  }
+
+  /** Draft the diff viewer should scroll to and highlight once it renders. */
+  const focusedDraftId = ref<string | null>(null)
+
+  /** Closes the finish modal and navigates to a pending comment in its file. */
+  function focusDraftComment(id: string): void {
+    const draft = draftComments.value.find((d) => d.id === id)
+    if (!draft) return
+    const inTour = () => tourSteps.value.some((s) => s.file.path === draft.path)
+    if (!inTour() && commitFilter.value !== 'all') {
+      commitFilter.value = 'all'
+      filteredFiles.value = null
+    }
+    if (!inTour() && hiddenPaths.value.has(draft.path)) {
+      toggleHideStep(draft.path)
+    }
+    if (!inTour()) return
+    showFinishModal.value = false
+    focusedDraftId.value = id
+    goToFile(draft.path)
   }
 
   async function submitCompleteReview(event: ReviewEvent, summary: string): Promise<boolean> {
@@ -881,7 +915,7 @@ export const useReviewStore = defineStore('review', () => {
       // Push all unsynced local draft comments into the pending GitHub review
       for (const draft of draftComments.value) {
         if (!draft.syncedThreadId) {
-          const threadId =
+          const added =
             draft.subjectType === 'FILE'
               ? await addFileReviewThread(auth.pat, pr.value.id, reviewId, draft.path, draft.body)
               : await addReviewThread(
@@ -895,7 +929,8 @@ export const useReviewStore = defineStore('review', () => {
                   draft.startLine,
                   draft.startSide,
                 )
-          draft.syncedThreadId = threadId
+          draft.syncedThreadId = added.threadId
+          draft.syncedCommentId = added.commentId
         }
       }
 
@@ -1363,6 +1398,8 @@ export const useReviewStore = defineStore('review', () => {
     addFileDraftComment,
     updateDraftComment,
     deleteDraftComment,
+    focusedDraftId,
+    focusDraftComment,
     replyToThread,
     toggleThreadResolved,
     postPRComment,

@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { AlertTriangle, Check, Loader2, MessageSquare, Send, Trash2, X } from '@lucide/vue'
+import {
+  AlertTriangle,
+  Check,
+  CornerDownRight,
+  Loader2,
+  MessageSquare,
+  Send,
+  Trash2,
+  X,
+} from '@lucide/vue'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore } from '@/stores/settings'
@@ -107,12 +116,24 @@ onBeforeUnmount(() => {
                   </div>
                   <p class="mt-0.5 line-clamp-2 break-words text-ink">{{ draft.body }}</p>
                 </div>
-                <button
-                  class="shrink-0 text-ink-muted hover:text-crimson-text"
-                  @click="review.deleteDraftComment(draft.id)"
-                >
-                  <Trash2 class="h-3.5 w-3.5" />
-                </button>
+                <div class="flex shrink-0 items-center gap-2">
+                  <button
+                    class="text-ink-muted hover:text-ink"
+                    title="Go to comment in file"
+                    aria-label="Go to comment in file"
+                    @click="review.focusDraftComment(draft.id)"
+                  >
+                    <CornerDownRight class="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    class="text-ink-muted hover:text-crimson-text"
+                    title="Delete pending comment"
+                    aria-label="Delete pending comment"
+                    @click="review.deleteDraftComment(draft.id)"
+                  >
+                    <Trash2 class="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
