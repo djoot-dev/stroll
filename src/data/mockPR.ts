@@ -360,6 +360,7 @@ const delayMs = computeBackoffMs(attempt, {
   },
   baseRefName: 'main',
   headRefName: 'feat/webhook-rate-limiter',
+  isCrossRepository: false,
   baseRefOid: 'a1b2c3d',
   headRefOid: 'e4f5a6b',
   isMock: true,

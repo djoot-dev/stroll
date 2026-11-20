@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { FileCode2, MessageSquare, Search, Sparkles } from '@lucide/vue'
+import { FileCode2, GitBranch, MessageSquare, Search, Sparkles } from '@lucide/vue'
 import { computed, nextTick, ref, watch } from 'vue'
 import { buildPRSymbolIndex } from '@/services/codeContext'
+import { localBranchForPR } from '@/services/localCheckout'
+import { useCheckoutStore } from '@/stores/checkout'
 import { useReviewStore } from '@/stores/review'
 
 const props = defineProps<{
@@ -13,13 +15,14 @@ const emit = defineEmits<{
 }>()
 
 const review = useReviewStore()
+const checkout = useCheckoutStore()
 const query = ref('')
 const selectedIdx = ref(0)
 const inputRef = ref<HTMLInputElement | null>(null)
 
 interface PaletteItem {
   id: string
-  kind: 'file' | 'symbol' | 'thread' | 'overview'
+  kind: 'file' | 'symbol' | 'thread' | 'overview' | 'checkout'
   title: string
   subtitle: string
   path?: string
@@ -41,6 +44,23 @@ const items = computed<PaletteItem[]>(() => {
       kind: 'overview',
       title: 'PR Overview',
       subtitle: 'Description, checks, commits & conversation',
+    })
+  }
+
+  const pr = review.pr
+  if (
+    pr.state === 'OPEN' &&
+    !pr.isMock &&
+    checkout.isAvailable() &&
+    checkout.isLinked(pr.owner, pr.repo) &&
+    (!q || 'check out checkout branch git'.includes(q) || pr.headRefName.toLowerCase().includes(q))
+  ) {
+    const branch = localBranchForPR(pr)
+    results.push({
+      id: 'checkout',
+      kind: 'checkout',
+      title: `Check out ${branch}`,
+      subtitle: `Fetch and switch ${checkout.repoPathFor(pr.owner, pr.repo)} to this PR`,
     })
   }
 
@@ -110,6 +130,18 @@ watch(items, () => {
 function selectItem(item: PaletteItem) {
   if (item.kind === 'overview') {
     review.openOverview()
+  } else if (item.kind === 'checkout' && review.pr) {
+    const pr = review.pr
+    // The overview's checkout panel shows progress and the outcome.
+    review.openOverview()
+    void checkout.checkout({
+      owner: pr.owner,
+      repo: pr.repo,
+      number: pr.number,
+      headRefName: pr.headRefName,
+      isCrossRepository: pr.isCrossRepository,
+      headRefOid: pr.headRefOid,
+    })
   } else if (item.path) {
     review.goToFile(item.path)
   }
@@ -178,6 +210,7 @@ function handleKeydown(e: KeyboardEvent) {
             @click="selectItem(item)"
           >
             <FileCode2 v-if="item.kind === 'file' || item.kind === 'overview'" class="h-4 w-4 shrink-0 text-ink-muted" />
+            <GitBranch v-else-if="item.kind === 'checkout'" class="h-4 w-4 shrink-0 text-pine-text" />
             <Sparkles v-else-if="item.kind === 'symbol'" class="h-4 w-4 shrink-0 text-terra-text" />
             <MessageSquare v-else class="h-4 w-4 shrink-0 text-ochre-text" />
 

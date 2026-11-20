@@ -146,8 +146,12 @@ export const useSettingsStore = defineStore('settings', () => {
     ])
   }
 
-  function openSettings(section: SettingsSection = 'general'): void {
+  /** `owner/repo` to prefill in the Repositories section the next time Settings opens. */
+  const linkRepoPrefill = ref<string | null>(null)
+
+  function openSettings(section: SettingsSection = 'general', options: { linkRepo?: string } = {}): void {
     activeSection.value = section
+    linkRepoPrefill.value = options.linkRepo ?? null
     isOpen.value = true
   }
 
@@ -231,6 +235,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   return {
     isOpen,
+    linkRepoPrefill,
     activeSection,
     theme,
     resolvedTheme,
