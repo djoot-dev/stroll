@@ -96,11 +96,14 @@ onBeforeUnmount(() => {
               >
                 <div class="min-w-0">
                   <div class="font-mono text-[11px] font-medium text-ochre-text">
-                    {{ draft.path }}:{{
+                    {{ draft.path
+                    }}<template v-if="draft.subjectType === 'FILE'">
+                      <span class="ml-1 font-sans text-[10px] text-ink-muted">(file)</span>
+                    </template><template v-else>:{{
                       draft.startLine && draft.startLine !== draft.line
                         ? `${draft.startLine}-${draft.line}`
                         : draft.line
-                    }}
+                    }}</template>
                   </div>
                   <p class="mt-0.5 line-clamp-2 text-ink">{{ draft.body }}</p>
                 </div>

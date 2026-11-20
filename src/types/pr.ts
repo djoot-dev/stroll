@@ -141,9 +141,17 @@ export interface ReviewComment {
   reactions?: ReactionGroup[]
 }
 
+/**
+ * What a review thread is anchored to: a line range in the diff, or the file
+ * as a whole (GitHub's `PullRequestReviewThreadSubjectType`).
+ */
+export type ReviewSubjectType = 'LINE' | 'FILE'
+
 export interface ReviewThread {
   id: string
   path: string
+  /** Defaults to `'LINE'` when absent. File-level threads use `line: 0`. */
+  subjectType?: ReviewSubjectType
   /** 1-based line number on the target side (end line for multiline threads) */
   line: number
   side: DiffSide
@@ -158,6 +166,8 @@ export interface DraftComment {
   id: string
   prKey: string
   path: string
+  /** Defaults to `'LINE'` when absent. File-level drafts use `line: 0`. */
+  subjectType?: ReviewSubjectType
   line: number
   side: DiffSide
   startLine?: number

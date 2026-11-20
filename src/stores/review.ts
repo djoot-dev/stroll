@@ -4,6 +4,7 @@ import { MOCK_PR } from '@/data/mockPR'
 import {
   addPRComment,
   addPullRequestLabels,
+  addFileReviewThread,
   addReviewThread,
   closePullRequest,
   createPendingReview,
@@ -677,6 +678,23 @@ export const useReviewStore = defineStore('review', () => {
     await saveDraftComments(prKey.value, draftComments.value)
   }
 
+  /** Queues a pending comment on the file as a whole rather than a line. */
+  async function addFileDraftComment(path: string, body: string): Promise<void> {
+    if (!pr.value || !body.trim()) return
+    const draft: DraftComment = {
+      id: `draft_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      prKey: prKey.value,
+      path,
+      subjectType: 'FILE',
+      line: 0,
+      side: 'RIGHT',
+      body: body.trim(),
+      createdAt: new Date().toISOString(),
+    }
+    draftComments.value = [...draftComments.value, draft]
+    await saveDraftComments(prKey.value, draftComments.value)
+  }
+
   async function deleteDraftComment(id: string): Promise<void> {
     if (!pr.value) return
     draftComments.value = draftComments.value.filter((d) => d.id !== id)
@@ -706,6 +724,7 @@ export const useReviewStore = defineStore('review', () => {
         const syncedThreads = draftComments.value.map((d) => ({
           id: `mock_thread_${d.id}`,
           path: d.path,
+          subjectType: d.subjectType ?? 'LINE',
           line: d.line,
           side: d.side,
           startLine: d.startLine,
@@ -756,17 +775,20 @@ export const useReviewStore = defineStore('review', () => {
       // Push all unsynced local draft comments into the pending GitHub review
       for (const draft of draftComments.value) {
         if (!draft.syncedThreadId) {
-          const threadId = await addReviewThread(
-            auth.pat,
-            pr.value.id,
-            reviewId,
-            draft.path,
-            draft.line,
-            draft.side,
-            draft.body,
-            draft.startLine,
-            draft.startSide,
-          )
+          const threadId =
+            draft.subjectType === 'FILE'
+              ? await addFileReviewThread(auth.pat, pr.value.id, reviewId, draft.path, draft.body)
+              : await addReviewThread(
+                  auth.pat,
+                  pr.value.id,
+                  reviewId,
+                  draft.path,
+                  draft.line,
+                  draft.side,
+                  draft.body,
+                  draft.startLine,
+                  draft.startSide,
+                )
           draft.syncedThreadId = threadId
         }
       }
@@ -1192,6 +1214,7 @@ export const useReviewStore = defineStore('review', () => {
     moveStep,
     resetTourCustomization,
     addDraftComment,
+    addFileDraftComment,
     updateDraftComment,
     deleteDraftComment,
     replyToThread,
