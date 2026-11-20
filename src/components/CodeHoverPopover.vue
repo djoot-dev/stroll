@@ -2,6 +2,8 @@
 import {
   ArrowRight,
   ArrowUpRight,
+  ChevronsDown,
+  Ellipsis,
   Equal,
   FileCode2,
   GitCommitHorizontal,
@@ -10,7 +12,11 @@ import {
   X,
 } from '@lucide/vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import type { HoverSymbolInfo } from '@/services/codeContext'
+import {
+  DEFAULT_SNIPPET_LINES,
+  hiddenSnippetLines,
+  type HoverSymbolInfo,
+} from '@/services/codeContext'
 import { highlightLinesWithCodeMirror } from '@/services/highlighter'
 import type { GitBlameInfo } from '@/services/native'
 import { computePopoverPosition } from '@/services/popoverPosition'
@@ -28,6 +34,8 @@ const emit = defineEmits<{
   (e: 'mouseleave'): void
   (e: 'close'): void
   (e: 'jumpToFile', path: string): void
+  /** Show up to `maxLines` lines of the declaration snippet. */
+  (e: 'expandSnippet', maxLines: number): void
 }>()
 
 const showBefore = ref(false)
@@ -40,6 +48,43 @@ const activeSnippet = computed(() => {
   }
   return props.info.declaration.headSnippet
 })
+
+const showingBaseSnippet = computed(
+  () => showBefore.value && Boolean(props.info?.declaration.baseSnippet),
+)
+
+const snippetLineCount = computed(() =>
+  activeSnippet.value ? activeSnippet.value.split('\n').length : 0,
+)
+
+const snippetTotalLines = computed(() => {
+  const decl = props.info?.declaration
+  if (!decl) return 0
+  return (showingBaseSnippet.value ? decl.baseTotalLines : decl.headTotalLines) ?? 0
+})
+
+const hiddenLines = computed(() => hiddenSnippetLines(activeSnippet.value, snippetTotalLines.value))
+
+/** Lines the snippet can grow to (repo symbols arrive capped by the native resolver). */
+const expandableLines = computed(() => {
+  const decl = props.info?.declaration
+  if (!decl) return 0
+  if (!showingBaseSnippet.value && decl.headFullSnippet) {
+    return Math.min(snippetTotalLines.value, decl.headFullSnippet.split('\n').length)
+  }
+  return snippetTotalLines.value
+})
+
+const EXPAND_STEP = 40
+const canExpand = computed(() => expandableLines.value > snippetLineCount.value)
+const nextStepLines = computed(() =>
+  Math.min(EXPAND_STEP, expandableLines.value - snippetLineCount.value),
+)
+const isSnippetExpanded = computed(() => snippetLineCount.value > DEFAULT_SNIPPET_LINES + 4)
+
+function expandBy(lines: number) {
+  emit('expandSnippet', snippetLineCount.value + lines)
+}
 
 const highlightedSnippet = computed(() => {
   if (!props.info) return []
@@ -295,16 +340,48 @@ const hasBeforeAfter = computed(
       </div>
 
       <!-- Highlighted Definition Snippet -->
-      <div
-        v-if="info"
-        class="max-h-48 overflow-auto bg-code px-3 py-2 font-mono text-[11.5px] leading-relaxed"
-      >
+      <div v-if="info" class="bg-code">
         <div
-          v-for="(spans, lIdx) in highlightedSnippet"
-          :key="lIdx"
-          class="whitespace-pre text-ink"
+          class="overflow-auto px-3 py-2 font-mono text-[11.5px] leading-relaxed"
+          :class="isSnippetExpanded ? 'max-h-[min(60vh,32rem)]' : 'max-h-48'"
         >
-          <span v-for="(sp, sIdx) in spans" :key="sIdx" :class="sp.className">{{ sp.text }}</span>
+          <div
+            v-for="(spans, lIdx) in highlightedSnippet"
+            :key="lIdx"
+            class="whitespace-pre text-ink"
+          >
+            <span v-for="(sp, sIdx) in spans" :key="sIdx" :class="sp.className">{{ sp.text }}</span>
+          </div>
+        </div>
+
+        <!-- Truncation indicator: the declaration continues past the snippet -->
+        <div
+          v-if="hiddenLines > 0"
+          class="flex items-center justify-between gap-2 border-t border-border-muted bg-canvas-subtle/60 px-3 py-1 text-[10.5px] text-ink-muted"
+        >
+          <span
+            class="inline-flex items-center gap-1"
+            :title="`Showing ${snippetLineCount} of ${snippetTotalLines} lines of this declaration`"
+          >
+            <Ellipsis class="h-3 w-3" />
+            <span>{{ hiddenLines }} more line{{ hiddenLines === 1 ? '' : 's' }}</span>
+          </span>
+          <div v-if="canExpand" class="flex shrink-0 items-center gap-1">
+            <button
+              class="inline-flex items-center gap-0.5 rounded-md border border-border bg-canvas px-1.5 py-0.5 text-[10px] text-ink-secondary transition-colors hover:border-terra-border hover:bg-terra-soft hover:text-terra-text"
+              @click="expandBy(nextStepLines)"
+            >
+              <ChevronsDown class="h-3 w-3" />
+              <span>Show {{ nextStepLines }} more</span>
+            </button>
+            <button
+              v-if="expandableLines - snippetLineCount > EXPAND_STEP"
+              class="rounded-md border border-border bg-canvas px-1.5 py-0.5 text-[10px] text-ink-secondary transition-colors hover:border-terra-border hover:bg-terra-soft hover:text-terra-text"
+              @click="expandBy(expandableLines - snippetLineCount)"
+            >
+              Show all
+            </button>
+          </div>
         </div>
       </div>
 

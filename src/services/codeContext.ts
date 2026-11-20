@@ -34,6 +34,14 @@ export interface SymbolDeclaration {
   docComment: string | null
   headSnippet: string
   baseSnippet: string | null
+  /** Line count of the whole head declaration; larger than `headSnippet` when it is truncated. */
+  headTotalLines?: number
+  /** Line count of the whole base declaration. */
+  baseTotalLines?: number | null
+  /** 1-based line of the declaration in the base file (used to expand `baseSnippet`). */
+  baseLine?: number | null
+  /** Full head declaration text when it is already in memory (repo fallback). */
+  headFullSnippet?: string | null
   isModifiedInPR: boolean
   source?: 'pr' | 'repo'
   /** Value expression of a constant / enum member as written (collapsed, truncated). */
@@ -122,14 +130,42 @@ function extractLeadingDocComment(lines: string[], declLineIdx: number): string 
   return collected.length > 0 ? collected.join('\n').trim() : null
 }
 
-function extractDeclarationSnippet(lines: string[], startIdx: number, maxLines = 12): string {
-  const slice: string[] = []
+/** Lines shown in the hover popover before the user asks for more. */
+export const DEFAULT_SNIPPET_LINES = 12
+const REPO_SNIPPET_LINES = 16
+/** How far a brace-delimited declaration is followed when measuring its full length. */
+const EXTENT_SCAN_LIMIT = 2000
+
+interface SlicedDeclaration {
+  snippet: string
+  totalLines: number
+}
+
+/** First `maxLines` of `lines[startIdx..=endIdx]`, plus the extent's length minus trailing blanks. */
+function sliceDeclaration(
+  lines: string[],
+  startIdx: number,
+  endIdx: number,
+  maxLines: number,
+): SlicedDeclaration {
+  let end = Math.min(endIdx, lines.length - 1)
+  while (end > startIdx && lines[end].trim() === '') end--
+  const snippet = lines
+    .slice(startIdx, Math.min(end, startIdx + maxLines - 1) + 1)
+    .join('\n')
+    .trimEnd()
+  return { snippet, totalLines: Math.max(1, end - startIdx + 1) }
+}
+
+/** Last line of a declaration: its matching closing brace, or the line before the first blank one. */
+function declarationExtentEnd(lines: string[], startIdx: number): number {
   let braceDepth = 0
   let sawOpenBrace = false
+  const last = Math.min(lines.length, startIdx + EXTENT_SCAN_LIMIT) - 1
 
-  for (let i = startIdx; i < Math.min(lines.length, startIdx + maxLines); i++) {
+  for (let i = startIdx; i <= last; i++) {
     const line = lines[i]
-    slice.push(line)
+    if (!sawOpenBrace && i > startIdx && line.trim() === '') return i - 1
 
     for (const ch of line) {
       if (ch === '{') {
@@ -140,16 +176,18 @@ function extractDeclarationSnippet(lines: string[], startIdx: number, maxLines =
       }
     }
 
-    if (sawOpenBrace && braceDepth <= 0) {
-      break
-    }
-    if (!sawOpenBrace && i > startIdx && line.trim() === '') {
-      slice.pop()
-      break
-    }
+    if (sawOpenBrace && braceDepth <= 0) return i
   }
 
-  return slice.join('\n').trimEnd()
+  return last
+}
+
+function extractDeclarationSnippet(
+  lines: string[],
+  startIdx: number,
+  maxLines = DEFAULT_SNIPPET_LINES,
+): SlicedDeclaration {
+  return sliceDeclaration(lines, startIdx, declarationExtentEnd(lines, startIdx), maxLines)
 }
 
 function toPascalCase(name: string): string {
@@ -165,6 +203,8 @@ interface ExtractedDeclaration {
   kind: SymbolKind
   docComment: string | null
   snippet: string
+  /** Line count of the whole declaration (`snippet` may be a prefix of it). */
+  totalLines: number
   /** What `isModifiedInPR` compares between base and head. */
   signature: string
   value: string | null
@@ -208,18 +248,26 @@ function extractDeclarationsFromContent(
   for (const decl of extractConstDeclarations(content, language, path)) {
     if (decl.kind === 'const') constStartLines.add(decl.startIdx)
     if (map.has(decl.name)) continue
-    const snippet =
-      decl.containerIdx !== null
-        ? buildEnumMemberSnippet(lines, decl.containerIdx, decl.startIdx, decl.endIdx)
-        : lines
-            .slice(decl.startIdx, Math.min(decl.endIdx, decl.startIdx + 11) + 1)
-            .join('\n')
-            .trimEnd()
+    let snippet: string
+    let totalLines: number
+    if (decl.containerIdx !== null) {
+      // Enum header + member excerpt: not a contiguous range, so nothing to expand.
+      snippet = buildEnumMemberSnippet(lines, decl.containerIdx, decl.startIdx, decl.endIdx)
+      totalLines = snippet.split('\n').length
+    } else {
+      ;({ snippet, totalLines } = sliceDeclaration(
+        lines,
+        decl.startIdx,
+        decl.endIdx,
+        DEFAULT_SNIPPET_LINES,
+      ))
+    }
     map.set(decl.name, {
       line: decl.startIdx + 1,
       kind: decl.kind,
       docComment: extractLeadingDocComment(lines, decl.startIdx),
       snippet,
+      totalLines,
       signature:
         decl.kind === 'enumMember' ? `${decl.value ?? ''}|${decl.valueNote ?? ''}` : snippet,
       value: decl.value,
@@ -242,12 +290,13 @@ function extractDeclarationsFromContent(
     }
     if (map.has(name)) return
 
-    const snippet = extractDeclarationSnippet(lines, idx)
+    const { snippet, totalLines } = extractDeclarationSnippet(lines, idx)
     map.set(name, {
       line: idx + 1,
       kind: normalizeKind(rawKind),
       docComment: extractLeadingDocComment(lines, idx),
       snippet,
+      totalLines,
       signature: snippet,
       value: null,
       valueNote: null,
@@ -265,12 +314,19 @@ function extractDeclarationsFromContent(
     if (componentName && !map.has(componentName)) {
       const scriptIdx = lines.findIndex((l) => /^\s*<script\b/i.test(l))
       const startIdx = scriptIdx >= 0 ? scriptIdx : 0
-      const snippet = lines.slice(startIdx, startIdx + 14).join('\n').trimEnd()
+      const closeIdx = lines.findIndex((l, i) => i > startIdx && /^\s*<\/script>/i.test(l))
+      const { snippet, totalLines } = sliceDeclaration(
+        lines,
+        startIdx,
+        closeIdx >= 0 ? closeIdx : lines.length - 1,
+        14,
+      )
       map.set(componentName, {
         line: startIdx + 1,
         kind: 'component',
         docComment: extractLeadingDocComment(lines, startIdx),
         snippet,
+        totalLines,
         signature: snippet,
         value: null,
         valueNote: null,
@@ -283,6 +339,70 @@ function extractDeclarationsFromContent(
 }
 
 export type PRSymbolIndex = Map<string, SymbolDeclaration[]>
+
+function firstLines(text: string, n: number): string {
+  return text.split('\n').slice(0, n).join('\n')
+}
+
+function lineCount(text: string | null | undefined): number {
+  return text ? text.split('\n').length : 0
+}
+
+/** How many lines of the declaration `snippet` leaves out (0 when it is complete). */
+export function hiddenSnippetLines(
+  snippet: string | null | undefined,
+  totalLines: number | null | undefined,
+): number {
+  if (!snippet || !totalLines) return 0
+  return Math.max(0, totalLines - lineCount(snippet))
+}
+
+function expandSide(
+  current: string | null,
+  content: string | null | undefined,
+  line: number | null | undefined,
+  totalLines: number | null | undefined,
+  maxLines: number,
+): string | null {
+  if (current === null || !content || !line || !totalLines) return current
+  if (lineCount(current) >= Math.min(maxLines, totalLines)) return current
+  const lines = content.split('\n')
+  const start = line - 1
+  return lines
+    .slice(start, start + Math.min(maxLines, totalLines))
+    .join('\n')
+    .trimEnd()
+}
+
+/**
+ * Returns a copy of `decl` whose head / base snippets show up to `maxLines` lines of the
+ * declaration, read from the PR file contents (or the full text held for repo symbols).
+ * Both sides grow together so the Before / After toggle keeps comparing like with like.
+ */
+export function expandDeclarationSnippets(
+  decl: SymbolDeclaration,
+  maxLines: number,
+  files: PRFile[],
+): SymbolDeclaration {
+  if (decl.headFullSnippet) {
+    return { ...decl, headSnippet: firstLines(decl.headFullSnippet, maxLines) }
+  }
+  const file = files.find((f) => f.path === decl.path)
+  if (!file) return decl
+  return {
+    ...decl,
+    headSnippet:
+      expandSide(decl.headSnippet, file.headContent, decl.line, decl.headTotalLines, maxLines) ??
+      decl.headSnippet,
+    baseSnippet: expandSide(
+      decl.baseSnippet,
+      file.baseContent,
+      decl.baseLine,
+      decl.baseTotalLines,
+      maxLines,
+    ),
+  }
+}
 
 /**
  * Builds an index of symbol declarations across all changed files in the PR,
@@ -317,6 +437,9 @@ export function buildPRSymbolIndex(files: PRFile[]): PRSymbolIndex {
         docComment: headInfo.docComment,
         headSnippet: headInfo.snippet,
         baseSnippet: baseInfo?.snippet ?? null,
+        headTotalLines: headInfo.totalLines,
+        baseTotalLines: baseInfo?.totalLines ?? null,
+        baseLine: baseInfo?.line ?? null,
         isModifiedInPR,
         value: headInfo.value,
         baseValue: baseInfo?.value ?? null,
@@ -732,8 +855,10 @@ export async function resolveHoverSymbolWithRepoFallback(
     line: resolved.line,
     language: resolved.language,
     docComment: resolved.docComment,
-    headSnippet: resolved.snippet,
+    headSnippet: firstLines(resolved.snippet, REPO_SNIPPET_LINES),
     baseSnippet: null,
+    headFullSnippet: resolved.snippet,
+    headTotalLines: resolved.totalLines ?? resolved.snippet.split('\n').length,
     isModifiedInPR: false,
     source: 'repo',
   })

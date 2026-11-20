@@ -23,6 +23,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import {
   buildPRSymbolIndex,
   createHoverableSymbols,
+  expandDeclarationSnippets,
   extractImportedSymbolNames,
   getEnclosingScope,
   getReplacedLinesForAddedLine,
@@ -861,6 +862,22 @@ function handlePopoverMouseLeave() {
   hoverCloseTimer = window.setTimeout(() => {
     hoverState.value = null
   }, 140)
+}
+
+function handleExpandSnippet(maxLines: number) {
+  const state = hoverState.value
+  if (!state?.info) return
+  hoverState.value = {
+    ...state,
+    info: {
+      ...state.info,
+      declaration: expandDeclarationSnippets(
+        state.info.declaration,
+        maxLines,
+        review.pr?.files ?? [],
+      ),
+    },
+  }
 }
 
 function handleJumpFromPopover(path: string) {
@@ -1717,6 +1734,7 @@ function statusBadgeClass(status: string): string {
       @mouseleave="handlePopoverMouseLeave"
       @close="closePopoverImmediately"
       @jump-to-file="handleJumpFromPopover"
+      @expand-snippet="handleExpandSnippet"
     />
   </div>
 </template>
