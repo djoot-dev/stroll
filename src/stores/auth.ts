@@ -42,6 +42,8 @@ export const useAuthStore = defineStore('auth', () => {
   const isLoadingMore = ref(false)
   const prFilter = ref<PRFilterMode>('review-requested')
   const isLoading = ref(false)
+  /** True while the inbox is re-fetching after the user picked a different filter tab. */
+  const isSwitchingFilter = ref(false)
   const error = ref<string | null>(null)
   let knownReviewRequestedIds: Set<string> | null = null
   let persistedPat: string | null = null
@@ -169,8 +171,12 @@ export const useAuthStore = defineStore('auth', () => {
   async function setPrFilter(mode: PRFilterMode): Promise<void> {
     if (prFilter.value === mode) return
     prFilter.value = mode
-    if (pat.value) {
+    if (!pat.value) return
+    isSwitchingFilter.value = true
+    try {
       await refreshRequestedPRs()
+    } finally {
+      isSwitchingFilter.value = false
     }
   }
 
@@ -194,6 +200,7 @@ export const useAuthStore = defineStore('auth', () => {
     isLoadingMore,
     prFilter,
     isLoading,
+    isSwitchingFilter,
     error,
     isAuthenticated,
     init,

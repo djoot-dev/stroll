@@ -68,6 +68,36 @@ describe('useAuthStore', () => {
     expect(mockSaveGitHubPat).not.toHaveBeenCalled()
   })
 
+  it('flags isSwitchingFilter only while a filter change is re-fetching', async () => {
+    mockLoadGitHubPat.mockResolvedValue('ghp_saved_token')
+    const auth = useAuthStore()
+    await auth.init()
+    expect(auth.isSwitchingFilter).toBe(false)
+
+    let resolveFetch: (value: unknown) => void = () => {}
+    mockFetchViewerAndRequestedPRs.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFetch = resolve
+      }),
+    )
+    const pending = auth.setPrFilter('authored')
+    expect(auth.isSwitchingFilter).toBe(true)
+
+    resolveFetch({
+      viewer: { login: 'octocat', avatarUrl: 'https://example.com/a.png', name: 'Octo' },
+      requestedPRs: [],
+      hasNextPage: false,
+      endCursor: null,
+    })
+    await pending
+    expect(auth.isSwitchingFilter).toBe(false)
+
+    // A plain refresh (e.g. auto-refresh) must not trigger the switching state.
+    const refresh = auth.refreshRequestedPRs()
+    expect(auth.isSwitchingFilter).toBe(false)
+    await refresh
+  })
+
   it('persists new PAT once and skips redundant saves for the same token', async () => {
     const auth = useAuthStore()
 
