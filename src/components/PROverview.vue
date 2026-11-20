@@ -452,7 +452,7 @@ async function handlePostComment() {
 }
 
 const tourCtaLabel = computed(() =>
-  review.reviewedCount > 0 || review.currentStepIndex > 0
+  review.reviewedCount > 0 || review.tourStarted
     ? 'Continue Guided Tour'
     : 'Start Guided Tour',
 )
