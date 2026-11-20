@@ -11,6 +11,8 @@ const props = defineProps<{
   originalCode?: string
   /** Comment targets the whole file rather than a line range. */
   fileLevel?: boolean
+  /** Prefills the composer and switches its copy to editing an existing draft. */
+  initialBody?: string
 }>()
 
 const emit = defineEmits<{
@@ -18,7 +20,9 @@ const emit = defineEmits<{
   (e: 'cancel'): void
 }>()
 
-const body = ref('')
+const body = ref(props.initialBody ?? '')
+const isEditing = computed(() => props.initialBody !== undefined)
+const verb = computed(() => (isEditing.value ? 'Edit' : 'Add'))
 const previewMode = ref(false)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 
@@ -27,7 +31,11 @@ const originalLines = computed(() =>
 )
 
 onMounted(() => {
-  textareaRef.value?.focus()
+  const el = textareaRef.value
+  if (!el) return
+  el.focus()
+  // Place the caret at the end so editing continues where the text left off.
+  el.setSelectionRange(el.value.length, el.value.length)
 })
 
 function insertSuggestion() {
@@ -51,17 +59,17 @@ function handleSubmit() {
       <div class="flex items-center gap-2">
         <span>
           <template v-if="props.fileLevel">
-            Add pending comment on
+            {{ verb }} pending comment on
             <span class="font-semibold text-terra-text">this file</span>
           </template>
           <template v-else-if="props.startLine !== undefined && props.startLine !== props.line">
-            Add pending comment on lines
+            {{ verb }} pending comment on lines
             <span class="font-mono font-semibold text-terra-text">
               {{ props.startLine }}–{{ props.line }}
             </span>
           </template>
           <template v-else>
-            Add pending comment on line
+            {{ verb }} pending comment on line
             <span class="font-mono font-semibold text-terra-text">
               {{ props.side === 'LEFT' ? 'old ' : '' }}{{ props.line }}
             </span>
@@ -135,7 +143,7 @@ function handleSubmit() {
           :disabled="!body.trim()"
           @click="handleSubmit"
         >
-          Add Pending Comment
+          {{ isEditing ? 'Save Changes' : 'Add Pending Comment' }}
         </button>
       </div>
     </div>

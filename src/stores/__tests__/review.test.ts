@@ -23,8 +23,9 @@ const setFileViewedStateMock = vi.fn<
 
 const createPendingReviewMock = vi.fn(async () => 'review_1')
 const submitReviewMock = vi.fn(async () => undefined)
-const addReviewThreadMock = vi.fn(async () => 'thread_line')
-const addFileReviewThreadMock = vi.fn(async () => 'thread_file')
+const addReviewThreadMock = vi.fn(async () => ({ threadId: 'thread_line', commentId: 'comment_line' }))
+const addFileReviewThreadMock = vi.fn(async () => ({ threadId: 'thread_file', commentId: 'comment_file' }))
+const updateReviewCommentMock = vi.fn(async (_pat: string, _id: string, body: string) => body)
 const fetchPRHeadPulseMock = vi.fn<() => Promise<PRHeadPulse | null>>()
 const updatePullRequestBodyMock = vi.fn<
   (pat: string, pullRequestId: string, body: string) => Promise<string>
@@ -51,6 +52,8 @@ vi.mock('@/services/github', async (importOriginal) => {
     submitReview: (...args: unknown[]) => submitReviewMock(...(args as [])),
     addReviewThread: (...args: unknown[]) => addReviewThreadMock(...(args as [])),
     addFileReviewThread: (...args: unknown[]) => addFileReviewThreadMock(...(args as [])),
+    updateReviewComment: (pat: string, id: string, body: string) =>
+      updateReviewCommentMock(pat, id, body),
     fetchPRHeadPulse: () => fetchPRHeadPulseMock(),
     updatePullRequestBody: (pat: string, pullRequestId: string, body: string) =>
       updatePullRequestBodyMock(pat, pullRequestId, body),
@@ -524,6 +527,86 @@ describe('useReviewStore file-level comments', () => {
     )
     expect(addReviewThreadMock).toHaveBeenCalledTimes(1)
     expect(store.draftComments).toHaveLength(0)
+  })
+})
+
+describe('useReviewStore pending comment editing & focus', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.stubGlobal('localStorage', createMemoryStorage())
+    fetchPullRequestMock.mockReset()
+    createPendingReviewMock.mockClear()
+    submitReviewMock.mockReset()
+    submitReviewMock.mockResolvedValue(undefined)
+    addReviewThreadMock.mockClear()
+    updateReviewCommentMock.mockClear()
+  })
+
+  it('edits a local draft body without calling the API', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+    const path = store.tourSteps[0].file.path
+    await store.addDraftComment(path, 3, 'RIGHT', 'Original')
+    const id = store.draftComments[0].id
+
+    await store.updateDraftComment(id, '   ')
+    expect(store.draftComments[0].body).toBe('Original')
+
+    await store.updateDraftComment(id, '  Revised  ')
+    expect(store.draftComments[0]).toMatchObject({ id, line: 3, side: 'RIGHT', body: 'Revised' })
+    expect(updateReviewCommentMock).not.toHaveBeenCalled()
+  })
+
+  it('pushes edits of drafts already synced to the pending remote review', async () => {
+    fetchPullRequestMock.mockResolvedValueOnce(
+      makePR({ owner: 'acme', repo: 'stroll', number: 9, pendingReviewId: null }),
+    )
+    useAuthStore().pat = 'ghp_test_token'
+    const store = useReviewStore()
+    await store.loadPRByRepo('acme', 'stroll', 9)
+    const path = store.tourSteps[0].file.path
+    await store.addDraftComment(path, 3, 'RIGHT', 'Original')
+
+    // Threads get created, then the final submit fails, leaving the draft synced.
+    submitReviewMock.mockRejectedValueOnce(new Error('boom'))
+    expect(await store.submitCompleteReview('COMMENT', '')).toBe(false)
+    const id = store.draftComments[0].id
+    expect(store.draftComments[0].syncedCommentId).toBe('comment_line')
+
+    await store.updateDraftComment(id, 'Revised')
+    expect(updateReviewCommentMock).toHaveBeenCalledWith('ghp_test_token', 'comment_line', 'Revised')
+    expect(store.draftComments[0].body).toBe('Revised')
+
+    // Retrying the submit must not create a duplicate thread.
+    expect(await store.submitCompleteReview('COMMENT', '')).toBe(true)
+    expect(addReviewThreadMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('focusDraftComment closes the modal and navigates to the draft file', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+    const target = store.tourSteps[2].file.path
+    await store.addDraftComment(target, 1, 'RIGHT', 'Look here')
+    const id = store.draftComments[0].id
+    store.showFinishModal = true
+
+    store.focusDraftComment(id)
+    expect(store.showFinishModal).toBe(false)
+    expect(store.activeView).toBe('step')
+    expect(store.currentStep?.file.path).toBe(target)
+    expect(store.focusedDraftId).toBe(id)
+  })
+
+  it('focusDraftComment unhides a hidden file so the draft can be shown', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+    const target = store.tourSteps[1].file.path
+    await store.addDraftComment(target, 1, 'RIGHT', 'Hidden file note')
+    store.toggleHideStep(target)
+    expect(store.tourSteps.some((s) => s.file.path === target)).toBe(false)
+
+    store.focusDraftComment(store.draftComments[0].id)
+    expect(store.currentStep?.file.path).toBe(target)
   })
 })
 

@@ -184,6 +184,8 @@ export interface DraftComment {
   createdAt: string
   /** Set once synced to GitHub as a pending review thread */
   syncedThreadId?: string
+  /** Opening comment of the synced thread; lets edits reach the pending GitHub review */
+  syncedCommentId?: string
 }
 
 export interface ReferencedContext {

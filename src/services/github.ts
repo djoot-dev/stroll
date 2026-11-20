@@ -1643,6 +1643,24 @@ export async function createPendingReview(
   return data.addPullRequestReview.pullRequestReview.id
 }
 
+interface AddedReviewThreadPayload {
+  thread: { id: string; comments: { nodes: Array<{ id: string }> } }
+}
+
+/** IDs of a newly created pending review thread and its first comment. */
+export interface AddedReviewThread {
+  threadId: string
+  /** The thread's opening comment, needed to edit the body before submitting. */
+  commentId?: string
+}
+
+function toAddedReviewThread(payload: AddedReviewThreadPayload): AddedReviewThread {
+  return {
+    threadId: payload.thread.id,
+    commentId: payload.thread.comments.nodes[0]?.id,
+  }
+}
+
 export async function addReviewThread(
   pat: string,
   pullRequestId: string,
@@ -1653,7 +1671,7 @@ export async function addReviewThread(
   body: string,
   startLine?: number,
   startSide?: DiffSide,
-): Promise<string> {
+): Promise<AddedReviewThread> {
   const isMultiline = startLine !== undefined && startLine !== line
   const mutation = `
     mutation AddReviewThread(
@@ -1678,12 +1696,17 @@ export async function addReviewThread(
       ) {
         thread {
           id
+          comments(first: 1) {
+            nodes {
+              id
+            }
+          }
         }
       }
     }
   `
   const data = await graphql<{
-    addPullRequestReviewThread: { thread: { id: string } }
+    addPullRequestReviewThread: AddedReviewThreadPayload
   }>(pat, mutation, {
     pullRequestId,
     pullRequestReviewId,
@@ -1693,7 +1716,7 @@ export async function addReviewThread(
     ...(isMultiline ? { startLine, startSide: startSide ?? side } : {}),
     body,
   })
-  return data.addPullRequestReviewThread.thread.id
+  return toAddedReviewThread(data.addPullRequestReviewThread)
 }
 
 /** Adds a file-level (not line-anchored) thread to a pending review. */
@@ -1703,7 +1726,7 @@ export async function addFileReviewThread(
   pullRequestReviewId: string,
   path: string,
   body: string,
-): Promise<string> {
+): Promise<AddedReviewThread> {
   const mutation = `
     mutation AddFileReviewThread(
       $pullRequestId: ID!
@@ -1722,14 +1745,19 @@ export async function addFileReviewThread(
       ) {
         thread {
           id
+          comments(first: 1) {
+            nodes {
+              id
+            }
+          }
         }
       }
     }
   `
   const data = await graphql<{
-    addPullRequestReviewThread: { thread: { id: string } }
+    addPullRequestReviewThread: AddedReviewThreadPayload
   }>(pat, mutation, { pullRequestId, pullRequestReviewId, path, body })
-  return data.addPullRequestReviewThread.thread.id
+  return toAddedReviewThread(data.addPullRequestReviewThread)
 }
 
 export async function replyToReviewThread(
