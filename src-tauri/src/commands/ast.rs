@@ -30,7 +30,10 @@ pub struct ResolvedRepoSymbol {
     pub line: usize,
     pub language: String,
     pub doc_comment: Option<String>,
+    /// Declaration text, capped at `MAX_SNIPPET_LINES`; the UI shows a prefix and expands on demand.
     pub snippet: String,
+    /// Line count of the whole declaration (may exceed what `snippet` holds).
+    pub total_lines: usize,
 }
 
 const SCRIPT_EXTENSIONS: &[&str] = &[
@@ -662,9 +665,25 @@ fn extract_leading_doc_comment(lines: &[&str], decl_row: usize) -> Option<String
     }
 }
 
+/// Upper bound on how much of a declaration is sent to the UI.
+const MAX_SNIPPET_LINES: usize = 400;
+
+fn declaration_end(lines: &[&str], start_row: usize, end_row: usize) -> usize {
+    let mut end = end_row.min(lines.len().saturating_sub(1));
+    while end > start_row && lines[end].trim().is_empty() {
+        end -= 1;
+    }
+    end
+}
+
 fn extract_snippet(lines: &[&str], start_row: usize, end_row: usize) -> String {
-    let max_end = (start_row + 15).min(end_row).min(lines.len().saturating_sub(1));
+    let end = declaration_end(lines, start_row, end_row);
+    let max_end = (start_row + MAX_SNIPPET_LINES - 1).min(end);
     lines[start_row..=max_end].join("\n").trim_end().to_string()
+}
+
+fn snippet_total_lines(lines: &[&str], start_row: usize, end_row: usize) -> usize {
+    declaration_end(lines, start_row, end_row) - start_row + 1
 }
 
 fn node_text<'a>(node: Node, source: &'a [u8]) -> Option<&'a str> {
@@ -1012,6 +1031,7 @@ pub fn extract_member_from_source(
             language: lang_label.to_string(),
             doc_comment: extract_leading_doc_comment(&lines, decl.start_row),
             snippet: extract_snippet(&lines, decl.start_row, decl.end_row),
+            total_lines: snippet_total_lines(&lines, decl.start_row, decl.end_row),
         }));
     }
     Ok(None)
@@ -1162,6 +1182,7 @@ fn extract_vue_symbol(
                         language: "vue".to_string(),
                         doc_comment: extract_leading_doc_comment(&lines, decl.start_row),
                         snippet: extract_snippet(&lines, decl.start_row, decl.end_row),
+                        total_lines: snippet_total_lines(&lines, decl.start_row, decl.end_row),
                     }));
                 }
             }
@@ -1170,7 +1191,13 @@ fn extract_vue_symbol(
 
     if allow_component_fallback || vue_component_matches_symbol(file_path, symbol_name) {
         let start_row = blocks.first().map(|b| b.start_row).unwrap_or(0);
-        let end_row = (start_row + 15).min(lines.len().saturating_sub(1));
+        let end_row = lines
+            .iter()
+            .enumerate()
+            .skip(start_row)
+            .find(|(_, l)| l.trim_start().to_ascii_lowercase().starts_with("</script"))
+            .map(|(i, _)| i)
+            .unwrap_or_else(|| lines.len().saturating_sub(1));
         if start_row < lines.len() {
             let doc_comment = extract_vue_html_doc_comment(&lines, start_row)
                 .or_else(|| extract_leading_doc_comment(&lines, start_row));
@@ -1182,6 +1209,7 @@ fn extract_vue_symbol(
                 language: "vue".to_string(),
                 doc_comment,
                 snippet: extract_snippet(&lines, start_row, end_row),
+                total_lines: snippet_total_lines(&lines, start_row, end_row),
             }));
         }
     }
@@ -1242,6 +1270,7 @@ pub fn extract_symbol_from_source(
         language: lang_label.to_string(),
         doc_comment: extract_leading_doc_comment(&lines, decl.start_row),
         snippet: extract_snippet(&lines, decl.start_row, decl.end_row),
+        total_lines: snippet_total_lines(&lines, decl.start_row, decl.end_row),
     }))
 }
 
@@ -1486,6 +1515,18 @@ export interface RetryPolicy {
             .unwrap()
             .contains("Configuration for retry backoff."));
         assert!(res.snippet.contains("export interface RetryPolicy"));
+    }
+
+    #[test]
+    fn returns_full_declaration_and_total_lines_for_long_bodies() {
+        let body: String = (0..30).map(|i| format!("  const v{i} = {i}\n")).collect();
+        let src = format!("export function big() {{\n{body}}}\n\nexport const other = 1\n");
+        let res = extract_symbol_from_source(&src, Path::new("a.ts"), "a.ts", "big")
+            .unwrap()
+            .expect("should find big");
+        assert_eq!(res.total_lines, 32);
+        assert_eq!(res.snippet.lines().count(), 32);
+        assert!(res.snippet.ends_with('}'));
     }
 
     #[test]
