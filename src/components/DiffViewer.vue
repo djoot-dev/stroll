@@ -20,7 +20,7 @@ import {
   Trash2,
   X,
 } from '@lucide/vue'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import {
   buildPRSymbolIndex,
   extractImportedSymbolNames,
@@ -29,6 +29,7 @@ import {
   resolveHoverSymbolWithRepoFallback,
   type HoverSymbolInfo,
 } from '@/services/codeContext'
+import { isCSharpPath, loadCSharpTypeIndex, type CSharpTypeIndex } from '@/services/csharpIndex'
 import { buildDiffSegments, isPureRename, type DiffLine } from '@/services/diffParser'
 import {
   fetchFileBlobDataUrl,
@@ -289,20 +290,51 @@ onBeforeUnmount(() => {
 
 const symbolIndex = computed(() => buildPRSymbolIndex(review.pr?.files ?? []))
 
+const csharpTypeIndex = shallowRef<CSharpTypeIndex | null>(null)
+watch(
+  () =>
+    [
+      review.currentRepoPath,
+      isCSharpPath(props.step.file.path),
+      review.pr?.headRefOid ?? '',
+    ] as const,
+  async ([repoPath, isCSharp, version]) => {
+    csharpTypeIndex.value = null
+    if (!repoPath || !isCSharp || !isTauriRuntime()) return
+    const loaded = await loadCSharpTypeIndex(repoPath, version)
+    if (
+      review.currentRepoPath === repoPath &&
+      isCSharpPath(props.step.file.path) &&
+      (review.pr?.headRefOid ?? '') === version
+    ) {
+      csharpTypeIndex.value = loaded
+    }
+  },
+  { immediate: true },
+)
+
 const hoverableSymbols = computed<ReadonlyMap<string, unknown>>(() => {
   const base = symbolIndex.value
   if (!review.currentRepoPath || !isTauriRuntime()) return base
 
   const content = props.step.file.headContent ?? props.step.file.baseContent
   const imported = extractImportedSymbolNames(content)
-  if (imported.size === 0) return base
+  const csharpTypes = csharpTypeIndex.value
+  if (imported.size === 0 && !csharpTypes) return base
 
   const merged = new Map<string, unknown>(base)
   for (const name of imported) {
     if (!merged.has(name)) merged.set(name, true)
   }
+  // C# `using` imports namespaces, so any type declared anywhere in the repo may be in scope.
+  if (csharpTypes) {
+    for (const name of csharpTypes.keys()) {
+      if (!merged.has(name)) merged.set(name, true)
+    }
+  }
   return merged
 })
+
 
 const segments = computed(() =>
   buildDiffSegments(props.step.file, { ignoreWhitespace: review.ignoreWhitespace }),
@@ -593,6 +625,7 @@ function handleIdentMouseEnter(
         review.pr?.files ?? [],
         symbolIndex.value,
         review.currentRepoPath,
+        csharpTypeIndex.value,
       ),
       fetchBlameForLine(line),
     ])

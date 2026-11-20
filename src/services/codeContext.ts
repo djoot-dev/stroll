@@ -1,6 +1,12 @@
 import type { PRFile } from '@/types/pr'
 import type { DiffLine } from './diffParser'
 import { isTauriRuntime, resolveRepoSymbol } from './native'
+import {
+  extractCSharpScopeContext,
+  isCSharpPath,
+  pickCSharpTypeEntry,
+  type CSharpTypeIndex,
+} from './csharpIndex'
 
 export type SymbolKind =
   | 'interface'
@@ -475,6 +481,7 @@ export async function resolveHoverSymbolWithRepoFallback(
   allFiles: PRFile[],
   index: PRSymbolIndex,
   repoPath: string | null,
+  csharpIndex: CSharpTypeIndex | null = null,
 ): Promise<HoverSymbolInfo | null> {
   const fastResult = resolveHoverSymbol(identifier, currentFile, allFiles, index)
   if (fastResult) return fastResult
@@ -482,13 +489,25 @@ export async function resolveHoverSymbolWithRepoFallback(
   if (!repoPath || !isTauriRuntime()) return null
 
   const sourceContent = currentFile.headContent ?? currentFile.baseContent
-  const binding = findImportBindingForSymbol(sourceContent, identifier)
+
+  const csharpEntry =
+    csharpIndex && isCSharpPath(currentFile.path)
+      ? pickCSharpTypeEntry(
+          identifier,
+          csharpIndex,
+          extractCSharpScopeContext(sourceContent),
+          currentFile.path,
+        )
+      : null
+
+  const binding = csharpEntry ? null : findImportBindingForSymbol(sourceContent, identifier)
 
   const resolved = await resolveRepoSymbol({
     repoPath,
     importerPath: currentFile.path,
-    symbolName: binding?.importedName ?? identifier,
-    importSpecifier: binding?.specifier ?? null,
+    symbolName: csharpEntry?.name ?? binding?.importedName ?? identifier,
+    importSpecifier: csharpEntry?.namespace ?? binding?.specifier ?? null,
+    targetPath: csharpEntry?.path ?? null,
   })
 
   if (!resolved) return null
