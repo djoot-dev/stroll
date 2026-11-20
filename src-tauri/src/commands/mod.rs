@@ -1,4 +1,5 @@
 pub mod ast;
+pub mod csharp_index;
 pub mod gh;
 pub mod git;
 pub mod keychain;
