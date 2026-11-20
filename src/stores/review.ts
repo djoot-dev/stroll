@@ -28,6 +28,7 @@ import {
   submitReview,
   toggleReaction as apiToggleReaction,
   updateIssueComment as apiUpdateIssueComment,
+  updatePullRequestBody,
   updateReviewComment as apiUpdateReviewComment,
 } from '@/services/github'
 import type { PRHeadPulse } from '@/services/github'
@@ -1168,6 +1169,19 @@ export const useReviewStore = defineStore('review', () => {
     pr.value = { ...pr.value, state: nextState }
   }
 
+  async function editPRDescription(body: string): Promise<void> {
+    if (!pr.value) return
+    const next = body.trimEnd()
+    if (pr.value.isMock) {
+      pr.value = { ...pr.value, body: next }
+      return
+    }
+    const auth = useAuthStore()
+    if (!auth.pat) throw new Error('GitHub PAT is required to edit the PR description.')
+    const saved = await updatePullRequestBody(auth.pat, pr.value.id, next)
+    pr.value = { ...pr.value, body: saved }
+  }
+
   async function setPRDraft(isDraft: boolean): Promise<void> {
     if (!pr.value) return
     if (pr.value.isMock) {
@@ -1331,6 +1345,7 @@ export const useReviewStore = defineStore('review', () => {
     closePR,
     reopenPR,
     setPRDraft,
+    editPRDescription,
     addReviewer,
     removeReviewer,
     addLabels,
