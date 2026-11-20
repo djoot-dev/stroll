@@ -88,14 +88,14 @@ onBeforeUnmount(() => {
               No pending inline comments. You can still submit an overall review summary below.
             </div>
 
-            <div v-else class="max-h-40 space-y-1.5 overflow-y-auto pr-1">
+            <div v-else class="max-h-40 space-y-1.5 overflow-x-hidden overflow-y-auto pr-1">
               <div
                 v-for="draft in review.draftComments"
                 :key="draft.id"
                 class="flex items-start justify-between gap-3 rounded-xl border border-ochre-border bg-ochre-soft p-2.5 text-xs"
               >
-                <div class="min-w-0">
-                  <div class="font-mono text-[11px] font-medium text-ochre-text">
+                <div class="min-w-0 flex-1">
+                  <div class="font-mono text-[11px] font-medium break-all text-ochre-text">
                     {{ draft.path
                     }}<template v-if="draft.subjectType === 'FILE'">
                       <span class="ml-1 font-sans text-[10px] text-ink-muted">(file)</span>
@@ -105,7 +105,7 @@ onBeforeUnmount(() => {
                         : draft.line
                     }}</template>
                   </div>
-                  <p class="mt-0.5 line-clamp-2 text-ink">{{ draft.body }}</p>
+                  <p class="mt-0.5 line-clamp-2 break-words text-ink">{{ draft.body }}</p>
                 </div>
                 <button
                   class="shrink-0 text-ink-muted hover:text-crimson-text"
