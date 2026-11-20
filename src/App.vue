@@ -13,13 +13,16 @@ import SettingsModal from '@/components/SettingsModal.vue'
 import SplashScreen from '@/components/SplashScreen.vue'
 import TopBar from '@/components/TopBar.vue'
 import TourSidebar from '@/components/TourSidebar.vue'
+import UpdateIndicator from '@/components/UpdateIndicator.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore } from '@/stores/settings'
+import { BACKGROUND_UPDATE_CHECK_MS, useUpdatesStore } from '@/stores/updates'
 
 const auth = useAuthStore()
 const review = useReviewStore()
 const settings = useSettingsStore()
+const updates = useUpdatesStore()
 
 const SCROLL_TAP_PX = 100
 const SCROLL_HOLD_SPEED_PX = 950
@@ -227,6 +230,7 @@ function handleWindowBlur() {
 }
 
 let pulseTimerId: ReturnType<typeof setInterval> | null = null
+let updateCheckTimerId: ReturnType<typeof setInterval> | null = null
 
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
@@ -238,10 +242,16 @@ onMounted(async () => {
   const minSplashDelay = new Promise((resolve) => setTimeout(resolve, 750))
   await Promise.all([auth.init(), review.init(), minSplashDelay])
   review.screen = 'inbox'
+  // Quietly look for a new desktop release so the version indicator can surface it.
+  void updates.checkForUpdates({ silent: true })
+  updateCheckTimerId = setInterval(() => {
+    void updates.checkForUpdates({ silent: true })
+  }, BACKGROUND_UPDATE_CHECK_MS)
 })
 
 onBeforeUnmount(() => {
   if (pulseTimerId !== null) clearInterval(pulseTimerId)
+  if (updateCheckTimerId !== null) clearInterval(updateCheckTimerId)
   cancelSmoothScroll()
   window.removeEventListener('keydown', handleKeydown)
   window.removeEventListener('keyup', handleKeyup)
@@ -361,6 +371,12 @@ onBeforeUnmount(() => {
       <KeyboardShortcutsBar v-if="settings.showShortcutsBar" />
     </div>
   </Transition>
+
+  <!-- Update indicator for screens without the shortcuts footer -->
+  <UpdateIndicator
+    v-if="review.screen !== 'splash' && !(review.screen === 'review' && settings.showShortcutsBar)"
+    variant="floating"
+  />
 
   <!-- Global Modals -->
   <CommandPaletteModal :open="showCommandPalette" @close="showCommandPalette = false" />
