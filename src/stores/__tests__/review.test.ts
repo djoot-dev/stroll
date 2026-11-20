@@ -431,6 +431,29 @@ describe('useReviewStore refreshCurrentPR and PR overview comments', () => {
   })
 })
 
+describe('useReviewStore per-file commits', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.stubGlobal('localStorage', createMemoryStorage())
+    fetchPullRequestMock.mockReset()
+  })
+
+  it('resolves commits with full messages for the current and upcoming files in Demo PR mode', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+    await store.ensureFileCommitsForStep(0)
+
+    for (const step of store.tourSteps) {
+      expect(store.fileCommits[step.file.path]).toBeDefined()
+    }
+    const typesCommits = store.fileCommits['src/types/webhook.ts']
+    expect(typesCommits.map((c) => c.oid)).toEqual(['e4f5a6b', 'c111111'])
+    expect(typesCommits[0].messageHeadline).toContain('EndpointRateLimiter')
+    expect(typesCommits[0].messageBody).toContain('exponential backoff')
+    expect(typesCommits[0].isMerge).toBe(false)
+  })
+})
+
 describe('useReviewStore file-level comments', () => {
   beforeEach(() => {
     setActivePinia(createPinia())

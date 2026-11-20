@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildDiffSegments, isPureRename } from '@/services/diffParser'
 import {
+  buildFileHistoryQuery,
   detectLanguage,
+  fetchFileCommitHistory,
   fetchRestPRFiles,
   getGitHubEndpoints,
   isBinaryFilePath,
@@ -293,5 +295,85 @@ describe('github host & URL parsing', () => {
     if (wsSegs[0]?.kind === 'hunk') {
       expect(wsSegs[0].lines.every((l) => l.type === 'context')).toBe(true)
     }
+  })
+})
+
+describe('fetchFileCommitHistory', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const node = (oid: string, date: string, parents = 1) => ({
+    oid,
+    abbreviatedOid: oid.slice(0, 7),
+    messageHeadline: `headline ${oid}`,
+    messageBody: `body ${oid}`,
+    committedDate: date,
+    author: { name: 'Ada' },
+    parents: { totalCount: parents },
+  })
+
+  it('passes paths as variables and adds a lookup for the previous path of renames', () => {
+    const { query, pathVariables } = buildFileHistoryQuery([
+      { path: 'src/a "quoted".ts' },
+      { path: 'src/new.ts', previousPath: 'src/old.ts' },
+    ])
+    expect(pathVariables).toEqual({ p0: 'src/a "quoted".ts', p1: 'src/new.ts', p2: 'src/old.ts' })
+    expect(query).toContain('f0: history(first: 50, path: $p0)')
+    expect(query).toContain('f1: history(first: 50, path: $p1)')
+    expect(query).toContain('r1: history(first: 50, path: $p2)')
+    expect(query).toContain('$p2: String!')
+    expect(query).not.toContain('quoted')
+  })
+
+  it('keeps only PR commits, merges rename history, dedupes, sorts newest first and flags merges', async () => {
+    const fetchSpy = vi.spyOn(httpModule, 'httpFetch').mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          data: {
+            repository: {
+              object: {
+                f0: {
+                  nodes: [
+                    node('merge01', '2026-11-03T00:00:00Z', 2),
+                    node('aaa1111', '2026-11-02T00:00:00Z'),
+                    node('base999', '2026-10-01T00:00:00Z'),
+                  ],
+                },
+                f1: { nodes: [node('bbb2222', '2026-11-04T00:00:00Z')] },
+                r1: {
+                  nodes: [
+                    node('bbb2222', '2026-11-04T00:00:00Z'),
+                    node('aaa1111', '2026-11-02T00:00:00Z'),
+                  ],
+                },
+              },
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+    )
+
+    const result = await fetchFileCommitHistory(
+      'fake-pat',
+      'acme',
+      'stroll',
+      'headsha',
+      [{ path: 'src/a.ts' }, { path: 'src/new.ts', previousPath: 'src/old.ts' }],
+      new Set(['aaa1111', 'bbb2222', 'merge01']),
+    )
+
+    const body = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body))
+    expect(body.variables).toMatchObject({ owner: 'acme', repo: 'stroll', headOid: 'headsha' })
+
+    expect(result.get('src/a.ts')?.map((c) => c.oid)).toEqual(['merge01', 'aaa1111'])
+    expect(result.get('src/a.ts')?.[0]).toMatchObject({ isMerge: true, shortOid: 'merge01' })
+    expect(result.get('src/a.ts')?.[1]).toMatchObject({
+      isMerge: false,
+      messageBody: 'body aaa1111',
+      authorName: 'Ada',
+    })
+    expect(result.get('src/new.ts')?.map((c) => c.oid)).toEqual(['bbb2222', 'aaa1111'])
   })
 })

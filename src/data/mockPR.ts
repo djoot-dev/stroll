@@ -850,3 +850,23 @@ const delayMs = computeBackoffMs(attempt, {
     },
   ],
 }
+
+/**
+ * Which mock commits touched each mock file, with full commit messages, so the
+ * per-file commit panel can be demoed offline. Newest commit first.
+ */
+export const MOCK_COMMIT_BODIES: Record<string, string> = {
+  c111111:
+    'Adds the webhook_deliveries table so each delivery attempt is persisted\nand can be retried after a crash. Indexed on (endpoint_id, status).',
+  e4f5a6b:
+    'Introduces a token-bucket EndpointRateLimiter and makes WebhookDispatcher\nretry failed deliveries with exponential backoff.\n\nThe settings card gains a per-endpoint rate limit input.',
+}
+
+export const MOCK_FILE_COMMIT_OIDS: Record<string, string[]> = {
+  'db/migrations/004_webhook_deliveries.sql': ['c111111'],
+  'src/types/webhook.ts': ['e4f5a6b', 'c111111'],
+  'src/services/rateLimiter.ts': ['e4f5a6b'],
+  'src/services/webhookDispatcher.ts': ['e4f5a6b'],
+  'src/tests/webhookDispatcher.test.ts': ['e4f5a6b'],
+  'src/components/WebhookEndpointCard.vue': ['e4f5a6b'],
+}
