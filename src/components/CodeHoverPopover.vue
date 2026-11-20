@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ArrowUpRight, FileCode2, GitCommitHorizontal, GitCompare, Layers, X } from '@lucide/vue'
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { HoverSymbolInfo } from '@/services/codeContext'
 import { highlightLinesWithCodeMirror } from '@/services/highlighter'
 import type { GitBlameInfo } from '@/services/native'
+import { computePopoverPosition } from '@/services/popoverPosition'
 
 const props = defineProps<{
   info: HoverSymbolInfo | null
@@ -51,21 +52,63 @@ function formatBlameDate(timestamp: number): string {
   return new Date(timestamp * 1000).toLocaleDateString()
 }
 
-const popoverStyle = computed(() => {
-  const maxWidth = 460
-  const maxHeight = 380
-  const vw = typeof window !== 'undefined' ? window.innerWidth : 1280
-  const vh = typeof window !== 'undefined' ? window.innerHeight : 800
+const POPOVER_WIDTH = 460
+const ESTIMATED_HEIGHT = 380
 
-  const left = Math.min(Math.max(12, props.x), vw - maxWidth - 16)
-  const placeAbove = props.y + maxHeight + 24 > vh && props.y > maxHeight
-  const top = placeAbove ? Math.max(12, props.y - 10) : Math.min(props.y + 18, vh - 120)
+const popoverEl = ref<HTMLElement | null>(null)
+const measuredHeight = ref<number | null>(null)
+const viewport = ref({
+  width: typeof window !== 'undefined' ? window.innerWidth : 1280,
+  height: typeof window !== 'undefined' ? window.innerHeight : 800,
+})
+
+let resizeObserver: ResizeObserver | null = null
+
+function measure() {
+  const el = popoverEl.value
+  if (!el) return
+  // scrollHeight (+ borders) reflects the natural height even when max-height caps it.
+  measuredHeight.value = el.scrollHeight + (el.offsetHeight - el.clientHeight)
+}
+
+function handleWindowResize() {
+  viewport.value = { width: window.innerWidth, height: window.innerHeight }
+}
+
+onMounted(() => {
+  measure()
+  window.addEventListener('resize', handleWindowResize)
+  if (typeof ResizeObserver !== 'undefined' && popoverEl.value) {
+    resizeObserver = new ResizeObserver(() => measure())
+    // Observe the content so toggles (Peek, Before/After) re-align the popover.
+    for (const child of Array.from(popoverEl.value.children)) resizeObserver.observe(child)
+    resizeObserver.observe(popoverEl.value)
+  }
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', handleWindowResize)
+  resizeObserver?.disconnect()
+  resizeObserver = null
+})
+
+const popoverStyle = computed(() => {
+  const pos = computePopoverPosition({
+    x: props.x,
+    y: props.y,
+    width: POPOVER_WIDTH,
+    height: measuredHeight.value ?? ESTIMATED_HEIGHT,
+    viewportWidth: viewport.value.width,
+    viewportHeight: viewport.value.height,
+  })
 
   return {
-    left: `${left}px`,
-    top: `${top}px`,
-    transform: placeAbove ? 'translateY(-100%)' : undefined,
-    width: `${maxWidth}px`,
+    left: `${pos.left}px`,
+    top: `${pos.top}px`,
+    width: `${pos.width}px`,
+    maxHeight: pos.maxHeight !== null ? `${pos.maxHeight}px` : undefined,
+    overflowY: pos.maxHeight !== null ? ('auto' as const) : undefined,
+    visibility: measuredHeight.value === null ? ('hidden' as const) : undefined,
   }
 })
 
@@ -81,6 +124,7 @@ const hasBeforeAfter = computed(
 <template>
   <Teleport to="body">
     <div
+      ref="popoverEl"
       class="animate-pop-in stroll-elevated fixed z-50 overflow-hidden rounded-2xl border border-border bg-canvas-subtle"
       :style="popoverStyle"
       @mouseenter="emit('mouseenter')"
