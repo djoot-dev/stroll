@@ -6,6 +6,7 @@ import {
   Code2,
   Download,
   Eye,
+  ExternalLink,
   EyeOff,
   FolderGit2,
   FolderOpen,
@@ -31,11 +32,14 @@ import { computed, onMounted, ref, watch } from 'vue'
 import {
   inspectLocalRepo,
   isTauriRuntime,
+  openExternalUrl,
   pickLocalDirectory,
   requestNotificationPermission,
 } from '@/services/native'
+import { fetchReleaseNotes, RELEASES_PAGE_URL, type ReleaseNote } from '@/services/releaseNotes'
 import { checkForAppUpdate, type AvailableUpdate } from '@/services/updater'
 import { useAuthStore } from '@/stores/auth'
+import MarkdownContent from './MarkdownContent.vue'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore, type SettingsSection, type ThemeMode } from '@/stores/settings'
 import type { TourDirection } from '@/types/pr'
@@ -58,6 +62,8 @@ const appVersion = ref('0.1.0')
 const updateState = ref<'idle' | 'checking' | 'up-to-date' | 'available' | 'installing' | 'error'>('idle')
 const availableUpdate = ref<AvailableUpdate | null>(null)
 const updateMessage = ref('')
+const releaseNotes = ref<ReleaseNote[]>([])
+const isLoadingReleaseNotes = ref(false)
 
 const linkedRepos = computed(() => Object.entries(review.repoPaths))
 const activePRRepo = computed(() =>
@@ -78,11 +84,13 @@ async function handleCheckForUpdates() {
   updateState.value = 'checking'
   updateMessage.value = ''
   availableUpdate.value = null
+  releaseNotes.value = []
   try {
     const result = await checkForAppUpdate()
     if (result.available) {
       availableUpdate.value = result
       updateState.value = 'available'
+      void loadReleaseNotes(result)
     } else {
       updateState.value = 'up-to-date'
     }
@@ -90,6 +98,27 @@ async function handleCheckForUpdates() {
     updateState.value = 'error'
     updateMessage.value = err instanceof Error ? err.message : 'Unable to check for updates.'
   }
+}
+
+async function loadReleaseNotes(update: AvailableUpdate) {
+  isLoadingReleaseNotes.value = true
+  try {
+    const notes = await fetchReleaseNotes(appVersion.value, update.version, update.body)
+    // Ignore results from a stale check if the user re-checked meanwhile.
+    if (availableUpdate.value === update) {
+      releaseNotes.value = notes
+    }
+  } finally {
+    isLoadingReleaseNotes.value = false
+  }
+}
+
+function formatReleaseDate(iso?: string): string {
+  if (!iso) return ''
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime())
+    ? ''
+    : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
 async function handleInstallUpdate() {
@@ -966,6 +995,57 @@ async function handleResetDefaults() {
                       <RefreshCw v-else class="h-3.5 w-3.5" />
                       <span>Check for Updates</span>
                     </button>
+                  </div>
+                </div>
+
+                <div
+                  v-if="(updateState === 'available' || updateState === 'installing') && availableUpdate"
+                  class="rounded-xl border border-border bg-canvas/60 p-4"
+                >
+                  <div class="mb-3 flex items-center justify-between gap-3">
+                    <p class="text-xs font-medium text-ink">What's new</p>
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink"
+                      @click="openExternalUrl(RELEASES_PAGE_URL)"
+                    >
+                      <span>All releases</span>
+                      <ExternalLink class="h-3 w-3" />
+                    </button>
+                  </div>
+
+                  <div v-if="isLoadingReleaseNotes" class="flex items-center gap-2 text-[11px] text-ink-muted">
+                    <Loader2 class="h-3.5 w-3.5 animate-spin" />
+                    <span>Loading release notes...</span>
+                  </div>
+                  <p v-else-if="releaseNotes.length === 0" class="text-[11px] text-ink-muted">
+                    No release notes available for v{{ availableUpdate.version }}.
+                  </p>
+                  <div v-else class="max-h-80 space-y-4 overflow-y-auto pr-1">
+                    <section
+                      v-for="note in releaseNotes"
+                      :key="note.version"
+                      class="border-b border-border pb-4 last:border-b-0 last:pb-0"
+                    >
+                      <div class="mb-1.5 flex items-baseline justify-between gap-3">
+                        <button
+                          type="button"
+                          class="text-xs font-semibold text-ink hover:underline"
+                          @click="openExternalUrl(note.url)"
+                        >
+                          v{{ note.version }}
+                        </button>
+                        <span v-if="note.publishedAt" class="text-[11px] text-ink-muted">
+                          {{ formatReleaseDate(note.publishedAt) }}
+                        </span>
+                      </div>
+                      <MarkdownContent
+                        v-if="note.body"
+                        :content="note.body"
+                        class="text-xs text-ink-secondary"
+                      />
+                      <p v-else class="text-[11px] text-ink-muted">No notes for this release.</p>
+                    </section>
                   </div>
                 </div>
               </div>
