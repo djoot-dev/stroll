@@ -137,6 +137,7 @@ export interface PersistedAppSettings {
   theme: ThemeMode
   autoAdvanceOnReview: boolean
   sidebarDefaultOpen: boolean
+  sidebarWidth: number
   codeFontSize: number
   requireAltForHover: boolean
   wrapLines: boolean
