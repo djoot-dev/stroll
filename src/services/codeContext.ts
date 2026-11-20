@@ -1,4 +1,10 @@
 import type { PRFile } from '@/types/pr'
+import {
+  constLanguageFamily,
+  extractConstDeclarations,
+  extractConstValueFromSnippet,
+  type ConstValueNote,
+} from './constValues'
 import type { DiffLine } from './diffParser'
 import { isTauriRuntime, resolveRepoSymbol } from './native'
 import {
@@ -15,6 +21,7 @@ export type SymbolKind =
   | 'enum'
   | 'function'
   | 'const'
+  | 'enumMember'
   | 'component'
   | 'other'
 
@@ -29,6 +36,13 @@ export interface SymbolDeclaration {
   baseSnippet: string | null
   isModifiedInPR: boolean
   source?: 'pr' | 'repo'
+  /** Value expression of a constant / enum member as written (collapsed, truncated). */
+  value?: string | null
+  /** Value before the PR, when it differs from `value`'s declaration in the base. */
+  baseValue?: string | null
+  valueNote?: ConstValueNote | null
+  /** Only resolvable from its own file (non-exported / private declarations). */
+  fileLocal?: boolean
 }
 
 export interface SymbolUsage {
@@ -44,7 +58,7 @@ export interface HoverSymbolInfo {
 }
 
 const DECL_REGEX =
-  /^\s*(?:export\s+(?:default\s+)?)?(?:declare\s+)?(?:(?:public|internal|private|protected|static|sealed|partial|abstract|readonly|ref|new|async)\s+)*(record\s+(?:struct|class)|record|interface|type|class|enum|function|const|def|fn|struct)\s+([A-Za-z_$][\w$]*)/
+  /^\s*(?:export\s+(?:default\s+)?)?(?:declare\s+)?(?:(?:public|internal|private|protected|static|sealed|partial|abstract|readonly|ref|new|async)\s+)*(?:const\s+(?=enum\b))?(record\s+(?:struct|class)|record|interface|type|class|enum|function|const|def|fn|struct)\s+([A-Za-z_$][\w$]*)/
 
 function normalizeKind(raw: string): SymbolKind {
   switch (raw) {
@@ -66,7 +80,11 @@ function normalizeKind(raw: string): SymbolKind {
     case 'method':
       return 'function'
     case 'const':
+    case 'static':
       return 'const'
+    case 'enumMember':
+    case 'enum_member':
+      return 'enumMember'
     case 'component':
       return 'component'
     default:
@@ -142,31 +160,98 @@ function toPascalCase(name: string): string {
     .join('')
 }
 
+interface ExtractedDeclaration {
+  line: number
+  kind: SymbolKind
+  docComment: string | null
+  snippet: string
+  /** What `isModifiedInPR` compares between base and head. */
+  signature: string
+  value: string | null
+  valueNote: ConstValueNote | null
+  fileLocal: boolean
+}
+
+/** Enum header (+ opening brace), an ellipsis for skipped members, then the member itself. */
+function buildEnumMemberSnippet(
+  lines: string[],
+  containerIdx: number,
+  startIdx: number,
+  endIdx: number,
+): string {
+  const out: string[] = []
+  let i = containerIdx
+  while (i < startIdx && i <= containerIdx + 3) {
+    out.push(lines[i])
+    if (lines[i].includes('{') || lines[i].trimEnd().endsWith(':')) break
+    i++
+  }
+  const memberLines = lines.slice(startIdx, Math.min(endIdx, startIdx + 5) + 1)
+  if (startIdx > i + 1) {
+    const indent = memberLines[0]?.match(/^\s*/)?.[0] ?? '  '
+    out.push(`${indent}…`)
+  }
+  out.push(...memberLines)
+  return out.join('\n').trimEnd()
+}
+
 function extractDeclarationsFromContent(
   content: string,
   path: string,
   language: string,
-): Map<string, { line: number; kind: SymbolKind; docComment: string | null; snippet: string }> {
-  const map = new Map<
-    string,
-    { line: number; kind: SymbolKind; docComment: string | null; snippet: string }
-  >()
+): Map<string, ExtractedDeclaration> {
+  const map = new Map<string, ExtractedDeclaration>()
   const lines = content.split('\n')
+  const family = constLanguageFamily(language, path)
+  const constStartLines = new Set<number>()
+
+  for (const decl of extractConstDeclarations(content, language, path)) {
+    if (decl.kind === 'const') constStartLines.add(decl.startIdx)
+    if (map.has(decl.name)) continue
+    const snippet =
+      decl.containerIdx !== null
+        ? buildEnumMemberSnippet(lines, decl.containerIdx, decl.startIdx, decl.endIdx)
+        : lines
+            .slice(decl.startIdx, Math.min(decl.endIdx, decl.startIdx + 11) + 1)
+            .join('\n')
+            .trimEnd()
+    map.set(decl.name, {
+      line: decl.startIdx + 1,
+      kind: decl.kind,
+      docComment: extractLeadingDocComment(lines, decl.startIdx),
+      snippet,
+      signature:
+        decl.kind === 'enumMember' ? `${decl.value ?? ''}|${decl.valueNote ?? ''}` : snippet,
+      value: decl.value,
+      valueNote: decl.valueNote,
+      fileLocal: decl.fileLocal,
+    })
+  }
 
   lines.forEach((line, idx) => {
+    if (constStartLines.has(idx)) return
     const match = line.match(DECL_REGEX)
     if (!match) return
     const rawKind = match[1]
     const name = match[2]
-    // Skip very short or local-looking lowercase consts unless exported
-    if (rawKind === 'const' && !/^\s*export\b/.test(line)) return
+    if (rawKind === 'const') {
+      // C# / Rust / Python constants are handled above (the regex would capture the type).
+      if (family !== 'ts' && family !== null) return
+      // Skip very short or local-looking lowercase consts unless exported
+      if (!/^\s*export\b/.test(line)) return
+    }
     if (map.has(name)) return
 
+    const snippet = extractDeclarationSnippet(lines, idx)
     map.set(name, {
       line: idx + 1,
       kind: normalizeKind(rawKind),
       docComment: extractLeadingDocComment(lines, idx),
-      snippet: extractDeclarationSnippet(lines, idx),
+      snippet,
+      signature: snippet,
+      value: null,
+      valueNote: null,
+      fileLocal: false,
     })
   })
 
@@ -180,11 +265,16 @@ function extractDeclarationsFromContent(
     if (componentName && !map.has(componentName)) {
       const scriptIdx = lines.findIndex((l) => /^\s*<script\b/i.test(l))
       const startIdx = scriptIdx >= 0 ? scriptIdx : 0
+      const snippet = lines.slice(startIdx, startIdx + 14).join('\n').trimEnd()
       map.set(componentName, {
         line: startIdx + 1,
         kind: 'component',
         docComment: extractLeadingDocComment(lines, startIdx),
-        snippet: lines.slice(startIdx, startIdx + 14).join('\n').trimEnd(),
+        snippet,
+        signature: snippet,
+        value: null,
+        valueNote: null,
+        fileLocal: false,
       })
     }
   }
@@ -216,7 +306,7 @@ export function buildPRSymbolIndex(files: PRFile[]): PRSymbolIndex {
       const isModifiedInPR =
         file.status === 'added' ||
         baseInfo === null ||
-        baseInfo.snippet.trim() !== headInfo.snippet.trim()
+        baseInfo.signature.trim() !== headInfo.signature.trim()
 
       const decl: SymbolDeclaration = {
         name,
@@ -228,6 +318,10 @@ export function buildPRSymbolIndex(files: PRFile[]): PRSymbolIndex {
         headSnippet: headInfo.snippet,
         baseSnippet: baseInfo?.snippet ?? null,
         isModifiedInPR,
+        value: headInfo.value,
+        baseValue: baseInfo?.value ?? null,
+        valueNote: headInfo.valueNote,
+        fileLocal: headInfo.fileLocal,
       }
 
       if (!index.has(name)) index.set(name, [])
@@ -279,14 +373,71 @@ export function findUsagesInPR(
  * Resolves hover context for an identifier in `currentFile`.
  * Prefers declarations in `currentFile`, otherwise resolves to other PR files.
  */
+export interface QualifiedName {
+  qualifier: string
+  separator: '.' | '::'
+  member: string
+}
+
+/** Splits `Status.Active` / `Status::Active` into qualifier and member (`null` for bare names). */
+export function splitQualifiedName(identifier: string): QualifiedName | null {
+  const m = identifier.match(/^([A-Za-z_$][\w$]*)(\.|::)([A-Za-z_$][\w$]*)$/)
+  if (!m) return null
+  return { qualifier: m[1], separator: m[2] as '.' | '::', member: m[3] }
+}
+
+function isVisibleFrom(decl: SymbolDeclaration, currentPath: string): boolean {
+  return !decl.fileLocal || decl.path === currentPath
+}
+
+const CONST_LIKE_KINDS: ReadonlySet<SymbolKind> = new Set<SymbolKind>(['const', 'enumMember'])
+
+/**
+ * For `Qualifier.Member` with no qualified entry in the index, finds a bare constant
+ * `Member` (e.g. a C# `public const` inside `class Qualifier`), preferring declarations
+ * whose file declares a type named `Qualifier`.
+ */
+function findQualifiedMemberCandidates(
+  q: QualifiedName,
+  currentPath: string,
+  allFiles: PRFile[],
+  index: PRSymbolIndex,
+): SymbolDeclaration[] {
+  const bare = (index.get(q.member) ?? []).filter(
+    (d) => CONST_LIKE_KINDS.has(d.kind) && isVisibleFrom(d, currentPath),
+  )
+  if (bare.length <= 1) return bare
+  const escaped = q.qualifier.replace(/[$]/g, '\\$')
+  const typeRe = new RegExp(
+    `\\b(?:class|struct|record|interface|enum|object|impl|trait|namespace)\\s+${escaped}\\b`,
+  )
+  const declaring = bare.filter((d) => {
+    const file = allFiles.find((f) => f.path === d.path)
+    return typeRe.test(file?.headContent ?? file?.baseContent ?? '')
+  })
+  return declaring.length > 0 ? declaring : bare
+}
+
+function lookupVisibleCandidates(
+  identifier: string,
+  currentPath: string,
+  allFiles: PRFile[],
+  index: PRSymbolIndex,
+): SymbolDeclaration[] {
+  const direct = (index.get(identifier) ?? []).filter((d) => isVisibleFrom(d, currentPath))
+  if (direct.length > 0) return direct
+  const q = splitQualifiedName(identifier)
+  return q ? findQualifiedMemberCandidates(q, currentPath, allFiles, index) : []
+}
+
 export function resolveHoverSymbol(
   identifier: string,
   currentFile: PRFile,
   allFiles: PRFile[],
   index: PRSymbolIndex,
 ): HoverSymbolInfo | null {
-  const candidates = index.get(identifier)
-  if (!candidates || candidates.length === 0) return null
+  const candidates = lookupVisibleCandidates(identifier, currentFile.path, allFiles, index)
+  if (candidates.length === 0) return null
 
   const sameFile = candidates.find((c) => c.path === currentFile.path)
   const declaration = sameFile ?? candidates[0]
@@ -302,6 +453,51 @@ export function resolveHoverSymbol(
     usages,
     isSameFile: declaration.path === currentFile.path,
   }
+}
+
+export interface HoverableSymbols {
+  has(name: string): boolean
+}
+
+export interface HoverableSymbolsOptions {
+  index: PRSymbolIndex
+  currentPath: string
+  /** Names resolvable via the local repo (imported names, C# repo types). */
+  repoNames?: ReadonlySet<string> | null
+}
+
+/**
+ * Decides which identifiers in the current file get hover affordances. Bare names follow the
+ * PR index (minus other files' file-local declarations) plus repo-resolvable names. Qualified
+ * names (`Status.Active`, `Limits::MAX`) are hoverable when indexed, when the member is a
+ * visible PR constant, or when the PascalCase qualifier itself is repo-resolvable.
+ */
+export function createHoverableSymbols(opts: HoverableSymbolsOptions): HoverableSymbols {
+  const { index, currentPath } = opts
+  const repoNames = opts.repoNames ?? null
+  const visible = (name: string) =>
+    (index.get(name) ?? []).some((d) => isVisibleFrom(d, currentPath))
+
+  return {
+    has(name: string): boolean {
+      const q = splitQualifiedName(name)
+      if (!q) return visible(name) || Boolean(repoNames?.has(name))
+      if (visible(name)) return true
+      const memberIsConst = (index.get(q.member) ?? []).some(
+        (d) => CONST_LIKE_KINDS.has(d.kind) && isVisibleFrom(d, currentPath),
+      )
+      if (memberIsConst) return true
+      return /^[A-Z]/.test(q.qualifier) && Boolean(repoNames?.has(q.qualifier))
+    },
+  }
+}
+
+/** Fills `value` / `valueNote` for a constant resolved from a bare snippet (repo fallback). */
+function withSnippetValue(decl: SymbolDeclaration): SymbolDeclaration {
+  if (!CONST_LIKE_KINDS.has(decl.kind)) return decl
+  const extracted = extractConstValueFromSnippet(decl.headSnippet, decl.name, decl.language)
+  if (!extracted) return decl
+  return { ...decl, value: extracted.value, valueNote: extracted.valueNote }
 }
 
 export interface ImportBinding {
@@ -489,31 +685,48 @@ export async function resolveHoverSymbolWithRepoFallback(
   if (!repoPath || !isTauriRuntime()) return null
 
   const sourceContent = currentFile.headContent ?? currentFile.baseContent
+  const qualified = splitQualifiedName(identifier)
+  // For `Type.Member`, resolve the type the usual way and look the member up inside it.
+  const lookupName = qualified?.qualifier ?? identifier
 
   const csharpEntry =
     csharpIndex && isCSharpPath(currentFile.path)
       ? pickCSharpTypeEntry(
-          identifier,
+          lookupName,
           csharpIndex,
           extractCSharpScopeContext(sourceContent),
           currentFile.path,
         )
       : null
 
-  const binding = csharpEntry ? null : findImportBindingForSymbol(sourceContent, identifier)
+  const binding = csharpEntry ? null : findImportBindingForSymbol(sourceContent, lookupName)
+  const containerName = csharpEntry?.name ?? binding?.importedName ?? lookupName
 
   const resolved = await resolveRepoSymbol({
     repoPath,
     importerPath: currentFile.path,
-    symbolName: csharpEntry?.name ?? binding?.importedName ?? identifier,
+    symbolName: qualified ? qualified.member : containerName,
+    container: qualified ? containerName : null,
     importSpecifier: csharpEntry?.namespace ?? binding?.specifier ?? null,
     targetPath: csharpEntry?.path ?? null,
   })
 
-  if (!resolved) return null
+  if (!resolved) {
+    // `Namespace.Type` etc.: not a member we can find, so behave like hovering the bare name.
+    return qualified
+      ? resolveHoverSymbolWithRepoFallback(
+          qualified.member,
+          currentFile,
+          allFiles,
+          index,
+          repoPath,
+          csharpIndex,
+        )
+      : null
+  }
 
-  const declaration: SymbolDeclaration = {
-    name: resolved.name,
+  const declaration: SymbolDeclaration = withSnippetValue({
+    name: qualified ? identifier : resolved.name,
     kind: normalizeKind(resolved.kind),
     path: resolved.path,
     line: resolved.line,
@@ -523,7 +736,7 @@ export async function resolveHoverSymbolWithRepoFallback(
     baseSnippet: null,
     isModifiedInPR: false,
     source: 'repo',
-  }
+  })
 
   const usages = findUsagesInPR(
     declaration.name,

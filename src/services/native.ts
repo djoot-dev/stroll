@@ -22,6 +22,8 @@ export interface ResolveRepoSymbolRequest {
   importSpecifier?: string | null
   /** Repo-relative file known to declare the symbol; skips import-path resolution. */
   targetPath?: string | null
+  /** When set, `symbolName` is a member looked up inside this type/enum (e.g. `Status.Active`). */
+  container?: string | null
 }
 
 export interface CSharpTypeEntry {
