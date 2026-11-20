@@ -15,6 +15,7 @@ jobs:
     outputs:
       release_id: ${{ steps.release.outputs.release_id }}
       tag_name: ${{ steps.release.outputs.tag_name }}
+      release_body: ${{ steps.release.outputs.release_body }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -48,6 +49,16 @@ jobs:
           > **macOS note:** This build is ad-hoc signed (not notarized with an Apple Developer certificate). If macOS Gatekeeper blocks the app on first launch, run `xattr -cr /Applications/Stroll.app` in Terminal or allow it in **System Settings → Privacy & Security**.
           EOF
           )
+            # Generate the "What's Changed" list now (instead of when the draft is
+            # published) so it also lands in latest.json, where the in-app updater
+            # reads release notes from.
+            NOTES=$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+              -f tag_name="$TAG" \
+              -f target_commitish="${GITHUB_SHA}" \
+              --jq '.body' || true)
+            if [ -n "$NOTES" ]; then
+              BODY="${BODY}"$'\n\n'"${NOTES}"
+            fi
             RELEASE_ID=$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
               -f tag_name="$TAG" \
               -f target_commitish="${GITHUB_SHA}" \
@@ -59,10 +70,16 @@ jobs:
             echo "Created draft release $RELEASE_ID for $TAG"
           else
             echo "Reusing existing draft release $RELEASE_ID for $TAG"
+            BODY=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.body // ""')
           fi
 
           echo "release_id=${RELEASE_ID}" >> "$GITHUB_OUTPUT"
           echo "tag_name=${TAG}" >> "$GITHUB_OUTPUT"
+          {
+            echo "release_body<<STROLL_RELEASE_BODY_EOF"
+            echo "$BODY"
+            echo "STROLL_RELEASE_BODY_EOF"
+          } >> "$GITHUB_OUTPUT"
 
   publish-tauri:
     needs: create-release
@@ -134,6 +151,8 @@ jobs:
           # APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
+          # Becomes the `notes` field in latest.json (the release itself is not edited).
+          releaseBody: ${{ needs.create-release.outputs.release_body }}
           args: ${{ matrix.args }}
           retryAttempts: 2
 
