@@ -670,3 +670,67 @@ describe('useReviewStore editPRDescription', () => {
     expect(store.pr?.body).toBe('Original')
   })
 })
+
+describe('useReviewStore tour start state', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.stubGlobal('localStorage', createMemoryStorage())
+    fetchPullRequestMock.mockReset()
+  })
+
+  function otherDirection(dir: string): 'top-down' | 'bottom-up' {
+    return dir === 'bottom-up' ? 'top-down' : 'bottom-up'
+  }
+
+  it('stays on the first step when the direction changes before the tour starts', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+    expect(store.tourStarted).toBe(false)
+
+    await store.setTourDirection(otherDirection(store.tourDirection))
+    expect(store.currentStepIndex).toBe(0)
+    expect(store.tourStarted).toBe(false)
+
+    await store.setTourDirection(otherDirection(store.tourDirection))
+    expect(store.currentStepIndex).toBe(0)
+    expect(store.tourStarted).toBe(false)
+  })
+
+  it('stays on the first step when steps are reordered before the tour starts', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+    const lastPath = store.tourSteps[store.tourSteps.length - 1].file.path
+
+    store.togglePinStep(lastPath)
+    expect(store.currentStepIndex).toBe(0)
+    store.moveStep(store.tourSteps[0].file.path, 1)
+    expect(store.currentStepIndex).toBe(0)
+    store.toggleHideStep(store.tourSteps[0].file.path)
+    expect(store.currentStepIndex).toBe(0)
+    store.resetTourCustomization()
+    expect(store.currentStepIndex).toBe(0)
+    expect(store.tourStarted).toBe(false)
+  })
+
+  it('keeps following the active file across direction changes once the tour has started', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+    store.startTour()
+    expect(store.tourStarted).toBe(true)
+
+    const activePath = store.tourSteps[0].file.path
+    store.openOverview()
+    await store.setTourDirection(otherDirection(store.tourDirection))
+    expect(store.tourStarted).toBe(true)
+    expect(store.tourSteps[store.currentStepIndex].file.path).toBe(activePath)
+  })
+
+  it('resets the started state when a PR is activated again', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+    store.startTour()
+    store.backToInbox()
+    await store.loadMockPR()
+    expect(store.tourStarted).toBe(false)
+  })
+})
