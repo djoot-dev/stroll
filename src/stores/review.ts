@@ -30,6 +30,14 @@ import {
   updateIssueComment as apiUpdateIssueComment,
   updateReviewComment as apiUpdateReviewComment,
 } from '@/services/github'
+import type { PRHeadPulse } from '@/services/github'
+import {
+  baselineFromPR,
+  baselineFromPulse,
+  completeBaseline,
+  detectPulseChange,
+  type PulseBaseline,
+} from '@/services/prPulse'
 import { buildReadingOrder } from '@/services/readingOrder'
 import {
   computeFileFingerprint,
@@ -86,6 +94,8 @@ export const useReviewStore = defineStore('review', () => {
   const isRefreshingPR = ref(false)
   const prHasRemoteUpdates = ref(false)
   const remoteUpdateSummary = ref<string | null>(null)
+  let pulseBaseline: PulseBaseline | null = null
+  let latestPulse: PRHeadPulse | null = null
   const prError = ref<string | null>(null)
   const refreshError = ref<string | null>(null)
   const isSubmittingReview = ref(false)
@@ -222,6 +232,8 @@ export const useReviewStore = defineStore('review', () => {
     sidebarOpen.value = settings.sidebarDefaultOpen
     prHasRemoteUpdates.value = false
     remoteUpdateSummary.value = null
+    pulseBaseline = baselineFromPR(data)
+    latestPulse = null
     refreshError.value = null
     submitError.value = null
     submitSuccessMessage.value = null
@@ -362,6 +374,8 @@ export const useReviewStore = defineStore('review', () => {
       pr.value = data
       prHasRemoteUpdates.value = false
       remoteUpdateSummary.value = null
+      pulseBaseline = baselineFromPR(data)
+      latestPulse = null
       fileFingerprints = nextFingerprints
       reviewedPaths.value = restoredPaths
 
@@ -392,6 +406,8 @@ export const useReviewStore = defineStore('review', () => {
   function dismissRemoteUpdates(): void {
     prHasRemoteUpdates.value = false
     remoteUpdateSummary.value = null
+    // Treat whatever triggered the banner as seen, so it doesn't reappear on the next poll.
+    if (latestPulse) pulseBaseline = baselineFromPulse(latestPulse)
   }
 
   async function checkForRemotePRUpdates(): Promise<void> {
@@ -400,6 +416,7 @@ export const useReviewStore = defineStore('review', () => {
     }
     const auth = useAuthStore()
     if (!auth.pat) return
+    const polledBaseline = pulseBaseline
     try {
       const pulse = await fetchPRHeadPulse(
         auth.pat,
@@ -407,15 +424,17 @@ export const useReviewStore = defineStore('review', () => {
         pr.value.repo,
         pr.value.number,
       )
-      if (!pulse) return
-      if (pulse.headRefOid !== pr.value.headRefOid) {
+      // Skip if the PR was switched or reloaded while the poll was in flight.
+      if (!pulse || !pulseBaseline || pulseBaseline !== polledBaseline || isRefreshingPR.value) {
+        return
+      }
+      latestPulse = pulse
+      const change = detectPulseChange(pulseBaseline, pulse)
+      pulseBaseline = completeBaseline(pulseBaseline, pulse)
+      if (change === 'commits') {
         prHasRemoteUpdates.value = true
         remoteUpdateSummary.value = 'New commits have been pushed to this Pull Request.'
-      } else if (
-        pulse.commentCount > pr.value.issueComments.length ||
-        pulse.threadCount > pr.value.threads.length ||
-        pulse.updatedAt > pr.value.updatedAt
-      ) {
+      } else if (change === 'activity' && !prHasRemoteUpdates.value) {
         prHasRemoteUpdates.value = true
         remoteUpdateSummary.value = 'New comments or activity arrived on GitHub.'
       }
