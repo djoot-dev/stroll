@@ -2042,6 +2042,26 @@ export async function mergePullRequest(
   return data.mergePullRequest.pullRequest.state
 }
 
+export async function updatePullRequestBody(
+  pat: string,
+  pullRequestId: string,
+  body: string,
+): Promise<string> {
+  const mutation = `
+    mutation UpdatePullRequestBody($pullRequestId: ID!, $body: String!) {
+      updatePullRequest(input: { pullRequestId: $pullRequestId, body: $body }) {
+        pullRequest { body }
+      }
+    }
+  `
+  const data = await graphql<{ updatePullRequest: { pullRequest: { body: string | null } } }>(
+    pat,
+    mutation,
+    { pullRequestId, body },
+  )
+  return data.updatePullRequest.pullRequest.body ?? ''
+}
+
 export async function closePullRequest(pat: string, pullRequestId: string): Promise<'CLOSED'> {
   const mutation = `
     mutation ClosePullRequest($pullRequestId: ID!) {
