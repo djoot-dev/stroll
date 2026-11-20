@@ -4074,7 +4074,7 @@ dependencies = [
 
 [[package]]
 name = "stroll"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "keyring",
  "serde",
