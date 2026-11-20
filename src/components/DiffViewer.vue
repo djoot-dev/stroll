@@ -30,6 +30,7 @@ import {
   resolveHoverSymbolWithRepoFallback,
   type HoverableSymbols,
   type HoverSymbolInfo,
+  type SymbolUsage,
 } from '@/services/codeContext'
 import { isCSharpPath, loadCSharpTypeIndex, type CSharpTypeIndex } from '@/services/csharpIndex'
 import { buildDiffSegments, isPureRename, type DiffLine } from '@/services/diffParser'
@@ -128,6 +129,26 @@ function clearHoverTimers() {
 function closePopoverImmediately() {
   clearHoverTimers()
   hoverState.value = null
+}
+
+/** Line (in this file) of the "Used in" popover entry under the pointer. */
+const hoveredUsageLine = ref<number | null>(null)
+
+function handleUsageHover(usage: SymbolUsage | null) {
+  hoveredUsageLine.value = usage && usage.path === props.step.file.path ? usage.line : null
+}
+
+watch(hoverState, (state) => {
+  if (!state) hoveredUsageLine.value = null
+})
+
+/** Usage line numbers refer to head content, or base content for deleted files. */
+function isHoveredUsageLine(line: { newLineNumber?: number | null; oldLineNumber?: number | null }) {
+  const target = hoveredUsageLine.value
+  if (target === null) return false
+  return props.step.file.headContent != null
+    ? line.newLineNumber === target
+    : line.oldLineNumber === target
 }
 
 const isGeneratedStep = computed(() =>
@@ -1518,6 +1539,9 @@ function statusBadgeClass(status: string): string {
                       : searchMatchSet.has(line.key)
                         ? 'bg-ochre-soft/20'
                         : '',
+                    isHoveredUsageLine(line)
+                      ? 'inset-ring-1 inset-ring-plum-border shadow-[inset_0_0_0_9999px_var(--color-plum-soft)]'
+                      : '',
                   ]"
                   @mousedown.left="startLineDrag(line)"
                   @mouseenter="handleLineMouseEnter(line, seg.lines, lIdx)"
@@ -1604,6 +1628,9 @@ function statusBadgeClass(status: string): string {
                     : searchMatchSet.has(line.key)
                       ? 'bg-ochre-soft/20'
                       : '',
+                  isHoveredUsageLine(line)
+                    ? 'inset-ring-1 inset-ring-plum-border shadow-[inset_0_0_0_9999px_var(--color-plum-soft)]'
+                    : '',
                 ]"
                 @mousedown.left="startLineDrag(line)"
                 @mouseenter="handleLineMouseEnter(line, seg.lines, lIdx)"
@@ -1735,6 +1762,7 @@ function statusBadgeClass(status: string): string {
       @close="closePopoverImmediately"
       @jump-to-file="handleJumpFromPopover"
       @expand-snippet="handleExpandSnippet"
+      @usage-hover="handleUsageHover"
     />
   </div>
 </template>
