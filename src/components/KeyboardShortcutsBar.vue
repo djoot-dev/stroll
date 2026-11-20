@@ -14,6 +14,7 @@ import UpdateIndicator from './UpdateIndicator.vue'
       <span><kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">M</kbd> Mark Reviewed</span>
       <span><kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">[</kbd> Toggle Sidebar</span>
       <span><kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">R</kbd> Finish Review</span>
+      <span><kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">⌘K</kbd> / <kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">Ctrl+K</kbd> Command Palette</span>
     </div>
     <UpdateIndicator class="hidden shrink-0 sm:inline-flex" />
   </footer>
