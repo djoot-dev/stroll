@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { ArrowUpRight, FileCode2, GitCommitHorizontal, GitCompare, Layers, X } from '@lucide/vue'
+import {
+  ArrowRight,
+  ArrowUpRight,
+  Equal,
+  FileCode2,
+  GitCommitHorizontal,
+  GitCompare,
+  Layers,
+  X,
+} from '@lucide/vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { HoverSymbolInfo } from '@/services/codeContext'
 import { highlightLinesWithCodeMirror } from '@/services/highlighter'
@@ -39,6 +48,49 @@ const highlightedSnippet = computed(() => {
     props.info.declaration.language,
   )
 })
+
+const KIND_LABELS: Record<string, string> = { enumMember: 'enum member' }
+
+const kindLabel = computed(() =>
+  props.info ? (KIND_LABELS[props.info.declaration.kind] ?? props.info.declaration.kind) : '',
+)
+
+const VALUE_NOTES: Record<string, { label: string; title: string }> = {
+  implicit: {
+    label: 'implicit',
+    title: 'No initializer: value inferred from the member position',
+  },
+  convention: {
+    label: 'by convention',
+    title: 'UPPER_CASE module variable: constant by naming convention, not enforced',
+  },
+  readonly: {
+    label: 'readonly',
+    title: 'static readonly: fixed after initialization, but evaluated at runtime',
+  },
+}
+
+const constValue = computed(() => props.info?.declaration.value ?? null)
+
+const changedFromValue = computed(() => {
+  const decl = props.info?.declaration
+  if (!decl || !decl.value || !decl.baseValue) return null
+  return decl.baseValue !== decl.value ? decl.baseValue : null
+})
+
+const valueNote = computed(() => {
+  const note = props.info?.declaration.valueNote
+  return note ? VALUE_NOTES[note] ?? null : null
+})
+
+function highlightValue(value: string) {
+  return highlightLinesWithCodeMirror([value], props.info?.declaration.language ?? '')[0] ?? []
+}
+
+const highlightedValue = computed(() => (constValue.value ? highlightValue(constValue.value) : []))
+const highlightedBaseValue = computed(() =>
+  changedFromValue.value ? highlightValue(changedFromValue.value) : [],
+)
 
 function formatBlameDate(timestamp: number): string {
   if (!timestamp) return ''
@@ -139,7 +191,7 @@ const hasBeforeAfter = computed(
         <div class="flex min-w-0 items-center gap-1.5">
           <FileCode2 class="h-3.5 w-3.5 shrink-0 text-terra" />
           <span class="rounded-md bg-terra-soft px-1.5 py-0.5 font-mono text-[10px] font-semibold text-terra-text">
-            {{ info.declaration.kind }}
+            {{ kindLabel }}
           </span>
           <span class="truncate font-mono text-xs font-semibold text-ink">
             {{ info.declaration.name }}
@@ -191,6 +243,38 @@ const hasBeforeAfter = computed(
           >
             <X class="h-3.5 w-3.5" />
           </button>
+        </div>
+      </div>
+
+      <!-- Constant / enum member value -->
+      <div
+        v-if="info && constValue"
+        class="flex items-start gap-2 border-b border-border-muted bg-canvas px-3 py-1.5"
+      >
+        <Equal class="mt-0.5 h-3.5 w-3.5 shrink-0 text-terra" />
+        <div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-0.5 font-mono text-[11.5px]">
+          <template v-if="changedFromValue">
+            <span
+              class="rounded bg-crimson-soft px-1 text-crimson-text line-through decoration-crimson-text/60 break-words"
+              title="Value before this PR"
+            >
+              <span v-for="(sp, sIdx) in highlightedBaseValue" :key="sIdx">{{ sp.text }}</span>
+            </span>
+            <ArrowRight class="h-3 w-3 shrink-0 text-ink-faint" />
+            <span class="rounded bg-pine-soft px-1 font-semibold break-words" title="Value after this PR">
+              <span v-for="(sp, sIdx) in highlightedValue" :key="sIdx" :class="sp.className">{{ sp.text }}</span>
+            </span>
+          </template>
+          <span v-else class="font-semibold break-words">
+            <span v-for="(sp, sIdx) in highlightedValue" :key="sIdx" :class="sp.className">{{ sp.text }}</span>
+          </span>
+          <span
+            v-if="valueNote"
+            class="shrink-0 rounded-md border border-border bg-canvas-subtle px-1.5 py-px font-sans text-[10px] text-ink-muted"
+            :title="valueNote.title"
+          >
+            {{ valueNote.label }}
+          </span>
         </div>
       </div>
 
