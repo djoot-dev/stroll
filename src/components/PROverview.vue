@@ -26,7 +26,7 @@ import {
   X,
   XCircle,
 } from '@lucide/vue'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { renderSafeMarkdown } from '@/services/markdown'
 import { openExternalUrl } from '@/services/native'
 import type { CheckoutTarget } from '@/services/localCheckout'
@@ -358,6 +358,49 @@ async function handleDeleteIssueComment(commentId: string) {
     commentError.value = err instanceof Error ? err.message : 'Failed to delete comment'
   } finally {
     deletingCommentId.value = null
+  }
+}
+
+const isEditingDescription = ref(false)
+const descriptionDraft = ref('')
+const isSavingDescription = ref(false)
+const descriptionError = ref<string | null>(null)
+
+watch(
+  () => (pr.value ? `${pr.value.owner}/${pr.value.repo}#${pr.value.number}` : null),
+  () => {
+    isEditingDescription.value = false
+    descriptionDraft.value = ''
+    descriptionError.value = null
+  },
+)
+
+function startEditDescription() {
+  if (!pr.value) return
+  descriptionDraft.value = pr.value.body ?? ''
+  descriptionError.value = null
+  isEditingDescription.value = true
+}
+
+function cancelEditDescription() {
+  if (isSavingDescription.value) return
+  isEditingDescription.value = false
+  descriptionDraft.value = ''
+  descriptionError.value = null
+}
+
+async function handleSaveDescription() {
+  if (!pr.value || isSavingDescription.value) return
+  isSavingDescription.value = true
+  descriptionError.value = null
+  try {
+    await review.editPRDescription(descriptionDraft.value)
+    isEditingDescription.value = false
+    descriptionDraft.value = ''
+  } catch (err) {
+    descriptionError.value = err instanceof Error ? err.message : 'Failed to update description'
+  } finally {
+    isSavingDescription.value = false
   }
 }
 
@@ -730,11 +773,60 @@ async function handleRemoveReviewer(login: string) {
 
     <!-- PR Description -->
     <section class="stroll-card rounded-2xl border border-border bg-canvas-subtle p-5">
-      <h2 class="mb-3 text-xs font-semibold uppercase tracking-wider text-ink-muted">
-        Description
-      </h2>
+      <div class="mb-3 flex items-center justify-between gap-2">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-ink-muted">
+          Description
+        </h2>
+        <button
+          v-if="pr && !isEditingDescription"
+          type="button"
+          title="Edit description"
+          class="rounded p-0.5 text-ink-faint transition-colors hover:bg-canvas-elevated hover:text-ink"
+          @click="startEditDescription"
+        >
+          <Pencil class="h-3 w-3" />
+        </button>
+      </div>
+      <div v-if="isEditingDescription" class="space-y-2">
+        <textarea
+          v-model="descriptionDraft"
+          rows="10"
+          placeholder="Describe this Pull Request…"
+          class="w-full resize-y rounded-xl border border-border bg-canvas-inset px-3 py-2 font-mono text-xs leading-relaxed text-ink focus:border-terra-border focus:outline-none"
+          @keydown.meta.enter.prevent="handleSaveDescription"
+          @keydown.ctrl.enter.prevent="handleSaveDescription"
+          @keydown.esc.prevent="cancelEditDescription"
+        />
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-[11px] text-ink-faint">
+            {{ pr?.isMock ? 'Demo mode: description will be updated locally.' : 'Markdown supported · ⌘↵ to save · Esc to cancel' }}
+          </span>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-canvas-elevated disabled:opacity-40"
+              :disabled="isSavingDescription"
+              @click="cancelEditDescription"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 rounded-lg bg-terra px-3 py-1 text-[11px] font-semibold text-white hover:bg-terra-hover disabled:opacity-40"
+              :disabled="isSavingDescription"
+              @click="handleSaveDescription"
+            >
+              <Loader2 v-if="isSavingDescription" class="h-3 w-3 animate-spin" />
+              <span>Save</span>
+            </button>
+          </div>
+        </div>
+        <p v-if="descriptionError" class="text-[11px] text-crimson-text">
+          {{ descriptionError }}
+        </p>
+      </div>
       <MarkdownContent
-        v-if="hasDescription && pr"
+        v-else-if="hasDescription && pr"
         :content="pr.body"
         class="text-[13px] leading-relaxed text-ink-secondary"
       />
