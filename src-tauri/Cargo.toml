@@ -3,6 +3,9 @@ name = "stroll"
 version = "0.5.0"
 description = "Guided, step-by-step GitHub Pull Request review desktop app"
 authors = ["Daniel"]
+license = "MIT"
+repository = "https://github.com/totalfreak/stroll"
+homepage = "https://github.com/totalfreak/stroll"
 edition = "2021"
 
 [lib]

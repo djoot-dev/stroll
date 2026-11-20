@@ -28,6 +28,13 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
+    "publisher": "totalfreak",
+    "copyright": "Copyright (c) 2026 totalfreak",
+    "license": "MIT",
+    "homepage": "https://github.com/totalfreak/stroll",
+    "category": "DeveloperTool",
+    "shortDescription": "Guided, step-by-step GitHub Pull Request review",
+    "longDescription": "Stroll walks you through a GitHub Pull Request as a guided tour, ordering changed files by dependency and layer instead of a flat alphabetical list.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

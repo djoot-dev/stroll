@@ -55,3 +55,7 @@ cargo check --manifest-path src-tauri/Cargo.toml   # Verify Rust backend compile
 - **`src/stores/`**: Pinia Composition API stores (`auth.ts`, `review.ts`, `settings.ts`).
 - **`src/components/`**: Vue 3 (`<script setup lang="ts">`) UI components.
 - **`src-tauri/`**: Tauri v2 Rust backend providing OS keychain integration (`keychain.rs`), `gh` CLI token lookup (`gh.rs`), local `git` blob/blame inspection (`git.rs`), and Tree-sitter AST symbol resolution (`ast.rs`).
+
+## License
+
+[MIT](LICENSE) © totalfreak
