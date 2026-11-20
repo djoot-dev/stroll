@@ -9,6 +9,7 @@ import type {
   GitHubUser,
   PRCommit,
   PRFile,
+  PRFileCommit,
   PRFilterMode,
   PRIssueComment,
   PRLabel,
@@ -655,6 +656,148 @@ async function fetchFileContentsBatch(
     })
   }
 
+  return result
+}
+
+export interface FileHistoryTarget {
+  path: string
+  previousPath?: string
+}
+
+export interface RawHistoryCommit {
+  oid: string
+  abbreviatedOid: string
+  messageHeadline: string
+  messageBody: string
+  committedDate: string
+  author: { name?: string | null } | null
+  parents: { totalCount: number } | null
+}
+
+type RawHistoryObject = Record<string, { nodes?: RawHistoryCommit[] | null } | null>
+
+/** Max files per GraphQL request; renamed files cost two history lookups. */
+const FILE_HISTORY_CHUNK_SIZE = 20
+/** Commits fetched per path. History starts at head, so PR commits come first. */
+const FILE_HISTORY_DEPTH = 50
+
+/**
+ * Builds a GraphQL query that looks up the commit history of several paths at
+ * once, starting from `$headOid`. Paths are passed as variables (`$p0`, `$p1`, …)
+ * so they never need escaping inside the query text.
+ */
+export function buildFileHistoryQuery(targets: FileHistoryTarget[]): {
+  query: string
+  pathVariables: Record<string, string>
+} {
+  const pathVariables: Record<string, string> = {}
+  const declarations: string[] = []
+  const fields: string[] = []
+
+  const addAlias = (alias: string, path: string) => {
+    const name = `p${declarations.length}`
+    pathVariables[name] = path
+    declarations.push(`$${name}: String!`)
+    fields.push(
+      `${alias}: history(first: ${FILE_HISTORY_DEPTH}, path: $${name}) { nodes { ...FileHistoryCommit } }`,
+    )
+  }
+
+  targets.forEach((t, idx) => {
+    addAlias(`f${idx}`, t.path)
+    if (t.previousPath && t.previousPath !== t.path) addAlias(`r${idx}`, t.previousPath)
+  })
+
+  const query = `
+    query FileCommitHistory($owner: String!, $repo: String!, $headOid: GitObjectID!, ${declarations.join(', ')}) {
+      repository(owner: $owner, name: $repo) {
+        object(oid: $headOid) {
+          ... on Commit {
+            ${fields.join('\n            ')}
+          }
+        }
+      }
+    }
+    fragment FileHistoryCommit on Commit {
+      oid
+      abbreviatedOid
+      messageHeadline
+      messageBody
+      committedDate
+      author { name }
+      parents { totalCount }
+    }
+  `
+  return { query, pathVariables }
+}
+
+/**
+ * Turns raw history results into per-file commit lists. Only commits belonging
+ * to the PR are kept (history also walks into the base branch), and each list
+ * is deduplicated and sorted newest first.
+ */
+export function mapFileHistoryResult(
+  targets: FileHistoryTarget[],
+  commitObject: RawHistoryObject | null,
+  prCommitOids: Set<string>,
+): Map<string, PRFileCommit[]> {
+  const result = new Map<string, PRFileCommit[]>()
+  targets.forEach((t, idx) => {
+    const raw = [
+      ...(commitObject?.[`f${idx}`]?.nodes ?? []),
+      ...(commitObject?.[`r${idx}`]?.nodes ?? []),
+    ]
+    const byOid = new Map<string, PRFileCommit>()
+    for (const c of raw) {
+      if (!c || !prCommitOids.has(c.oid) || byOid.has(c.oid)) continue
+      byOid.set(c.oid, {
+        oid: c.oid,
+        shortOid: c.abbreviatedOid,
+        messageHeadline: c.messageHeadline,
+        messageBody: c.messageBody ?? '',
+        authorName: c.author?.name ?? 'Unknown',
+        committedDate: c.committedDate,
+        isMerge: (c.parents?.totalCount ?? 0) > 1,
+      })
+    }
+    result.set(
+      t.path,
+      [...byOid.values()].sort((a, b) => b.committedDate.localeCompare(a.committedDate)),
+    )
+  })
+  return result
+}
+
+/**
+ * Finds which PR commits touched each of the given files, using batched
+ * GraphQL `history(path:)` lookups from the PR head.
+ */
+export async function fetchFileCommitHistory(
+  pat: string,
+  owner: string,
+  repo: string,
+  headOid: string,
+  targets: FileHistoryTarget[],
+  prCommitOids: Set<string>,
+): Promise<Map<string, PRFileCommit[]>> {
+  const result = new Map<string, PRFileCommit[]>()
+  for (let i = 0; i < targets.length; i += FILE_HISTORY_CHUNK_SIZE) {
+    const chunk = targets.slice(i, i + FILE_HISTORY_CHUNK_SIZE)
+    const { query, pathVariables } = buildFileHistoryQuery(chunk)
+
+    interface HistoryResp {
+      repository: { object: RawHistoryObject | null } | null
+    }
+
+    const data = await graphql<HistoryResp>(pat, query, {
+      owner,
+      repo,
+      headOid,
+      ...pathVariables,
+    })
+    const mapped = mapFileHistoryResult(chunk, data.repository?.object ?? null, prCommitOids)
+    for (const [path, commits] of mapped) result.set(path, commits)
+  }
   return result
 }
 
