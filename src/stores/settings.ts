@@ -33,6 +33,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   sidebarDefaultOpen: true,
   codeFontSize: 12.5,
   requireAltForHover: false,
+  wrapLines: false,
   showShortcutsBar: true,
   inboxAutoRefreshSeconds: 60,
   inboxNotificationsEnabled: false,
@@ -56,6 +57,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const sidebarDefaultOpen = ref<boolean>(DEFAULT_APP_SETTINGS.sidebarDefaultOpen)
   const codeFontSize = ref<number>(DEFAULT_APP_SETTINGS.codeFontSize)
   const requireAltForHover = ref<boolean>(DEFAULT_APP_SETTINGS.requireAltForHover)
+  const wrapLines = ref<boolean>(DEFAULT_APP_SETTINGS.wrapLines)
   const showShortcutsBar = ref<boolean>(DEFAULT_APP_SETTINGS.showShortcutsBar)
   const inboxAutoRefreshSeconds = ref<number>(DEFAULT_APP_SETTINGS.inboxAutoRefreshSeconds)
   const inboxNotificationsEnabled = ref<boolean>(DEFAULT_APP_SETTINGS.inboxNotificationsEnabled)
@@ -112,6 +114,9 @@ export const useSettingsStore = defineStore('settings', () => {
     if (typeof savedSettings.requireAltForHover === 'boolean') {
       requireAltForHover.value = savedSettings.requireAltForHover
     }
+    if (typeof savedSettings.wrapLines === 'boolean') {
+      wrapLines.value = savedSettings.wrapLines
+    }
     if (typeof savedSettings.showShortcutsBar === 'boolean') {
       showShortcutsBar.value = savedSettings.showShortcutsBar
     }
@@ -138,6 +143,7 @@ export const useSettingsStore = defineStore('settings', () => {
         sidebarDefaultOpen: sidebarDefaultOpen.value,
         codeFontSize: codeFontSize.value,
         requireAltForHover: requireAltForHover.value,
+        wrapLines: wrapLines.value,
         showShortcutsBar: showShortcutsBar.value,
         inboxAutoRefreshSeconds: inboxAutoRefreshSeconds.value,
         inboxNotificationsEnabled: inboxNotificationsEnabled.value,
@@ -195,6 +201,11 @@ export const useSettingsStore = defineStore('settings', () => {
     await persist()
   }
 
+  async function setWrapLines(enabled: boolean): Promise<void> {
+    wrapLines.value = enabled
+    await persist()
+  }
+
   async function setShowShortcutsBar(visible: boolean): Promise<void> {
     showShortcutsBar.value = visible
     await persist()
@@ -224,6 +235,7 @@ export const useSettingsStore = defineStore('settings', () => {
     sidebarDefaultOpen.value = DEFAULT_APP_SETTINGS.sidebarDefaultOpen
     codeFontSize.value = DEFAULT_APP_SETTINGS.codeFontSize
     requireAltForHover.value = DEFAULT_APP_SETTINGS.requireAltForHover
+    wrapLines.value = DEFAULT_APP_SETTINGS.wrapLines
     showShortcutsBar.value = DEFAULT_APP_SETTINGS.showShortcutsBar
     inboxAutoRefreshSeconds.value = DEFAULT_APP_SETTINGS.inboxAutoRefreshSeconds
     inboxNotificationsEnabled.value = DEFAULT_APP_SETTINGS.inboxNotificationsEnabled
@@ -244,6 +256,7 @@ export const useSettingsStore = defineStore('settings', () => {
     sidebarDefaultOpen,
     codeFontSize,
     requireAltForHover,
+    wrapLines,
     showShortcutsBar,
     inboxAutoRefreshSeconds,
     inboxNotificationsEnabled,
@@ -258,6 +271,7 @@ export const useSettingsStore = defineStore('settings', () => {
     setSidebarDefaultOpen,
     setCodeFontSize,
     setRequireAltForHover,
+    setWrapLines,
     setShowShortcutsBar,
     setInboxAutoRefreshSeconds,
     setInboxNotificationsEnabled,

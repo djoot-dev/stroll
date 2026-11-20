@@ -17,6 +17,7 @@ import {
   Search,
   Sparkles,
   Trash2,
+  WrapText,
 } from '@lucide/vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import {
@@ -1422,6 +1423,25 @@ function statusBadgeClass(status: string): string {
               <Sparkles class="h-3 w-3" />
               <span>{{ settings.requireAltForHover ? 'Hover: ⌥ + Hover' : 'Hover: Auto' }}</span>
             </button>
+
+            <button
+              class="inline-flex shrink-0 items-center gap-1 rounded-lg border px-2 py-0.5 text-[10.5px] transition-colors"
+              :class="
+                settings.wrapLines
+                  ? 'border-terra-border bg-terra-soft text-terra-text'
+                  : 'border-border bg-canvas text-ink-secondary hover:bg-canvas-elevated'
+              "
+              :title="
+                settings.wrapLines
+                  ? 'Long lines wrap to fit. Click to scroll horizontally instead'
+                  : 'Long lines scroll horizontally. Click to wrap them'
+              "
+              :aria-pressed="settings.wrapLines"
+              @click="settings.setWrapLines(!settings.wrapLines)"
+            >
+              <WrapText class="h-3 w-3" />
+              <span>{{ settings.wrapLines ? 'Wrap: On' : 'Wrap: Off' }}</span>
+            </button>
           </div>
         </div>
 
@@ -1431,16 +1451,21 @@ function statusBadgeClass(status: string): string {
 
         <div
           v-else
-          class="@container overflow-x-auto font-mono leading-[1.55]"
-          :class="{ 'select-none': isDraggingSelection }"
+          class="@container font-mono leading-[1.55]"
+          :class="[
+            settings.wrapLines ? 'overflow-x-hidden' : 'overflow-x-auto',
+            { 'select-none': isDraggingSelection },
+          ]"
           :style="{ fontSize: `${settings.codeFontSize}px` }"
         >
           <!--
             Rows share a track as wide as the longest line (never narrower than
             the viewport) so add/del backgrounds extend when scrolling
             horizontally. Cards stay pinned to the visible width (100cqw).
+            With line wrapping on, the track is exactly the viewport width and
+            long lines soft-wrap within their row instead.
           -->
-          <div class="w-max min-w-full">
+          <div :class="settings.wrapLines ? 'w-full' : 'w-max min-w-full'">
           <template v-for="seg in segments" :key="seg.id">
           <!-- Collapsed Unchanged Gap -->
           <template v-if="seg.kind === 'gap'">
@@ -1489,7 +1514,10 @@ function statusBadgeClass(status: string): string {
                   <span class="w-6 shrink-0 select-none text-center text-code-gutter-text">
                     <MessageSquarePlus class="mx-auto mt-1 hidden h-3 w-3 text-terra group-hover:block" />
                   </span>
-                  <pre class="flex-1 whitespace-pre pr-4 text-ink"><template
+                  <pre
+                    class="flex-1 pr-4 text-ink"
+                    :class="settings.wrapLines ? 'min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre'"
+                  ><template
                     v-for="(pt, pIdx) in tokenizedByKey.get(line.key)"
                     :key="pIdx"
                   ><span
@@ -1582,7 +1610,10 @@ function statusBadgeClass(status: string): string {
                   </span>
                   <MessageSquarePlus class="mx-auto mt-1 hidden h-3 w-3 text-terra group-hover:block" />
                 </span>
-                <pre class="flex-1 whitespace-pre pr-4 text-ink"><template
+                <pre
+                  class="flex-1 pr-4 text-ink"
+                  :class="settings.wrapLines ? 'min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre'"
+                ><template
                   v-for="(pt, pIdx) in tokenizedByKey.get(line.key)"
                   :key="pIdx"
                 ><span
