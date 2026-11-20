@@ -1182,16 +1182,22 @@ function statusBadgeClass(status: string): string {
 
         <div
           v-else
-          class="overflow-x-auto font-mono leading-[1.55]"
+          class="@container overflow-x-auto font-mono leading-[1.55]"
           :class="{ 'select-none': isDraggingSelection }"
           :style="{ fontSize: `${settings.codeFontSize}px` }"
         >
+          <!--
+            Rows share a track as wide as the longest line (never narrower than
+            the viewport) so add/del backgrounds extend when scrolling
+            horizontally. Cards stay pinned to the visible width (100cqw).
+          -->
+          <div class="w-max min-w-full">
           <template v-for="seg in segments" :key="seg.id">
           <!-- Collapsed Unchanged Gap -->
           <template v-if="seg.kind === 'gap'">
             <button
               v-if="!expandedGaps.has(seg.id)"
-              class="flex w-full items-center gap-2 border-y border-border-muted bg-canvas-subtle px-4 py-1 text-left font-sans text-[11px] text-ink-secondary transition-colors hover:bg-terra-soft hover:text-terra-text"
+              class="sticky left-0 flex w-[100cqw] items-center gap-2 border-y border-border-muted bg-canvas-subtle px-4 py-1 text-left font-sans text-[11px] text-ink-secondary transition-colors hover:bg-terra-soft hover:text-terra-text"
               @click="toggleGap(seg.id)"
             >
               <ChevronsUpDown class="h-3.5 w-3.5 shrink-0" />
@@ -1203,7 +1209,7 @@ function statusBadgeClass(status: string): string {
 
             <template v-else>
               <div
-                class="flex items-center justify-between border-y border-border-muted bg-canvas-subtle/80 px-4 py-0.5 font-sans text-[10px] text-ink-muted"
+                class="sticky left-0 flex w-[100cqw] items-center justify-between border-y border-border-muted bg-canvas-subtle/80 px-4 py-0.5 font-sans text-[10px] text-ink-muted"
               >
                 <span>Expanded unchanged context ({{ seg.lineCount }} lines)</span>
                 <button class="hover:text-ink" @click="toggleGap(seg.id)">Collapse</button>
@@ -1240,29 +1246,35 @@ function statusBadgeClass(status: string): string {
                 </div>
 
                 <!-- Existing GitHub Review Threads -->
-                <ReviewThreadCard
+                <div
                   v-for="thread in threadsForLine(line)"
                   :key="thread.id"
-                  :thread="thread"
-                />
+                  class="sticky left-0 w-[100cqw]"
+                >
+                  <ReviewThreadCard :thread="thread" />
+                </div>
 
                 <!-- Inline Composer -->
-                <CommentComposer
+                <div
                   v-if="activeComposer?.key === line.key"
-                  :line="activeComposer.line"
-                  :side="activeComposer.side"
-                  :start-line="activeComposer.startLine"
-                  :start-side="activeComposer.startSide"
-                  :original-code="
-                    getOriginalCodeForRange(
-                      activeComposer.line,
-                      activeComposer.side,
-                      activeComposer.startLine,
-                    )
-                  "
-                  @submit="handleCreateDraft"
-                  @cancel="activeComposer = null"
-                />
+                  class="sticky left-0 w-[100cqw]"
+                >
+                  <CommentComposer
+                    :line="activeComposer.line"
+                    :side="activeComposer.side"
+                    :start-line="activeComposer.startLine"
+                    :start-side="activeComposer.startSide"
+                    :original-code="
+                      getOriginalCodeForRange(
+                        activeComposer.line,
+                        activeComposer.side,
+                        activeComposer.startLine,
+                      )
+                    "
+                    @submit="handleCreateDraft"
+                    @cancel="activeComposer = null"
+                  />
+                </div>
               </template>
             </template>
           </template>
@@ -1270,7 +1282,7 @@ function statusBadgeClass(status: string): string {
           <!-- Diff Hunk Block -->
           <template v-else>
             <div
-              class="border-y border-border-muted bg-sage-soft px-4 py-1 text-[11px] font-medium text-sage-text"
+              class="sticky left-0 w-[100cqw] border-y border-border-muted bg-sage-soft px-4 py-1 text-[11px] font-medium text-sage-text"
             >
               {{ seg.header }}
             </div>
@@ -1334,17 +1346,22 @@ function statusBadgeClass(status: string): string {
               </div>
 
               <!-- Existing GitHub Review Threads -->
-              <ReviewThreadCard
+              <div
                 v-for="thread in threadsForLine(line)"
                 :key="thread.id"
-                :thread="thread"
-              />
+                class="sticky left-0 w-[100cqw]"
+              >
+                <ReviewThreadCard :thread="thread" />
+              </div>
 
               <!-- Local Pending Draft Comments -->
               <div
                 v-for="draft in draftsForLine(line)"
                 :key="draft.id"
-                class="animate-pop-in my-1.5 mx-3 rounded-xl border border-ochre-border bg-ochre-soft p-3 font-sans"
+                class="sticky left-0 w-[100cqw] py-1.5"
+              >
+              <div
+                class="animate-pop-in mx-3 rounded-xl border border-ochre-border bg-ochre-soft p-3 font-sans"
               >
                 <div class="flex items-center justify-between text-[11px]">
                   <span class="font-semibold text-ochre-text">
@@ -1371,27 +1388,33 @@ function statusBadgeClass(status: string): string {
                   class="mt-1 text-xs leading-relaxed text-ink"
                 />
               </div>
+              </div>
 
               <!-- Inline Comment Composer -->
-              <CommentComposer
+              <div
                 v-if="activeComposer?.key === line.key"
-                :line="activeComposer.line"
-                :side="activeComposer.side"
-                :start-line="activeComposer.startLine"
-                :start-side="activeComposer.startSide"
-                :original-code="
-                  getOriginalCodeForRange(
-                    activeComposer.line,
-                    activeComposer.side,
-                    activeComposer.startLine,
-                  )
-                "
-                @submit="handleCreateDraft"
-                @cancel="activeComposer = null"
-              />
+                class="sticky left-0 w-[100cqw]"
+              >
+                <CommentComposer
+                  :line="activeComposer.line"
+                  :side="activeComposer.side"
+                  :start-line="activeComposer.startLine"
+                  :start-side="activeComposer.startSide"
+                  :original-code="
+                    getOriginalCodeForRange(
+                      activeComposer.line,
+                      activeComposer.side,
+                      activeComposer.startLine,
+                    )
+                  "
+                  @submit="handleCreateDraft"
+                  @cancel="activeComposer = null"
+                />
+              </div>
             </template>
           </template>
         </template>
+          </div>
       </div>
       </template>
     </div>
