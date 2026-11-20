@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { FileCode2, GitBranch, MessageSquare, Search, Sparkles } from '@lucide/vue'
 import { computed, nextTick, ref, watch } from 'vue'
-import { buildPRSymbolIndex } from '@/services/codeContext'
+import { buildPRSymbolIndex, type PRSymbolIndex } from '@/services/codeContext'
 import { localBranchForPR } from '@/services/localCheckout'
 import { useCheckoutStore } from '@/stores/checkout'
 import { useReviewStore } from '@/stores/review'
@@ -28,7 +28,7 @@ interface PaletteItem {
   path?: string
 }
 
-const symbolIndex = computed(() => {
+const symbolIndex = computed<PRSymbolIndex>(() => {
   if (!review.pr) return new Map()
   return buildPRSymbolIndex(review.pr.files)
 })
@@ -81,11 +81,11 @@ const items = computed<PaletteItem[]>(() => {
       if (!name.toLowerCase().includes(q)) continue
       for (const decl of decls.slice(0, 3)) {
         results.push({
-          id: `sym:${decl.filePath}:${decl.line}:${name}`,
+          id: `sym:${decl.path}:${decl.line}:${name}`,
           kind: 'symbol',
           title: name,
-          subtitle: `${decl.kind} in ${decl.filePath}:${decl.line}`,
-          path: decl.filePath,
+          subtitle: `${decl.kind} in ${decl.path}:${decl.line}`,
+          path: decl.path,
         })
       }
     }
