@@ -445,8 +445,14 @@ svg.animate-spin {
     opacity 160ms ease;
 }
 
+/* While dragging the sidebar edge, keep the resize cursor and block text selection everywhere. */
+body.is-resizing-sidebar {
+  cursor: col-resize;
+  user-select: none;
+}
+
 .sidebar-slide-enter-from,
 .sidebar-slide-leave-to {
-  margin-left: -18rem;
+  margin-left: calc(-1 * var(--sidebar-width, 18rem));
   opacity: 0;
 }

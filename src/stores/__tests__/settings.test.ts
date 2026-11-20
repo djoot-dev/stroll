@@ -1,6 +1,12 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_APP_SETTINGS, useSettingsStore } from '../settings'
+import {
+  clampSidebarWidth,
+  DEFAULT_APP_SETTINGS,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+  useSettingsStore,
+} from '../settings'
 
 function createMemoryStorage() {
   const data = new Map<string, string>()
@@ -102,5 +108,38 @@ describe('useSettingsStore', () => {
 
     store.closeSettings()
     expect(store.isOpen).toBe(false)
+  })
+
+  it('defaults the sidebar width and clamps it into range', () => {
+    expect(useSettingsStore().sidebarWidth).toBe(DEFAULT_APP_SETTINGS.sidebarWidth)
+    expect(clampSidebarWidth(10)).toBe(SIDEBAR_MIN_WIDTH)
+    expect(clampSidebarWidth(5000)).toBe(SIDEBAR_MAX_WIDTH)
+    expect(clampSidebarWidth(321.6)).toBe(322)
+    expect(clampSidebarWidth(Number.NaN)).toBe(DEFAULT_APP_SETTINGS.sidebarWidth)
+  })
+
+  it('persists the sidebar width only when asked to', async () => {
+    const store = useSettingsStore()
+    await store.init()
+
+    await store.setSidebarWidth(400, { persist: false })
+    expect(store.sidebarWidth).toBe(400)
+    expect(localStorage.getItem('stroll_app_settings') ?? '').not.toContain('"sidebarWidth":400')
+
+    await store.setSidebarWidth(420)
+    setActivePinia(createPinia())
+    const reloaded = useSettingsStore()
+    await reloaded.init()
+    expect(reloaded.sidebarWidth).toBe(420)
+
+    await reloaded.resetToDefaults()
+    expect(reloaded.sidebarWidth).toBe(DEFAULT_APP_SETTINGS.sidebarWidth)
+  })
+
+  it('clamps an out-of-range persisted sidebar width on load', async () => {
+    localStorage.setItem('stroll_app_settings', JSON.stringify({ sidebarWidth: 9999 }))
+    const store = useSettingsStore()
+    await store.init()
+    expect(store.sidebarWidth).toBe(SIDEBAR_MAX_WIDTH)
   })
 })

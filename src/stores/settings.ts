@@ -26,11 +26,21 @@ export interface AppSettings extends PersistedAppSettings {
   defaultTourDirection: TourDirection
 }
 
+export const SIDEBAR_MIN_WIDTH = 200
+export const SIDEBAR_MAX_WIDTH = 560
+
+/** Rounds and clamps a sidebar width (px) into the supported range. */
+export function clampSidebarWidth(width: number): number {
+  if (!Number.isFinite(width)) return DEFAULT_APP_SETTINGS.sidebarWidth
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)))
+}
+
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   theme: 'light',
   defaultTourDirection: 'bottom-up',
   autoAdvanceOnReview: false,
   sidebarDefaultOpen: true,
+  sidebarWidth: 288,
   codeFontSize: 12.5,
   requireAltForHover: false,
   wrapLines: false,
@@ -55,6 +65,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const defaultTourDirection = ref<TourDirection>(DEFAULT_APP_SETTINGS.defaultTourDirection)
   const autoAdvanceOnReview = ref<boolean>(DEFAULT_APP_SETTINGS.autoAdvanceOnReview)
   const sidebarDefaultOpen = ref<boolean>(DEFAULT_APP_SETTINGS.sidebarDefaultOpen)
+  const sidebarWidth = ref<number>(DEFAULT_APP_SETTINGS.sidebarWidth)
   const codeFontSize = ref<number>(DEFAULT_APP_SETTINGS.codeFontSize)
   const requireAltForHover = ref<boolean>(DEFAULT_APP_SETTINGS.requireAltForHover)
   const wrapLines = ref<boolean>(DEFAULT_APP_SETTINGS.wrapLines)
@@ -108,6 +119,9 @@ export const useSettingsStore = defineStore('settings', () => {
     if (typeof savedSettings.sidebarDefaultOpen === 'boolean') {
       sidebarDefaultOpen.value = savedSettings.sidebarDefaultOpen
     }
+    if (typeof savedSettings.sidebarWidth === 'number') {
+      sidebarWidth.value = clampSidebarWidth(savedSettings.sidebarWidth)
+    }
     if (typeof savedSettings.codeFontSize === 'number') {
       codeFontSize.value = savedSettings.codeFontSize
     }
@@ -141,6 +155,7 @@ export const useSettingsStore = defineStore('settings', () => {
         theme: theme.value,
         autoAdvanceOnReview: autoAdvanceOnReview.value,
         sidebarDefaultOpen: sidebarDefaultOpen.value,
+        sidebarWidth: sidebarWidth.value,
         codeFontSize: codeFontSize.value,
         requireAltForHover: requireAltForHover.value,
         wrapLines: wrapLines.value,
@@ -191,6 +206,15 @@ export const useSettingsStore = defineStore('settings', () => {
     await persist()
   }
 
+  /**
+   * Sets the tour sidebar width. Pass `persist: false` for live updates while
+   * dragging, then persist once on release.
+   */
+  async function setSidebarWidth(width: number, options: { persist?: boolean } = {}): Promise<void> {
+    sidebarWidth.value = clampSidebarWidth(width)
+    if (options.persist !== false) await persist()
+  }
+
   async function setCodeFontSize(size: number): Promise<void> {
     codeFontSize.value = size
     await persist()
@@ -233,6 +257,7 @@ export const useSettingsStore = defineStore('settings', () => {
     defaultTourDirection.value = DEFAULT_APP_SETTINGS.defaultTourDirection
     autoAdvanceOnReview.value = DEFAULT_APP_SETTINGS.autoAdvanceOnReview
     sidebarDefaultOpen.value = DEFAULT_APP_SETTINGS.sidebarDefaultOpen
+    sidebarWidth.value = DEFAULT_APP_SETTINGS.sidebarWidth
     codeFontSize.value = DEFAULT_APP_SETTINGS.codeFontSize
     requireAltForHover.value = DEFAULT_APP_SETTINGS.requireAltForHover
     wrapLines.value = DEFAULT_APP_SETTINGS.wrapLines
@@ -254,6 +279,7 @@ export const useSettingsStore = defineStore('settings', () => {
     defaultTourDirection,
     autoAdvanceOnReview,
     sidebarDefaultOpen,
+    sidebarWidth,
     codeFontSize,
     requireAltForHover,
     wrapLines,
@@ -269,6 +295,7 @@ export const useSettingsStore = defineStore('settings', () => {
     setDefaultTourDirection,
     setAutoAdvanceOnReview,
     setSidebarDefaultOpen,
+    setSidebarWidth,
     setCodeFontSize,
     setRequireAltForHover,
     setWrapLines,
