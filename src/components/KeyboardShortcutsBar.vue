@@ -1,18 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { getVersion } from '@tauri-apps/api/app'
-import { isTauriRuntime } from '@/services/native'
-
-const appVersion = ref('')
-
-onMounted(async () => {
-  if (!isTauriRuntime()) return
-  try {
-    appVersion.value = await getVersion()
-  } catch {
-    // Version unavailable; show the name only
-  }
-})
+import UpdateIndicator from './UpdateIndicator.vue'
 </script>
 
 <template>
@@ -28,6 +15,6 @@ onMounted(async () => {
       <span><kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">[</kbd> Toggle Sidebar</span>
       <span><kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">R</kbd> Finish Review</span>
     </div>
-    <span class="hidden font-mono text-ink-faint sm:inline">Stroll<template v-if="appVersion"> v{{ appVersion }}</template></span>
+    <UpdateIndicator class="hidden shrink-0 sm:inline-flex" />
   </footer>
 </template>
