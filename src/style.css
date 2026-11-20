@@ -255,6 +255,48 @@ html.dark {
     font-family: var(--font-sans);
   }
 
+  /*
+   * Cursor affordances. Tailwind v4's preflight resets <button> to
+   * `cursor: default`, so restore the pointer for every native control here
+   * rather than repeating `cursor-pointer` on each one. All selectors are
+   * wrapped in :where() (zero specificity) so per-component utilities such as
+   * `cursor-wait` or `disabled:cursor-not-allowed` still take precedence.
+   * Order matters: disabled overrides pointer, busy overrides disabled.
+   */
+  :where(
+    button,
+    [role='button'],
+    [role='tab'],
+    [role='option'],
+    [role='menuitem'],
+    select,
+    summary,
+    a[href],
+    label:has(> input:is([type='checkbox'], [type='radio'])),
+    input:is(
+        [type='checkbox'],
+        [type='radio'],
+        [type='file'],
+        [type='range'],
+        [type='color'],
+        [type='button'],
+        [type='submit'],
+        [type='reset']
+      )
+  ) {
+    cursor: pointer;
+  }
+
+  :where(:disabled, [aria-disabled='true']),
+  :where(label:has(> input:disabled)) {
+    cursor: not-allowed;
+  }
+
+  /* Disabled *because it is working* (spinner showing): signal progress instead. */
+  :where([aria-busy='true']) {
+    cursor: progress;
+  }
+
   ::-webkit-scrollbar {
     width: 8px;
     height: 8px;

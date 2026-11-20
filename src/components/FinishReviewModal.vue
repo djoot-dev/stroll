@@ -197,6 +197,7 @@ onBeforeUnmount(() => {
             <button
               class="inline-flex items-center gap-1.5 rounded-xl bg-pine px-4 py-1.5 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-pine-hover disabled:opacity-40"
               :disabled="review.isSubmittingReview"
+              :aria-busy="review.isSubmittingReview"
               @click="handleSubmit"
             >
               <Loader2 v-if="review.isSubmittingReview" class="h-3.5 w-3.5 animate-spin" />

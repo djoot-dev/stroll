@@ -147,8 +147,9 @@ function handleRefreshPR() {
       <div class="flex shrink-0 items-center gap-1.5">
         <button
           v-if="review.pr"
-          class="shrink-0 rounded-lg border border-border bg-canvas p-1.5 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+          class="shrink-0 rounded-lg border border-border bg-canvas p-1.5 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink disabled:opacity-40"
           :disabled="review.pr.isMock || review.isRefreshingPR"
+          :aria-busy="review.isRefreshingPR"
           :title="
             review.pr.isMock
               ? 'Refresh is disabled in Demo PR mode'

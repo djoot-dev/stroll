@@ -695,6 +695,7 @@ async function handleRemoveReviewer(login: string) {
                   type="button"
                   class="inline-flex items-center gap-1.5 rounded-l-lg border border-pine-border bg-pine-soft px-2.5 py-1 text-[11px] font-semibold text-pine-text transition-colors hover:bg-pine/20 disabled:opacity-40"
                   :disabled="isUpdatingLifecycle || pr.isDraft || pr.mergeable === 'CONFLICTING'"
+                  :aria-busy="isUpdatingLifecycle"
                   :title="pr.isDraft ? 'Mark ready for review before merging' : pr.mergeable === 'CONFLICTING' ? 'Resolve merge conflicts before merging' : `Merge using ${mergeMethod}`"
                   @click="handleMerge(mergeMethod)"
                 >
@@ -706,6 +707,7 @@ async function handleRemoveReviewer(login: string) {
                   type="button"
                   class="inline-flex items-center rounded-r-lg border border-l-0 border-pine-border bg-pine-soft px-1.5 py-1 text-pine-text transition-colors hover:bg-pine/20 disabled:opacity-40"
                   :disabled="isUpdatingLifecycle"
+                  :aria-busy="isUpdatingLifecycle"
                   @click="mergeMenuOpen = !mergeMenuOpen"
                 >
                   <ChevronDown class="h-3 w-3" />
@@ -737,6 +739,7 @@ async function handleRemoveReviewer(login: string) {
                 type="button"
                 class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary transition-colors hover:bg-canvas-elevated disabled:opacity-40"
                 :disabled="isUpdatingLifecycle"
+                :aria-busy="isUpdatingLifecycle"
                 @click="handleToggleDraft"
               >
                 {{ pr.isDraft ? 'Ready for review' : 'Convert to draft' }}
@@ -746,6 +749,7 @@ async function handleRemoveReviewer(login: string) {
                 type="button"
                 class="rounded-lg border border-crimson-border/60 bg-canvas px-2.5 py-1 text-[11px] text-crimson-text transition-colors hover:bg-crimson-soft disabled:opacity-40"
                 :disabled="isUpdatingLifecycle"
+                :aria-busy="isUpdatingLifecycle"
                 @click="handleToggleClose"
               >
                 Close PR
@@ -757,6 +761,7 @@ async function handleRemoveReviewer(login: string) {
               type="button"
               class="rounded-lg border border-pine-border bg-pine-soft px-2.5 py-1 text-[11px] font-semibold text-pine-text transition-colors hover:bg-pine/20 disabled:opacity-40"
               :disabled="isUpdatingLifecycle"
+              :aria-busy="isUpdatingLifecycle"
               @click="handleToggleClose"
             >
               Reopen PR
@@ -813,6 +818,7 @@ async function handleRemoveReviewer(login: string) {
               type="button"
               class="inline-flex items-center gap-1 rounded-lg bg-terra px-3 py-1 text-[11px] font-semibold text-white hover:bg-terra-hover disabled:opacity-40"
               :disabled="isSavingDescription"
+              :aria-busy="isSavingDescription"
               @click="handleSaveDescription"
             >
               <Loader2 v-if="isSavingDescription" class="h-3 w-3 animate-spin" />
@@ -1099,6 +1105,7 @@ async function handleRemoveReviewer(login: string) {
                   title="Delete comment"
                   class="rounded p-0.5 text-ink-faint transition-colors hover:bg-crimson-soft hover:text-crimson-text disabled:opacity-40"
                   :disabled="deletingCommentId === item.rawId"
+                  :aria-busy="deletingCommentId === item.rawId"
                   @click="handleDeleteIssueComment(item.rawId)"
                 >
                   <Loader2 v-if="deletingCommentId === item.rawId" class="h-3 w-3 animate-spin" />
@@ -1129,6 +1136,7 @@ async function handleRemoveReviewer(login: string) {
                 type="button"
                 class="inline-flex items-center gap-1 rounded-lg bg-terra px-3 py-1 text-[11px] font-semibold text-white hover:bg-terra-hover disabled:opacity-40"
                 :disabled="isSavingCommentEdit || !editCommentBody.trim()"
+                :aria-busy="isSavingCommentEdit"
                 @click="handleSaveIssueCommentEdit(item.rawId)"
               >
                 <Loader2 v-if="isSavingCommentEdit" class="h-3 w-3 animate-spin" />
@@ -1168,6 +1176,7 @@ async function handleRemoveReviewer(login: string) {
           <button
             class="inline-flex items-center gap-1.5 rounded-xl bg-pine px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs transition-all hover:bg-pine-hover active:scale-[0.98] disabled:opacity-40"
             :disabled="!commentDraft.trim() || isPostingComment"
+            :aria-busy="isPostingComment"
             @click="handlePostComment"
           >
             <Loader2 v-if="isPostingComment" class="h-3.5 w-3.5 animate-spin" />

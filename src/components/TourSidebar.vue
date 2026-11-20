@@ -208,6 +208,7 @@ function dirOnly(path: string): string {
           <select
             :value="review.commitFilter"
             :disabled="review.isLoadingCommitFilter"
+            :aria-busy="review.isLoadingCommitFilter"
             class="min-w-0 flex-1 rounded-lg border border-border bg-canvas px-2 py-1 text-[11px] text-ink-secondary focus:border-terra-border focus:outline-none disabled:opacity-50"
             @change="review.setCommitFilter(($event.target as HTMLSelectElement).value)"
           >
