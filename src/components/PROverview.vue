@@ -30,15 +30,30 @@ import {
 import { computed, ref } from 'vue'
 import { renderSafeMarkdown } from '@/services/markdown'
 import { openExternalUrl } from '@/services/native'
+import type { CheckoutTarget } from '@/services/localCheckout'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 import type { PRMergeMethod, PRReviewState, PRStatusCheck, ReactionGroup } from '@/types/pr'
+import LocalCheckoutPanel from './LocalCheckoutPanel.vue'
 import MarkdownContent from './MarkdownContent.vue'
 import ReactionBar from './ReactionBar.vue'
 
 const auth = useAuthStore()
 const review = useReviewStore()
 const pr = computed(() => review.pr)
+
+const checkoutTarget = computed<CheckoutTarget | null>(() => {
+  const p = review.pr
+  if (!p || p.isMock || p.state !== 'OPEN') return null
+  return {
+    owner: p.owner,
+    repo: p.repo,
+    number: p.number,
+    headRefName: p.headRefName,
+    isCrossRepository: p.isCrossRepository,
+    headRefOid: p.headRefOid,
+  }
+})
 
 const commitsExpanded = ref(true)
 const commentDraft = ref('')
@@ -561,6 +576,8 @@ async function handleRemoveReviewer(login: string) {
               </span>
             </span>
           </div>
+
+          <LocalCheckoutPanel v-if="checkoutTarget" :target="checkoutTarget" />
 
           <!-- Labels -->
           <div class="flex flex-wrap items-center gap-1.5 pt-1">

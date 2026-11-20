@@ -205,6 +205,58 @@ export async function deleteGitHubTokenKeychain(): Promise<void> {
   await invoke<void>('delete_github_token')
 }
 
+export interface LocalRepoStatus {
+  /** Current branch, or `null` when HEAD is detached. */
+  branch: string | null
+  headOid: string | null
+  /** Tracked files with uncommitted changes. */
+  dirtyFiles: string[]
+}
+
+export interface GitCheckoutPRRequest {
+  repoPath: string
+  expectedOwnerRepo: string
+  number: number
+  headRefName: string
+  isCrossRepository: boolean
+}
+
+export interface GitCheckoutPRResult {
+  branch: string
+  headOid: string
+  created: boolean
+  fastForwarded: boolean
+  localAhead: boolean
+}
+
+function nativeErrorMessage(err: unknown, fallback: string): string {
+  if (typeof err === 'string') return err
+  if (err instanceof Error) return err.message
+  return fallback
+}
+
+/** Reads branch / HEAD / dirty files of a linked checkout. `null` outside Tauri. */
+export async function gitLocalStatus(repoPath: string): Promise<LocalRepoStatus | null> {
+  if (!isTauriRuntime()) return null
+  try {
+    return await invoke<LocalRepoStatus>('git_local_status', { repoPath })
+  } catch (err) {
+    throw new Error(nativeErrorMessage(err, 'Failed to read local checkout status'))
+  }
+}
+
+/** Fetches a PR's head and checks it out in the linked checkout. Throws with git's reason on failure. */
+export async function gitCheckoutPR(request: GitCheckoutPRRequest): Promise<GitCheckoutPRResult> {
+  if (!isTauriRuntime()) {
+    throw new Error('Checking out branches is only available in the desktop app.')
+  }
+  try {
+    return await invoke<GitCheckoutPRResult>('git_checkout_pr', { request })
+  } catch (err) {
+    throw new Error(nativeErrorMessage(err, 'Failed to check out the PR branch'))
+  }
+}
+
 export async function requestNotificationPermission(): Promise<boolean> {
   if (isTauriRuntime()) {
     try {

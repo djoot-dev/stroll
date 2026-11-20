@@ -17,6 +17,8 @@ function makePR(overrides: Partial<PRSummary> & { id: string; number: number }):
     reviewDecision: null,
     ciState: 'SUCCESS',
     totalCommentsCount: 0,
+    headRefName: 'feature',
+    isCrossRepository: false,
     ...overrides,
   }
 }

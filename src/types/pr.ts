@@ -212,6 +212,8 @@ export interface PullRequestData {
   author: GitHubUser
   baseRefName: string
   headRefName: string
+  /** Head branch lives in a fork rather than the base repository. */
+  isCrossRepository: boolean
   baseRefOid: string
   headRefOid: string
   commits: PRCommit[]
@@ -241,4 +243,6 @@ export interface PRSummary {
   reviewDecision: PRReviewDecision
   ciState: CheckRollupState | null
   totalCommentsCount: number
+  headRefName: string
+  isCrossRepository: boolean
 }

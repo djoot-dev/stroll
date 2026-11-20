@@ -6,6 +6,7 @@ import {
   Clock,
   FileDiff,
   FolderGit2,
+  GitBranch,
   GitPullRequest,
   KeyRound,
   Loader2,
@@ -21,14 +22,17 @@ import {
 } from '@lucide/vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { extractInboxRepos, filterAndSortInboxPRs } from '@/services/inbox'
+import { checkoutKey, localBranchForPR, type CheckoutTarget } from '@/services/localCheckout'
 import { PR_FILTER_OPTIONS, useAuthStore } from '@/stores/auth'
+import { useCheckoutStore } from '@/stores/checkout'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore } from '@/stores/settings'
-import type { CheckRollupState, PRInboxSortOption, PRReviewDecision } from '@/types/pr'
+import type { CheckRollupState, PRInboxSortOption, PRReviewDecision, PRSummary } from '@/types/pr'
 
 const auth = useAuthStore()
 const review = useReviewStore()
 const settings = useSettingsStore()
+const checkout = useCheckoutStore()
 
 const activeFilterOption = computed(
   () => PR_FILTER_OPTIONS.find((opt) => opt.value === auth.prFilter) ?? PR_FILTER_OPTIONS[0],
@@ -145,6 +149,36 @@ function reviewDecisionMeta(decision: PRReviewDecision): {
   }
 }
 
+function openInboxItem(item: PRSummary) {
+  if (review.isLoadingPR) return
+  void review.loadPRByRepo(item.owner, item.repo, item.number)
+}
+
+function checkoutTargetFor(item: PRSummary): CheckoutTarget {
+  return {
+    owner: item.owner,
+    repo: item.repo,
+    number: item.number,
+    headRefName: item.headRefName,
+    isCrossRepository: item.isCrossRepository,
+  }
+}
+
+/** Gated on the desktop app and a linked local checkout of the PR's repository. */
+function canCheckout(item: PRSummary): boolean {
+  return checkout.isAvailable() && Boolean(item.headRefName) && checkout.isLinked(item.owner, item.repo)
+}
+
+function checkoutBlockedReason(item: PRSummary): string | null {
+  const dirty = checkout.statusFor(item.owner, item.repo)?.dirtyFiles ?? []
+  if (dirty.length === 0) return null
+  return `Commit or stash uncommitted changes in ${checkout.repoPathFor(item.owner, item.repo)} first:\n${dirty.slice(0, 10).join('\n')}`
+}
+
+function refreshCheckoutStatuses() {
+  if (checkout.isAvailable() && !checkout.busyKey) void checkout.refreshStatuses(auth.requestedPRs)
+}
+
 async function handleLoadUrl() {
   if (!urlInput.value.trim()) return
   await review.loadPRByUrl(urlInput.value)
@@ -168,7 +202,10 @@ onMounted(() => {
     lastRefreshedAt.value = new Date()
   }
   resetPollTimer()
+  window.addEventListener('focus', refreshCheckoutStatuses)
 })
+
+watch([() => auth.requestedPRs, () => review.repoPaths], refreshCheckoutStatuses, { immediate: true })
 
 watch(
   () => settings.inboxAutoRefreshSeconds,
@@ -178,6 +215,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  window.removeEventListener('focus', refreshCheckoutStatuses)
   if (pollTimer !== null) {
     window.clearInterval(pollTimer)
     pollTimer = null
@@ -472,18 +510,24 @@ onBeforeUnmount(() => {
             </div>
 
             <div v-else class="space-y-2.5">
-              <button
+              <div
                 v-for="item in filteredPRs"
                 :key="item.id"
-                class="stroll-card group flex w-full items-center justify-between gap-4 rounded-2xl border px-4 py-3.5 text-left transition-all"
+                role="button"
+                :tabindex="review.isLoadingPR ? -1 : 0"
+                class="stroll-card group flex w-full items-center justify-between gap-4 rounded-2xl border px-4 py-3.5 text-left transition-all focus:outline-none focus-visible:border-terra-border"
                 :class="
                   isItemLoading(item.owner, item.repo, item.number)
                     ? 'cursor-wait border-terra-border bg-terra-soft/20'
-                    : 'border-border bg-canvas-subtle hover:border-terra-border hover:bg-canvas-elevated/50 disabled:cursor-not-allowed disabled:opacity-60'
+                    : review.isLoadingPR
+                      ? 'cursor-not-allowed border-border bg-canvas-subtle opacity-60'
+                      : 'cursor-pointer border-border bg-canvas-subtle hover:border-terra-border hover:bg-canvas-elevated/50'
                 "
-                :disabled="review.isLoadingPR"
+                :aria-disabled="review.isLoadingPR"
                 :aria-busy="isItemLoading(item.owner, item.repo, item.number)"
-                @click="review.loadPRByRepo(item.owner, item.repo, item.number)"
+                @click="openInboxItem(item)"
+                @keydown.enter.self.prevent="openInboxItem(item)"
+                @keydown.space.self.prevent="openInboxItem(item)"
               >
                 <div class="min-w-0 space-y-1">
                   <div class="flex flex-wrap items-center gap-1.5">
@@ -543,9 +587,51 @@ onBeforeUnmount(() => {
                   <div class="truncate text-sm font-medium text-ink">
                     {{ item.title }}
                   </div>
+                  <div
+                    v-if="checkout.errorByPR[checkoutKey(item)] || checkout.messageByPR[checkoutKey(item)]"
+                    class="flex items-start gap-1 text-[11px]"
+                    :class="checkout.errorByPR[checkoutKey(item)] ? 'text-crimson-text' : 'text-pine-text'"
+                    @click.stop
+                  >
+                    <span class="min-w-0 whitespace-pre-line break-words">{{
+                      checkout.errorByPR[checkoutKey(item)] ?? checkout.messageByPR[checkoutKey(item)]
+                    }}</span>
+                    <button
+                      type="button"
+                      class="shrink-0 opacity-70 hover:opacity-100"
+                      title="Dismiss"
+                      @click.stop="checkout.dismiss(item)"
+                    >
+                      <X class="h-3 w-3" />
+                    </button>
+                  </div>
                 </div>
 
                 <div class="flex shrink-0 items-center gap-4">
+                  <template v-if="canCheckout(item)">
+                    <span
+                      v-if="checkout.stateFor(checkoutTargetFor(item))?.kind === 'on-pr'"
+                      class="inline-flex items-center gap-1 rounded-lg border border-pine-border bg-pine-soft px-2 py-1 text-[11px] font-medium text-pine-text"
+                      :title="`${localBranchForPR(item)} is checked out in ${checkout.repoPathFor(item.owner, item.repo)}`"
+                    >
+                      <GitBranch class="h-3 w-3" />
+                      <span>Checked out</span>
+                    </span>
+                    <button
+                      v-else
+                      type="button"
+                      class="inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-1 text-[11px] text-ink-secondary transition-all hover:border-terra-border hover:text-terra-text focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
+                      :class="checkout.busyKey === checkoutKey(item) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'"
+                      :disabled="!!checkout.busyKey || checkoutBlockedReason(item) !== null"
+                      :title="checkoutBlockedReason(item) ?? `Check out ${localBranchForPR(item)} in ${checkout.repoPathFor(item.owner, item.repo)}`"
+                      @click.stop="checkout.checkout(checkoutTargetFor(item))"
+                      @keydown.stop
+                    >
+                      <Loader2 v-if="checkout.busyKey === checkoutKey(item)" class="h-3 w-3 animate-spin" />
+                      <GitBranch v-else class="h-3 w-3" />
+                      <span>{{ checkout.busyKey === checkoutKey(item) ? 'Checking out…' : 'Check out' }}</span>
+                    </button>
+                  </template>
                   <div class="hidden items-center gap-1.5 text-xs text-ink-muted sm:flex">
                     <FileDiff class="h-3.5 w-3.5 text-ink-faint" />
                     <span>{{ item.changedFiles }} files</span>
@@ -574,7 +660,7 @@ onBeforeUnmount(() => {
                     />
                   </span>
                 </div>
-              </button>
+              </div>
             </div>
 
             <!-- Load More Pagination & Demo PR Quick Access -->

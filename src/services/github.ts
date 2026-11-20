@@ -341,6 +341,8 @@ export async function fetchViewerAndRequestedPRs(
             isDraft
             reviewDecision
             totalCommentsCount
+            headRefName
+            isCrossRepository
             commits(last: 1) {
               nodes {
                 commit {
@@ -385,6 +387,8 @@ export async function fetchViewerAndRequestedPRs(
         isDraft: boolean
         reviewDecision: PRReviewDecision
         totalCommentsCount: number | null
+        headRefName: string
+        isCrossRepository: boolean | null
         commits: {
           nodes: Array<{
             commit: {
@@ -423,6 +427,8 @@ export async function fetchViewerAndRequestedPRs(
       reviewDecision: n.reviewDecision ?? null,
       ciState: n.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state ?? null,
       totalCommentsCount: n.totalCommentsCount ?? 0,
+      headRefName: n.headRefName,
+      isCrossRepository: Boolean(n.isCrossRepository),
     }))
 
   return {
@@ -927,6 +933,7 @@ export async function fetchPullRequest(
           updatedAt
           baseRefName
           headRefName
+          isCrossRepository
           baseRefOid
           headRefOid
           author {
@@ -1132,6 +1139,7 @@ export async function fetchPullRequest(
         updatedAt: string
         baseRefName: string
         headRefName: string
+        isCrossRepository: boolean | null
         baseRefOid: string
         headRefOid: string
         author: GitHubUser | null
@@ -1454,6 +1462,7 @@ export async function fetchPullRequest(
     author: pr.author ?? { login: 'ghost', avatarUrl: '' },
     baseRefName: pr.baseRefName,
     headRefName: pr.headRefName,
+    isCrossRepository: Boolean(pr.isCrossRepository),
     baseRefOid: pr.baseRefOid,
     headRefOid: pr.headRefOid,
     commits,
