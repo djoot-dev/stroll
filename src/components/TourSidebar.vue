@@ -11,13 +11,68 @@ import {
   Pin,
   RotateCcw,
 } from '@lucide/vue'
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { isLockfile, LAYER_META } from '@/services/readingOrder'
 import { computeRevealScrollTop } from '@/services/scrollReveal'
 import { useReviewStore } from '@/stores/review'
+import {
+  DEFAULT_APP_SETTINGS,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+  useSettingsStore,
+} from '@/stores/settings'
 
 const review = useReviewStore()
+const settings = useSettingsStore()
 const stepListRef = ref<HTMLElement | null>(null)
+
+// --- Resizing -------------------------------------------------------------
+const isResizing = ref(false)
+let dragStartX = 0
+let dragStartWidth = 0
+
+function onResizeMove(e: PointerEvent) {
+  void settings.setSidebarWidth(dragStartWidth + (e.clientX - dragStartX), { persist: false })
+}
+
+function stopResize() {
+  if (!isResizing.value) return
+  isResizing.value = false
+  window.removeEventListener('pointermove', onResizeMove)
+  window.removeEventListener('pointerup', stopResize)
+  window.removeEventListener('pointercancel', stopResize)
+  document.body.classList.remove('is-resizing-sidebar')
+  void settings.setSidebarWidth(settings.sidebarWidth)
+}
+
+function startResize(e: PointerEvent) {
+  if (e.button !== 0) return
+  e.preventDefault()
+  isResizing.value = true
+  dragStartX = e.clientX
+  dragStartWidth = settings.sidebarWidth
+  window.addEventListener('pointermove', onResizeMove)
+  window.addEventListener('pointerup', stopResize)
+  window.addEventListener('pointercancel', stopResize)
+  document.body.classList.add('is-resizing-sidebar')
+}
+
+function resetWidth() {
+  void settings.setSidebarWidth(DEFAULT_APP_SETTINGS.sidebarWidth)
+}
+
+function onResizeKey(e: KeyboardEvent) {
+  const step = e.shiftKey ? 48 : 16
+  if (e.key === 'ArrowLeft') void settings.setSidebarWidth(settings.sidebarWidth - step)
+  else if (e.key === 'ArrowRight') void settings.setSidebarWidth(settings.sidebarWidth + step)
+  else if (e.key === 'Home') void settings.setSidebarWidth(SIDEBAR_MIN_WIDTH)
+  else if (e.key === 'End') void settings.setSidebarWidth(SIDEBAR_MAX_WIDTH)
+  else return
+  e.preventDefault()
+  e.stopPropagation()
+}
+
+onBeforeUnmount(stopResize)
 
 /**
  * Scrolls the step list so the active step — plus the step directly above and
@@ -99,8 +154,30 @@ function dirOnly(path: string): string {
   <Transition name="sidebar-slide">
     <aside
       v-if="review.sidebarOpen && review.pr"
-      class="flex w-72 shrink-0 flex-col border-r border-border bg-canvas-subtle"
+      class="relative flex shrink-0 flex-col border-r border-border bg-canvas-subtle"
+      :style="{ width: `${settings.sidebarWidth}px`, '--sidebar-width': `${settings.sidebarWidth}px` }"
     >
+      <!-- Resize handle -->
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize tour outline"
+        :aria-valuenow="settings.sidebarWidth"
+        :aria-valuemin="SIDEBAR_MIN_WIDTH"
+        :aria-valuemax="SIDEBAR_MAX_WIDTH"
+        tabindex="0"
+        title="Drag to resize · double-click to reset"
+        class="group/resize absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize outline-none"
+        @pointerdown="startResize"
+        @dblclick="resetWidth"
+        @keydown="onResizeKey"
+      >
+        <div
+          class="mx-auto h-full w-px transition-colors group-hover/resize:bg-terra-text group-focus-visible/resize:bg-terra-text"
+          :class="isResizing ? 'bg-terra-text' : 'bg-transparent'"
+        />
+      </div>
+
       <!-- PR Summary Header -->
       <div class="border-b border-border p-3.5">
         <h2 class="line-clamp-2 text-xs font-semibold leading-snug text-ink">
