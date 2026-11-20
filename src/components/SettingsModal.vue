@@ -327,7 +327,7 @@ async function handleResetDefaults() {
         <aside
           class="flex shrink-0 flex-col border-b border-border bg-canvas/80 sm:w-48 sm:border-r sm:border-b-0"
         >
-          <div class="flex items-center justify-between px-4 py-3.5 sm:border-b sm:border-border-muted">
+          <div class="flex items-center justify-between h-12 shrink-0 px-4 sm:border-b sm:border-border">
             <div class="flex items-center gap-2">
               <Settings class="h-4 w-4 text-terra" />
               <span class="text-sm font-semibold text-ink">Settings</span>
@@ -372,7 +372,7 @@ async function handleResetDefaults() {
         <!-- Main Section Content -->
         <div class="flex min-w-0 flex-1 flex-col">
           <header
-            class="hidden items-center justify-between border-b border-border px-5 py-3.5 sm:flex"
+            class="hidden items-center justify-between h-12 shrink-0 border-b border-border px-5 sm:flex"
           >
             <h2 class="text-sm font-semibold text-ink">{{ activeSectionTitle }}</h2>
             <button
