@@ -20,6 +20,14 @@ export interface ResolveRepoSymbolRequest {
   importerPath: string
   symbolName: string
   importSpecifier?: string | null
+  /** Repo-relative file known to declare the symbol; skips import-path resolution. */
+  targetPath?: string | null
+}
+
+export interface CSharpTypeEntry {
+  name: string
+  namespace: string | null
+  path: string
 }
 
 export interface ResolvedRepoSymbol {
@@ -67,6 +75,15 @@ export async function resolveRepoSymbol(
   if (!isTauriRuntime()) return null
   try {
     return await invoke<ResolvedRepoSymbol | null>('resolve_repo_symbol', { request })
+  } catch {
+    return null
+  }
+}
+
+export async function indexCSharpTypes(repoPath: string): Promise<CSharpTypeEntry[] | null> {
+  if (!isTauriRuntime()) return null
+  try {
+    return await invoke<CSharpTypeEntry[]>('index_csharp_types', { request: { repoPath } })
   } catch {
     return null
   }

@@ -11,6 +11,10 @@ pub struct ResolveRepoSymbolRequest {
     pub importer_path: String,
     pub symbol_name: String,
     pub import_specifier: Option<String>,
+    /// Repo-relative file known to declare the symbol (e.g. from the C# type index).
+    /// When set, path resolution from `import_specifier` is skipped.
+    #[serde(default)]
+    pub target_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -1205,6 +1209,29 @@ pub fn resolve_repo_symbol(
         .canonicalize()
         .map_err(|e| format!("Failed to canonicalize repo path: {e}"))?;
 
+    if let Some(target) = request
+        .target_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let Ok(target_file) = canonical_root.join(target).canonicalize() else {
+            return Ok(None);
+        };
+        if !target_file.starts_with(&canonical_root) || !target_file.is_file() {
+            return Ok(None);
+        }
+        let mut visited = HashSet::new();
+        return resolve_symbol_in_file(
+            &canonical_root,
+            &target_file,
+            &request.symbol_name,
+            true,
+            &mut visited,
+            0,
+        );
+    }
+
     let target_file = resolve_target_file(
         &canonical_root,
         &request.importer_path,
@@ -1484,6 +1511,7 @@ public sealed class OrderService : IOrderService
             importer_path: "src/Controllers/OrdersController.cs".to_string(),
             symbol_name: "OrderService".to_string(),
             import_specifier: Some("MyApp.Services".to_string()),
+            target_path: None,
         })
         .unwrap()
         .expect("should resolve OrderService across C# namespace");
@@ -1492,6 +1520,47 @@ public sealed class OrderService : IOrderService
         assert_eq!(res.kind, "class");
         assert_eq!(res.language, "csharp");
         assert_eq!(res.path, "src/Services/OrderService.cs");
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn resolves_csharp_symbol_from_explicit_target_path() {
+        let tmp = std::env::temp_dir().join(format!(
+            "stroll_cs_target_test_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("src/MyApp.Domain/Services/Billing")).unwrap();
+        fs::create_dir_all(tmp.join("src/MyApp.Host")).unwrap();
+        fs::write(
+            tmp.join("src/MyApp.Domain/Services/Billing/Contracts.cs"),
+            "namespace MyApp.Domain.Services.Billing;\n\npublic class Invoice {}\n\n/// <summary>Bills things</summary>\npublic interface IBillingService {}\n",
+        )
+        .unwrap();
+        fs::write(
+            tmp.join("src/MyApp.Host/Startup.cs"),
+            "using MyApp.Domain.Services.Billing;\npublic static class Startup {}\n",
+        )
+        .unwrap();
+
+        let request = |target: &str| ResolveRepoSymbolRequest {
+            repo_path: tmp.to_string_lossy().to_string(),
+            importer_path: "src/MyApp.Host/Startup.cs".to_string(),
+            symbol_name: "IBillingService".to_string(),
+            import_specifier: Some("MyApp.Domain.Services.Billing".to_string()),
+            target_path: Some(target.to_string()),
+        };
+
+        let res = resolve_repo_symbol(request("src/MyApp.Domain/Services/Billing/Contracts.cs"))
+            .unwrap()
+            .expect("should resolve type declared in a differently named file");
+        assert_eq!(res.kind, "interface");
+        assert_eq!(res.path, "src/MyApp.Domain/Services/Billing/Contracts.cs");
+        assert!(res.doc_comment.as_deref().unwrap().contains("Bills things"));
+
+        // Paths escaping the repo root are rejected.
+        assert!(resolve_repo_symbol(request("../outside.cs")).unwrap().is_none());
 
         let _ = fs::remove_dir_all(&tmp);
     }
@@ -1633,6 +1702,7 @@ export default {
             importer_path: "apps/web/src/views/HomeView.vue".to_string(),
             symbol_name: "ActionCard".to_string(),
             import_specifier: Some("@ui/ActionCard.vue".to_string()),
+            target_path: None,
         })
         .unwrap()
         .expect("should resolve @ui/ActionCard.vue via tsconfig.app.json");
@@ -1646,6 +1716,7 @@ export default {
             importer_path: "apps/web/src/views/HomeView.vue".to_string(),
             symbol_name: "ActionCard".to_string(),
             import_specifier: Some("@/components/ui".to_string()),
+            target_path: None,
         })
         .unwrap()
         .expect("should resolve ActionCard through barrel index.ts");
@@ -1657,6 +1728,7 @@ export default {
             importer_path: "apps/web/src/views/HomeView.vue".to_string(),
             symbol_name: "useSession".to_string(),
             import_specifier: Some("~composables/useSession".to_string()),
+            target_path: None,
         })
         .unwrap()
         .expect("should resolve ~composables/useSession via vite.config.ts");
