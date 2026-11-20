@@ -36,6 +36,7 @@ import type { PRMergeMethod, PRReviewState, PRStatusCheck, ReactionGroup } from 
 import LocalCheckoutPanel from './LocalCheckoutPanel.vue'
 import MarkdownContent from './MarkdownContent.vue'
 import ReactionBar from './ReactionBar.vue'
+import ReviewerPicker from './ReviewerPicker.vue'
 
 const auth = useAuthStore()
 const review = useReviewStore()
@@ -69,7 +70,6 @@ const lifecycleError = ref<string | null>(null)
 const isAddingLabel = ref(false)
 const newLabelInput = ref('')
 const isAddingReviewer = ref(false)
-const newReviewerInput = ref('')
 
 function formatRelativeTime(iso: string | null | undefined): string {
   if (!iso) return ''
@@ -510,12 +510,11 @@ async function handleRemoveLabel(name: string) {
   }
 }
 
-async function handleAddReviewer() {
-  if (!newReviewerInput.value.trim()) return
+async function handleAddReviewer(login: string) {
+  if (!login.trim()) return
   lifecycleError.value = null
   try {
-    await review.addReviewer(newReviewerInput.value)
-    newReviewerInput.value = ''
+    await review.addReviewer(login)
     isAddingReviewer.value = false
   } catch (err) {
     lifecycleError.value = err instanceof Error ? err.message : 'Failed to request reviewer'
@@ -925,25 +924,12 @@ async function handleRemoveReviewer(login: string) {
             </div>
           </div>
 
-          <form
+          <ReviewerPicker
             v-if="isAddingReviewer"
-            class="flex items-center gap-1"
-            @submit.prevent="handleAddReviewer"
-          >
-            <input
-              v-model="newReviewerInput"
-              type="text"
-              placeholder="@username"
-              class="w-28 rounded-lg border border-terra-border bg-canvas-inset px-2 py-1 text-[11px] text-ink focus:outline-none"
-              @keydown.esc.prevent="isAddingReviewer = false"
-            />
-            <button
-              type="submit"
-              class="rounded-lg bg-terra px-2 py-1 text-[10.5px] font-semibold text-white hover:bg-terra-hover"
-            >
-              Request
-            </button>
-          </form>
+            :search="review.searchReviewerCandidates"
+            @submit="handleAddReviewer"
+            @cancel="isAddingReviewer = false"
+          />
           <button
             v-else
             type="button"
