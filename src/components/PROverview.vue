@@ -6,7 +6,6 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  CircleDashed,
   Clock,
   ExternalLink,
   GitBranch,
@@ -758,7 +757,7 @@ async function handleRemoveReviewer(login: string) {
               v-else-if="checksSummary.total > 0 && checksSummary.pending === 0"
               class="h-4 w-4 shrink-0 text-pine"
             />
-            <CircleDashed
+            <Loader2
               v-else-if="checksSummary.total > 0"
               class="h-4 w-4 shrink-0 animate-spin text-ochre-text"
             />

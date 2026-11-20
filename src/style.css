@@ -294,6 +294,19 @@ html.dark {
     inset -1px 0 0 var(--stroll-diff-select-edge);
 }
 
+/*
+ * Spinning icons: rotate about the icon's own center and promote to a
+ * compositor layer. Without this, WebKit (Tauri's webview) re-rasterizes the
+ * SVG each frame at a fractional layout position and snaps it to the pixel
+ * grid, so the spinner visibly wobbles around its center.
+ */
+svg.animate-spin {
+  transform-box: fill-box;
+  transform-origin: center;
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
 /* --- Tactile UI Transitions & Juice --- */
 
 @keyframes pop-in {
