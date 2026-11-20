@@ -26,6 +26,9 @@ const submitReviewMock = vi.fn(async () => undefined)
 const addReviewThreadMock = vi.fn(async () => 'thread_line')
 const addFileReviewThreadMock = vi.fn(async () => 'thread_file')
 const fetchPRHeadPulseMock = vi.fn<() => Promise<PRHeadPulse | null>>()
+const updatePullRequestBodyMock = vi.fn<
+  (pat: string, pullRequestId: string, body: string) => Promise<string>
+>(async (_pat, _id, body) => body)
 
 vi.mock('@/services/github', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/github')>()
@@ -49,6 +52,8 @@ vi.mock('@/services/github', async (importOriginal) => {
     addReviewThread: (...args: unknown[]) => addReviewThreadMock(...(args as [])),
     addFileReviewThread: (...args: unknown[]) => addFileReviewThreadMock(...(args as [])),
     fetchPRHeadPulse: () => fetchPRHeadPulseMock(),
+    updatePullRequestBody: (pat: string, pullRequestId: string, body: string) =>
+      updatePullRequestBodyMock(pat, pullRequestId, body),
   }
 })
 
@@ -600,5 +605,68 @@ describe('useReviewStore remote update banner', () => {
     fetchPRHeadPulseMock.mockResolvedValue({ ...changed, threadCount: changed.threadCount + 1 })
     await store.checkForRemotePRUpdates()
     expect(store.prHasRemoteUpdates).toBe(true)
+  })
+})
+
+describe('useReviewStore editPRDescription', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.stubGlobal('localStorage', createMemoryStorage())
+    fetchPullRequestMock.mockReset()
+    updatePullRequestBodyMock.mockClear()
+  })
+
+  it('updates the description locally in demo mode without calling GitHub', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+
+    await store.editPRDescription('New **demo** description\n\n')
+
+    expect(store.pr?.body).toBe('New **demo** description')
+    expect(updatePullRequestBodyMock).not.toHaveBeenCalled()
+  })
+
+  it('sends the new description to GitHub and stores the returned body', async () => {
+    fetchPullRequestMock.mockResolvedValueOnce(
+      makePR({ id: 'PR_node_1', owner: 'acme', repo: 'stroll', number: 5 }),
+    )
+    updatePullRequestBodyMock.mockResolvedValueOnce('Server-normalized body')
+
+    const auth = useAuthStore()
+    auth.pat = 'ghp_test_token'
+    const store = useReviewStore()
+    await store.loadPRByRepo('acme', 'stroll', 5)
+
+    await store.editPRDescription('Updated body  ')
+
+    expect(updatePullRequestBodyMock).toHaveBeenCalledWith('ghp_test_token', 'PR_node_1', 'Updated body')
+    expect(store.pr?.body).toBe('Server-normalized body')
+  })
+
+  it('allows clearing the description', async () => {
+    fetchPullRequestMock.mockResolvedValueOnce(makePR({ owner: 'acme', repo: 'stroll', number: 6 }))
+    const auth = useAuthStore()
+    auth.pat = 'ghp_test_token'
+    const store = useReviewStore()
+    await store.loadPRByRepo('acme', 'stroll', 6)
+
+    await store.editPRDescription('   ')
+
+    expect(updatePullRequestBodyMock).toHaveBeenCalledWith('ghp_test_token', expect.any(String), '')
+    expect(store.pr?.body).toBe('')
+  })
+
+  it('keeps the previous description when GitHub rejects the update', async () => {
+    fetchPullRequestMock.mockResolvedValueOnce(
+      makePR({ owner: 'acme', repo: 'stroll', number: 7, body: 'Original' }),
+    )
+    updatePullRequestBodyMock.mockRejectedValueOnce(new Error('Resource not accessible by integration'))
+    const auth = useAuthStore()
+    auth.pat = 'ghp_test_token'
+    const store = useReviewStore()
+    await store.loadPRByRepo('acme', 'stroll', 7)
+
+    await expect(store.editPRDescription('Nope')).rejects.toThrow('Resource not accessible')
+    expect(store.pr?.body).toBe('Original')
   })
 })
