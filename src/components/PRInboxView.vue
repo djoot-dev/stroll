@@ -62,6 +62,11 @@ const filteredPRs = computed(() =>
   }),
 )
 
+// Mirror the outgoing list's length (capped) so the skeleton doesn't make the page jump.
+const skeletonRowCount = computed(() =>
+  Math.min(Math.max(filteredPRs.value.length, 3), 5),
+)
+
 const hasActiveFilters = computed(
   () => searchQuery.value.trim().length > 0 || selectedRepo.value !== 'all',
 )
@@ -338,7 +343,12 @@ onBeforeUnmount(() => {
                 v-if="auth.isAuthenticated"
                 class="rounded-full bg-sage-soft px-2 py-0.5 font-mono text-[11px] font-medium text-sage-text"
               >
-                <template v-if="hasActiveFilters">
+                <Loader2
+                  v-if="auth.isSwitchingFilter"
+                  class="h-3 w-3 animate-spin"
+                  aria-label="Loading pull requests"
+                />
+                <template v-else-if="hasActiveFilters">
                   {{ filteredPRs.length }} / {{ auth.requestedPRs.length }}
                 </template>
                 <template v-else>
@@ -421,10 +431,43 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
+          <!-- Filter Switch Loading Skeleton -->
+          <div
+            v-else-if="auth.isSwitchingFilter"
+            class="space-y-2.5"
+            role="status"
+            aria-live="polite"
+            :aria-label="`Loading ${activeFilterOption.label} pull requests`"
+          >
+            <div
+              v-for="n in skeletonRowCount"
+              :key="n"
+              class="stroll-card relative flex items-center justify-between gap-4 overflow-hidden rounded-2xl border border-border bg-canvas-subtle px-4 py-3.5"
+              :style="{ opacity: 1 - (n - 1) * 0.18 }"
+              aria-hidden="true"
+            >
+              <div class="min-w-0 flex-1 space-y-2">
+                <div class="flex items-center gap-2">
+                  <div class="h-3 w-32 rounded bg-canvas-inset" />
+                  <div class="h-3 w-16 rounded bg-canvas-inset" />
+                </div>
+                <div class="h-3.5 rounded bg-canvas-inset" :class="n % 2 ? 'w-3/4' : 'w-1/2'" />
+                <div class="flex items-center gap-2">
+                  <div class="h-2.5 w-20 rounded bg-canvas-inset" />
+                  <div class="h-2.5 w-12 rounded bg-canvas-inset" />
+                </div>
+              </div>
+              <div class="h-6 w-16 shrink-0 rounded-lg bg-canvas-inset" />
+              <div
+                class="animate-shimmer pointer-events-none absolute inset-y-0 left-0 w-2/5 bg-gradient-to-r from-transparent via-canvas-elevated/60 to-transparent"
+              />
+            </div>
+          </div>
+
           <!-- Empty Inbox -->
           <div
             v-else-if="auth.requestedPRs.length === 0"
-            class="stroll-card rounded-2xl border border-border bg-canvas-subtle/80 p-8 text-center"
+            class="stroll-card animate-pop-in rounded-2xl border border-border bg-canvas-subtle/80 p-8 text-center"
           >
             <p class="text-sm font-medium text-ink-secondary">{{ activeFilterOption.emptyMessage }}</p>
             <p class="mt-1 text-xs text-ink-muted">
@@ -440,7 +483,7 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- PR List -->
-          <div v-else class="space-y-3">
+          <div v-else class="animate-pop-in space-y-3">
             <!-- Lightweight Search, Repo Filter & Sort Bar -->
             <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
               <div class="relative flex-1">
