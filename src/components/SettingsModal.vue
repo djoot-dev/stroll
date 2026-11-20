@@ -192,6 +192,8 @@ const fontSizeOptions = [
 ]
 
 const shortcutRows = [
+  { keys: ['⌘K', 'Ctrl+K'], description: 'Open command palette (files, symbols, threads)' },
+  { keys: ['O', '0'], description: 'Go to PR overview' },
   { keys: ['L', '→'], description: 'Next tour step' },
   { keys: ['H', '←'], description: 'Previous tour step' },
   { keys: ['J', '↓'], description: 'Smooth scroll down' },
