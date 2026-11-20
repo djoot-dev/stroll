@@ -42,8 +42,11 @@ export const useAuthStore = defineStore('auth', () => {
   const isLoadingMore = ref(false)
   const prFilter = ref<PRFilterMode>('review-requested')
   const isLoading = ref(false)
-  /** True while the inbox is re-fetching after the user picked a different filter tab. */
-  const isSwitchingFilter = ref(false)
+  /**
+   * True while a user-initiated inbox reload (filter switch or manual refresh) is in flight,
+   * so the UI can show a loading state in place of the list. Background refreshes stay silent.
+   */
+  const isReloadingList = ref(false)
   const error = ref<string | null>(null)
   let knownReviewRequestedIds: Set<string> | null = null
   let persistedPat: string | null = null
@@ -163,21 +166,24 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function refreshRequestedPRs(options?: { notifyOnNew?: boolean }): Promise<void> {
+  async function refreshRequestedPRs(options?: {
+    notifyOnNew?: boolean
+    showLoading?: boolean
+  }): Promise<void> {
     if (!pat.value) return
-    await verifyAndLoadProfile(pat.value, { ...options, persist: false })
+    const { showLoading = false, ...rest } = options ?? {}
+    if (showLoading) isReloadingList.value = true
+    try {
+      await verifyAndLoadProfile(pat.value, { ...rest, persist: false })
+    } finally {
+      if (showLoading) isReloadingList.value = false
+    }
   }
 
   async function setPrFilter(mode: PRFilterMode): Promise<void> {
     if (prFilter.value === mode) return
     prFilter.value = mode
-    if (!pat.value) return
-    isSwitchingFilter.value = true
-    try {
-      await refreshRequestedPRs()
-    } finally {
-      isSwitchingFilter.value = false
-    }
+    await refreshRequestedPRs({ showLoading: true })
   }
 
   async function clearPat(): Promise<void> {
@@ -200,7 +206,7 @@ export const useAuthStore = defineStore('auth', () => {
     isLoadingMore,
     prFilter,
     isLoading,
-    isSwitchingFilter,
+    isReloadingList,
     error,
     isAuthenticated,
     init,

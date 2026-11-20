@@ -68,11 +68,11 @@ describe('useAuthStore', () => {
     expect(mockSaveGitHubPat).not.toHaveBeenCalled()
   })
 
-  it('flags isSwitchingFilter only while a filter change is re-fetching', async () => {
+  it('flags isReloadingList for filter switches and visible refreshes only', async () => {
     mockLoadGitHubPat.mockResolvedValue('ghp_saved_token')
     const auth = useAuthStore()
     await auth.init()
-    expect(auth.isSwitchingFilter).toBe(false)
+    expect(auth.isReloadingList).toBe(false)
 
     let resolveFetch: (value: unknown) => void = () => {}
     mockFetchViewerAndRequestedPRs.mockReturnValueOnce(
@@ -81,7 +81,7 @@ describe('useAuthStore', () => {
       }),
     )
     const pending = auth.setPrFilter('authored')
-    expect(auth.isSwitchingFilter).toBe(true)
+    expect(auth.isReloadingList).toBe(true)
 
     resolveFetch({
       viewer: { login: 'octocat', avatarUrl: 'https://example.com/a.png', name: 'Octo' },
@@ -90,12 +90,18 @@ describe('useAuthStore', () => {
       endCursor: null,
     })
     await pending
-    expect(auth.isSwitchingFilter).toBe(false)
+    expect(auth.isReloadingList).toBe(false)
 
-    // A plain refresh (e.g. auto-refresh) must not trigger the switching state.
-    const refresh = auth.refreshRequestedPRs()
-    expect(auth.isSwitchingFilter).toBe(false)
-    await refresh
+    // A manual (visible) refresh uses the same loading state.
+    const visible = auth.refreshRequestedPRs({ showLoading: true })
+    expect(auth.isReloadingList).toBe(true)
+    await visible
+    expect(auth.isReloadingList).toBe(false)
+
+    // A background refresh (e.g. auto-refresh) must stay silent.
+    const background = auth.refreshRequestedPRs({ notifyOnNew: true })
+    expect(auth.isReloadingList).toBe(false)
+    await background
   })
 
   it('persists new PAT once and skips redundant saves for the same token', async () => {

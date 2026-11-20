@@ -106,7 +106,7 @@ function resetPollTimer() {
 
 async function handleRefresh(isAutoRefresh = false) {
   if (!auth.isAuthenticated || auth.isLoading) return
-  await auth.refreshRequestedPRs({ notifyOnNew: isAutoRefresh })
+  await auth.refreshRequestedPRs({ notifyOnNew: isAutoRefresh, showLoading: !isAutoRefresh })
   lastRefreshedAt.value = new Date()
 }
 
@@ -344,7 +344,7 @@ onBeforeUnmount(() => {
                 class="rounded-full bg-sage-soft px-2 py-0.5 font-mono text-[11px] font-medium text-sage-text"
               >
                 <Loader2
-                  v-if="auth.isSwitchingFilter"
+                  v-if="auth.isReloadingList"
                   class="h-3 w-3 animate-spin"
                   aria-label="Loading pull requests"
                 />
@@ -431,9 +431,9 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- Filter Switch Loading Skeleton -->
+          <!-- Reload Skeleton (filter switch / manual refresh) -->
           <div
-            v-else-if="auth.isSwitchingFilter"
+            v-else-if="auth.isReloadingList"
             class="space-y-2.5"
             role="status"
             aria-live="polite"
