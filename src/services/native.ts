@@ -39,7 +39,10 @@ export interface ResolvedRepoSymbol {
   line: number
   language: string
   docComment: string | null
+  /** Declaration text (capped on the native side); the UI shows a prefix of it. */
   snippet: string
+  /** Line count of the whole declaration. Absent from older native builds. */
+  totalLines?: number
 }
 
 export interface GitBlameLineRequest {
