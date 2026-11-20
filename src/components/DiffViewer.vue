@@ -14,6 +14,7 @@ import {
   FileText,
   Image as ImageIcon,
   Loader2,
+  MessageSquare,
   MessageSquarePlus,
   Search,
   Sparkles,
@@ -81,6 +82,9 @@ const activeComposer = ref<{
   startSide?: DiffSide
   selectedKeys: Set<string>
 } | null>(null)
+
+// File-level (not line-anchored) comment composer
+const fileComposerOpen = ref(false)
 
 // Drag-to-select multiline comment state
 const isDraggingSelection = ref(false)
@@ -265,6 +269,7 @@ watch(
     showSvgSource.value = false
     showMarkdownPreview.value = false
     activeComposer.value = null
+    fileComposerOpen.value = false
     activeScopes.value = []
     activeReplacedCount.value = 0
     closePopoverImmediately()
@@ -503,11 +508,35 @@ function inlineChangeClass(pt: DiffTokenPart, lineType: DiffLine['type']): strin
 }
 
 const fileThreads = computed<ReviewThread[]>(() =>
-  (review.pr?.threads ?? []).filter((t) => t.path === props.step.file.path),
+  (review.pr?.threads ?? []).filter(
+    (t) => t.path === props.step.file.path && t.subjectType !== 'FILE',
+  ),
 )
 
 const fileDrafts = computed<DraftComment[]>(() =>
-  review.draftComments.filter((d) => d.path === props.step.file.path),
+  review.draftComments.filter(
+    (d) => d.path === props.step.file.path && d.subjectType !== 'FILE',
+  ),
+)
+
+/** Threads and drafts that target the file as a whole rather than a line. */
+const fileLevelThreads = computed<ReviewThread[]>(() =>
+  (review.pr?.threads ?? []).filter(
+    (t) => t.path === props.step.file.path && t.subjectType === 'FILE',
+  ),
+)
+
+const fileLevelDrafts = computed<DraftComment[]>(() =>
+  review.draftComments.filter(
+    (d) => d.path === props.step.file.path && d.subjectType === 'FILE',
+  ),
+)
+
+const hasFileLevelSection = computed(
+  () =>
+    fileComposerOpen.value ||
+    fileLevelThreads.value.length > 0 ||
+    fileLevelDrafts.value.length > 0,
 )
 
 function threadsForLine(line: DiffLine): ReviewThread[] {
@@ -704,6 +733,16 @@ async function handleCreateDraft(body: string) {
   activeComposer.value = null
 }
 
+function openFileComposer() {
+  activeComposer.value = null
+  fileComposerOpen.value = true
+}
+
+async function handleCreateFileDraft(body: string) {
+  await review.addFileDraftComment(props.step.file.path, body)
+  fileComposerOpen.value = false
+}
+
 function statusBadgeClass(status: string): string {
   switch (status) {
     case 'added':
@@ -801,6 +840,21 @@ function statusBadgeClass(status: string): string {
           </button>
 
           <button
+            type="button"
+            title="Comment on this file as a whole"
+            class="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors"
+            :class="
+              fileComposerOpen
+                ? 'border-terra-border bg-terra-soft text-terra-text'
+                : 'border-border bg-canvas text-ink-muted hover:bg-canvas-elevated hover:text-ink'
+            "
+            @click="fileComposerOpen ? (fileComposerOpen = false) : openFileComposer()"
+          >
+            <MessageSquarePlus class="h-3 w-3" />
+            <span class="hidden sm:inline">File comment</span>
+          </button>
+
+          <button
             class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors"
             :class="
               review.isStepReviewed(step.file.path)
@@ -824,6 +878,60 @@ function statusBadgeClass(status: string): string {
         :context="ctx"
         @jump-to-file="(p) => review.goToFile(p)"
       />
+    </div>
+
+    <!-- File-level Comments (threads + drafts + composer) -->
+    <div
+      v-if="hasFileLevelSection"
+      class="stroll-card overflow-hidden rounded-2xl border border-border bg-canvas py-1"
+      data-testid="file-level-comments"
+    >
+      <div class="flex items-center gap-1.5 px-4 pt-2 text-[11px] font-medium text-ink-muted">
+        <MessageSquare class="h-3 w-3" />
+        <span>Comments on this file</span>
+      </div>
+
+      <ReviewThreadCard
+        v-for="thread in fileLevelThreads"
+        :key="thread.id"
+        :thread="thread"
+      />
+
+      <div v-for="draft in fileLevelDrafts" :key="draft.id" class="py-1.5">
+        <div class="animate-pop-in mx-3 rounded-xl border border-ochre-border bg-ochre-soft p-3 font-sans">
+          <div class="flex items-center justify-between text-[11px]">
+            <span class="font-semibold text-ochre-text">Pending Draft (File)</span>
+            <button
+              class="inline-flex items-center gap-1 text-ink-muted hover:text-crimson-text"
+              title="Delete draft"
+              @click.stop="review.deleteDraftComment(draft.id)"
+            >
+              <Trash2 class="h-3 w-3" />
+              <span>Discard</span>
+            </button>
+          </div>
+          <MarkdownContent :content="draft.body" class="mt-1 text-xs leading-relaxed text-ink" />
+        </div>
+      </div>
+
+      <CommentComposer
+        v-if="fileComposerOpen"
+        :line="0"
+        side="RIGHT"
+        file-level
+        @submit="handleCreateFileDraft"
+        @cancel="fileComposerOpen = false"
+      />
+
+      <button
+        v-else
+        type="button"
+        class="mx-3 my-2 inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary transition-colors hover:border-terra-border hover:text-terra-text"
+        @click="openFileComposer"
+      >
+        <MessageSquarePlus class="h-3 w-3" />
+        <span>Add file comment</span>
+      </button>
     </div>
 
     <!-- Isolated Diff Surface -->

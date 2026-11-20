@@ -15,6 +15,7 @@ const auth = useAuthStore()
 const review = useReviewStore()
 
 const originalLinesForThread = computed<string[] | undefined>(() => {
+  if (props.thread.subjectType === 'FILE') return undefined
   const file = review.pr?.files.find((f) => f.path === props.thread.path)
   if (!file) return undefined
   const content = props.thread.side === 'LEFT' ? file.baseContent : file.headContent
@@ -117,9 +118,11 @@ async function handleToggleResolve() {
       <div class="flex items-center gap-2">
         <span class="font-mono text-ink-muted">
           {{
-            thread.startLine && thread.startLine !== thread.line
-              ? `Lines ${thread.startLine}–${thread.line}`
-              : `Line ${thread.line}`
+            thread.subjectType === 'FILE'
+              ? 'File comment'
+              : thread.startLine && thread.startLine !== thread.line
+                ? `Lines ${thread.startLine}–${thread.line}`
+                : `Line ${thread.line}`
           }}
         </span>
         <span

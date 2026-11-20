@@ -691,6 +691,7 @@ function mapReactionGroups(groups?: RawReactionGroup[] | null): ReactionGroup[] 
 interface RawThreadNode {
   id: string
   path: string
+  subjectType?: 'LINE' | 'FILE' | null
   line: number | null
   diffSide: DiffSide | null
   startLine: number | null
@@ -856,6 +857,7 @@ async function fetchRemainingReviewThreads(
               diffSide
               startLine
               startDiffSide
+              subjectType
               isResolved
               isOutdated
               comments(first: 30) {
@@ -1066,6 +1068,7 @@ export async function fetchPullRequest(
               diffSide
               startLine
               startDiffSide
+              subjectType
               isResolved
               isOutdated
               comments(first: 30) {
@@ -1344,11 +1347,13 @@ export async function fetchPullRequest(
 
   const allThreadNodes = [...pr.reviewThreads.nodes, ...extraThreads]
   const threads: ReviewThread[] = allThreadNodes
-    .filter((t) => t.line !== null)
+    // File-level threads have no line; line threads lose theirs once outdated.
+    .filter((t) => t.subjectType === 'FILE' || t.line !== null)
     .map((t) => ({
       id: t.id,
       path: t.path,
-      line: t.line ?? 1,
+      subjectType: t.subjectType === 'FILE' ? ('FILE' as const) : ('LINE' as const),
+      line: t.subjectType === 'FILE' ? 0 : (t.line ?? 1),
       side: t.diffSide ?? 'RIGHT',
       startLine: t.startLine,
       startSide: t.startDiffSide,
@@ -1545,6 +1550,42 @@ export async function addReviewThread(
     ...(isMultiline ? { startLine, startSide: startSide ?? side } : {}),
     body,
   })
+  return data.addPullRequestReviewThread.thread.id
+}
+
+/** Adds a file-level (not line-anchored) thread to a pending review. */
+export async function addFileReviewThread(
+  pat: string,
+  pullRequestId: string,
+  pullRequestReviewId: string,
+  path: string,
+  body: string,
+): Promise<string> {
+  const mutation = `
+    mutation AddFileReviewThread(
+      $pullRequestId: ID!
+      $pullRequestReviewId: ID!
+      $path: String!
+      $body: String!
+    ) {
+      addPullRequestReviewThread(
+        input: {
+          pullRequestId: $pullRequestId
+          pullRequestReviewId: $pullRequestReviewId
+          path: $path
+          subjectType: FILE
+          body: $body
+        }
+      ) {
+        thread {
+          id
+        }
+      }
+    }
+  `
+  const data = await graphql<{
+    addPullRequestReviewThread: { thread: { id: string } }
+  }>(pat, mutation, { pullRequestId, pullRequestReviewId, path, body })
   return data.addPullRequestReviewThread.thread.id
 }
 
