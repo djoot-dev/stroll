@@ -9,6 +9,8 @@ const props = defineProps<{
   startLine?: number
   startSide?: 'LEFT' | 'RIGHT'
   originalCode?: string
+  /** Comment targets the whole file rather than a line range. */
+  fileLevel?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -48,7 +50,11 @@ function handleSubmit() {
     <div class="mb-2 flex items-center justify-between gap-2 text-[11px] text-ink-muted">
       <div class="flex items-center gap-2">
         <span>
-          <template v-if="props.startLine !== undefined && props.startLine !== props.line">
+          <template v-if="props.fileLevel">
+            Add pending comment on
+            <span class="font-semibold text-terra-text">this file</span>
+          </template>
+          <template v-else-if="props.startLine !== undefined && props.startLine !== props.line">
             Add pending comment on lines
             <span class="font-mono font-semibold text-terra-text">
               {{ props.startLine }}–{{ props.line }}
@@ -106,6 +112,7 @@ function handleSubmit() {
 
     <div class="mt-2 flex items-center justify-between gap-2">
       <button
+        v-if="!props.fileLevel"
         type="button"
         class="inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary transition-colors hover:border-pine-border hover:text-pine-text"
         title="Insert a GitHub code suggestion block"
@@ -114,6 +121,7 @@ function handleSubmit() {
         <FileDiff class="h-3 w-3" />
         <span>Suggest change</span>
       </button>
+      <span v-else />
 
       <div class="flex items-center gap-2">
         <button
