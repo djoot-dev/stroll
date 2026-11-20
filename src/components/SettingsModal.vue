@@ -672,6 +672,44 @@ async function handleResetDefaults() {
                     </button>
                   </div>
                 </div>
+
+                <div class="rounded-xl border border-border bg-canvas/60 p-4">
+                  <p class="text-xs font-medium text-ink">Long Lines</p>
+                  <p class="mt-0.5 text-[11px] text-ink-muted">
+                    Choose how diff lines wider than the viewer are displayed.
+                  </p>
+                  <div class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <button
+                      class="rounded-xl border p-3 text-left transition-colors"
+                      :class="
+                        !settings.wrapLines
+                          ? 'border-terra-border bg-terra-soft'
+                          : 'border-border bg-canvas-subtle hover:bg-canvas-elevated/60'
+                      "
+                      @click="settings.setWrapLines(false)"
+                    >
+                      <p class="text-xs font-semibold text-ink">Scroll horizontally</p>
+                      <p class="mt-1 text-[11px] text-ink-muted">
+                        Keep each line on one row; scroll sideways to read long lines.
+                      </p>
+                    </button>
+
+                    <button
+                      class="rounded-xl border p-3 text-left transition-colors"
+                      :class="
+                        settings.wrapLines
+                          ? 'border-terra-border bg-terra-soft'
+                          : 'border-border bg-canvas-subtle hover:bg-canvas-elevated/60'
+                      "
+                      @click="settings.setWrapLines(true)"
+                    >
+                      <p class="text-xs font-semibold text-ink">Wrap lines</p>
+                      <p class="mt-1 text-[11px] text-ink-muted">
+                        Soft-wrap long lines to fit the viewer width.
+                      </p>
+                    </button>
+                  </div>
+                </div>
               </div>
             </template>
 
