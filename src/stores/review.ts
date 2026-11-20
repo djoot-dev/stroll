@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   MOCK_COMMIT_BODIES,
   MOCK_FILE_COMMIT_OIDS,
@@ -91,6 +91,19 @@ export const useReviewStore = defineStore('review', () => {
   const pr = ref<PullRequestData | null>(null)
   const tourDirection = ref<TourDirection>('bottom-up')
   const currentStepIndex = ref(0)
+  /**
+   * Whether the reviewer has entered the step view for the current PR. Until then,
+   * `currentStepIndex` is just the default (0) rather than a position the reviewer chose,
+   * so reorders keep the tour anchored at the first step instead of tracking a file.
+   */
+  const tourStarted = ref(false)
+  watch(
+    activeView,
+    (view) => {
+      if (view === 'step') tourStarted.value = true
+    },
+    { flush: 'sync' },
+  )
   const reviewedPaths = ref<Set<string>>(new Set())
   let fileFingerprints = new Map<string, string>()
   const draftComments = ref<DraftComment[]>([])
@@ -228,6 +241,7 @@ export const useReviewStore = defineStore('review', () => {
     pr.value = data
     activeView.value = 'overview'
     currentStepIndex.value = 0
+    tourStarted.value = false
     commitFilter.value = 'all'
     filteredFiles.value = null
     pinnedPaths.value = new Set()
@@ -322,16 +336,26 @@ export const useReviewStore = defineStore('review', () => {
     }
   }
 
+  /**
+   * After the tour order changes, keep the reviewer on the file they were viewing. Before the
+   * tour has started there is no such file, so stay on the (new) first step.
+   */
+  function restoreActiveStep(activePath: string | undefined): void {
+    if (!tourStarted.value) {
+      currentStepIndex.value = 0
+      return
+    }
+    if (!activePath) return
+    const idx = tourSteps.value.findIndex((s) => s.file.path === activePath)
+    if (idx >= 0) currentStepIndex.value = idx
+  }
+
   async function setTourDirection(direction: TourDirection): Promise<void> {
     const settings = useSettingsStore()
     const activePath = currentStep.value?.file.path
     tourDirection.value = direction
     await settings.setDefaultTourDirection(direction)
-
-    if (activePath) {
-      const newIdx = tourSteps.value.findIndex((s) => s.file.path === activePath)
-      if (newIdx >= 0) currentStepIndex.value = newIdx
-    }
+    restoreActiveStep(activePath)
   }
 
   async function refreshCurrentPR(): Promise<boolean> {
@@ -584,10 +608,7 @@ export const useReviewStore = defineStore('review', () => {
     if (next.has(path)) next.delete(path)
     else next.add(path)
     pinnedPaths.value = next
-    if (activePath) {
-      const idx = tourSteps.value.findIndex((s) => s.file.path === activePath)
-      if (idx >= 0) currentStepIndex.value = idx
-    }
+    restoreActiveStep(activePath)
   }
 
   function toggleHideStep(path: string): void {
@@ -601,7 +622,9 @@ export const useReviewStore = defineStore('review', () => {
       currentStepIndex.value = 0
       return
     }
-    if (activePath === path) {
+    if (!tourStarted.value) {
+      currentStepIndex.value = 0
+    } else if (activePath === path) {
       currentStepIndex.value = Math.min(currentStepIndex.value, tourSteps.value.length - 1)
     } else if (activePath) {
       const idx = tourSteps.value.findIndex((s) => s.file.path === activePath)
@@ -618,10 +641,7 @@ export const useReviewStore = defineStore('review', () => {
     const next = [...currentOrder]
     ;[next[idx], next[targetIdx]] = [next[targetIdx], next[idx]]
     customOrderPaths.value = next
-    if (activePath) {
-      const newIdx = tourSteps.value.findIndex((s) => s.file.path === activePath)
-      if (newIdx >= 0) currentStepIndex.value = newIdx
-    }
+    restoreActiveStep(activePath)
   }
 
   function resetTourCustomization(): void {
@@ -629,10 +649,7 @@ export const useReviewStore = defineStore('review', () => {
     pinnedPaths.value = new Set()
     hiddenPaths.value = new Set()
     customOrderPaths.value = []
-    if (activePath) {
-      const idx = tourSteps.value.findIndex((s) => s.file.path === activePath)
-      if (idx >= 0) currentStepIndex.value = idx
-    }
+    restoreActiveStep(activePath)
   }
 
   /** Files after the current step whose commit history is loaded along with it. */
@@ -1300,6 +1317,7 @@ export const useReviewStore = defineStore('review', () => {
     lastSubmitted,
     tourDirection,
     currentStepIndex,
+    tourStarted,
     reviewedPaths,
     draftComments,
     repoPaths,
