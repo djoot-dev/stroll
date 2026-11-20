@@ -2,7 +2,9 @@
 import {
   AlertCircle,
   AlertTriangle,
+  ArrowDownWideNarrow,
   ArrowRight,
+  ArrowUpNarrowWide,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -32,6 +34,7 @@ import { openExternalUrl } from '@/services/native'
 import type { CheckoutTarget } from '@/services/localCheckout'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
+import { useSettingsStore } from '@/stores/settings'
 import type { PRMergeMethod, PRReviewState, PRStatusCheck, ReactionGroup } from '@/types/pr'
 import LocalCheckoutPanel from './LocalCheckoutPanel.vue'
 import MarkdownContent from './MarkdownContent.vue'
@@ -40,6 +43,7 @@ import ReviewerPicker from './ReviewerPicker.vue'
 
 const auth = useAuthStore()
 const review = useReviewStore()
+const settings = useSettingsStore()
 const pr = computed(() => review.pr)
 
 const checkoutTarget = computed<CheckoutTarget | null>(() => {
@@ -56,6 +60,17 @@ const checkoutTarget = computed<CheckoutTarget | null>(() => {
 })
 
 const commitsExpanded = ref(true)
+
+const historyNewestFirst = computed(() => settings.historyOrder === 'newest')
+const historyOrderLabel = computed(() =>
+  historyNewestFirst.value ? 'Newest first' : 'Oldest first',
+)
+
+/** PR commits arrive oldest-first (GitHub PR order); flip for newest-first. */
+const orderedCommits = computed(() => {
+  const commits = pr.value?.commits ?? []
+  return historyNewestFirst.value ? [...commits].reverse() : commits
+})
 const commentDraft = ref('')
 const isPostingComment = ref(false)
 const commentError = ref<string | null>(null)
@@ -318,7 +333,8 @@ const conversationItems = computed<ConversationItem[]>(() => {
     })
   }
 
-  return items.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  items.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  return historyNewestFirst.value ? items.reverse() : items
 })
 
 function canModifyIssueComment(item: ConversationItem): boolean {
@@ -992,23 +1008,37 @@ async function handleRemoveReviewer(login: string) {
 
     <!-- Commits List -->
     <section class="stroll-card overflow-hidden rounded-2xl border border-border bg-canvas-subtle">
-      <button
-        class="flex w-full items-center justify-between gap-3 px-5 py-3.5 text-left transition-colors hover:bg-canvas-elevated/40"
-        @click="commitsExpanded = !commitsExpanded"
-      >
-        <div class="flex items-center gap-2">
-          <GitCommitHorizontal class="h-4 w-4 text-ink-muted" />
-          <h2 class="text-xs font-semibold uppercase tracking-wider text-ink-muted">
-            Commits
-          </h2>
-          <span class="rounded-full bg-canvas-elevated px-2 py-0.5 font-mono text-[10.5px] text-ink-secondary">
-            {{ pr.commits.length }}
-          </span>
-        </div>
+      <div class="flex items-center gap-2 pr-5 transition-colors hover:bg-canvas-elevated/40">
+        <button
+          class="flex min-w-0 flex-1 items-center justify-between gap-3 py-3.5 pl-5 text-left"
+          :aria-expanded="commitsExpanded"
+          @click="commitsExpanded = !commitsExpanded"
+        >
+          <div class="flex items-center gap-2">
+            <GitCommitHorizontal class="h-4 w-4 text-ink-muted" />
+            <h2 class="text-xs font-semibold uppercase tracking-wider text-ink-muted">
+              Commits
+            </h2>
+            <span class="rounded-full bg-canvas-elevated px-2 py-0.5 font-mono text-[10.5px] text-ink-secondary">
+              {{ pr.commits.length }}
+            </span>
+          </div>
 
-        <ChevronDown v-if="commitsExpanded" class="h-4 w-4 text-ink-muted" />
-        <ChevronRight v-else class="h-4 w-4 text-ink-muted" />
-      </button>
+          <ChevronDown v-if="commitsExpanded" class="h-4 w-4 text-ink-muted" />
+          <ChevronRight v-else class="h-4 w-4 text-ink-muted" />
+        </button>
+        <button
+          type="button"
+          class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-1 text-[11px] text-ink-secondary transition-colors hover:border-terra-border hover:text-terra-text"
+          :title="`Showing ${historyOrderLabel.toLowerCase()} — click to flip`"
+          :aria-label="`History order: ${historyOrderLabel}. Click to flip.`"
+          @click="settings.toggleHistoryOrder()"
+        >
+          <ArrowDownWideNarrow v-if="historyNewestFirst" class="h-3 w-3" />
+          <ArrowUpNarrowWide v-else class="h-3 w-3" />
+          <span>{{ historyOrderLabel }}</span>
+        </button>
+      </div>
 
       <div v-if="commitsExpanded" class="border-t border-border-muted">
         <div v-if="pr.commits.length === 0" class="px-5 py-4 text-xs text-ink-faint">
@@ -1016,7 +1046,7 @@ async function handleRemoveReviewer(login: string) {
         </div>
         <ul v-else class="divide-y divide-border-muted">
           <li
-            v-for="commit in pr.commits"
+            v-for="commit in orderedCommits"
             :key="commit.oid"
             class="flex cursor-pointer items-center justify-between gap-3 px-5 py-2.5 text-xs transition-colors hover:bg-canvas-elevated/40"
             title="Review changes in this commit"
@@ -1052,6 +1082,17 @@ async function handleRemoveReviewer(login: string) {
             {{ conversationItems.length }}
           </span>
         </div>
+        <button
+          type="button"
+          class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-1 text-[11px] text-ink-secondary transition-colors hover:border-terra-border hover:text-terra-text"
+          :title="`Showing ${historyOrderLabel.toLowerCase()} — click to flip`"
+          :aria-label="`History order: ${historyOrderLabel}. Click to flip.`"
+          @click="settings.toggleHistoryOrder()"
+        >
+          <ArrowDownWideNarrow v-if="historyNewestFirst" class="h-3 w-3" />
+          <ArrowUpNarrowWide v-else class="h-3 w-3" />
+          <span>{{ historyOrderLabel }}</span>
+        </button>
       </div>
 
       <div v-if="conversationItems.length === 0" class="px-5 py-5 text-xs text-ink-faint">
