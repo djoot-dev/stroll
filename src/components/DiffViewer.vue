@@ -52,6 +52,7 @@ import type { DiffSide, DraftComment, ReviewThread, TourStep } from '@/types/pr'
 import CodeHoverPopover from './CodeHoverPopover.vue'
 import CommentComposer from './CommentComposer.vue'
 import DiffSearchPalette from './DiffSearchPalette.vue'
+import FileCommitsBar from './FileCommitsBar.vue'
 import MarkdownContent from './MarkdownContent.vue'
 import ReferencedContextCard from './ReferencedContextCard.vue'
 import ReviewThreadCard from './ReviewThreadCard.vue'
@@ -931,7 +932,7 @@ function statusBadgeClass(status: string): string {
     <!-- Step Header -->
     <div class="stroll-card rounded-2xl border border-border bg-canvas-subtle p-4">
       <div class="flex flex-wrap items-start justify-between gap-3">
-        <div class="min-w-0 space-y-1">
+        <div class="min-w-0 flex-1 basis-80 space-y-1">
           <div class="flex flex-wrap items-center gap-2">
             <span
               v-if="isGeneratedStep"
@@ -970,6 +971,8 @@ function statusBadgeClass(status: string): string {
           <p class="text-xs text-ink-muted">
             {{ step.reason }}
           </p>
+
+          <FileCommitsBar :path="step.file.path" :step-index="step.stepIndex" />
         </div>
 
         <div class="flex items-center gap-2.5">
