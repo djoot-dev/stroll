@@ -103,6 +103,14 @@ export interface PRCommit {
   committedDate: string
 }
 
+/** A PR commit that touched a specific file, with its full message. */
+export interface PRFileCommit extends PRCommit {
+  /** Commit message body (everything after the headline), may be empty. */
+  messageBody: string
+  /** True when the commit has more than one parent (e.g. merging the base branch in). */
+  isMerge: boolean
+}
+
 export interface PRFile {
   path: string
   previousPath?: string
