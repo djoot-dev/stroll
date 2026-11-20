@@ -14,6 +14,7 @@ import {
   Loader2,
   MessageSquare,
   MessageSquarePlus,
+  Pencil,
   Search,
   Sparkles,
   Trash2,
@@ -92,6 +93,14 @@ const activeComposer = ref<{
 
 // File-level (not line-anchored) comment composer
 const fileComposerOpen = ref(false)
+
+// Pending draft currently being edited in place, and any error from saving it
+const editingDraftId = ref<string | null>(null)
+const draftEditError = ref<string | null>(null)
+
+// Draft briefly highlighted after jumping to it from the Finish Review modal
+const flashDraftId = ref<string | null>(null)
+let flashTimer: ReturnType<typeof setTimeout> | null = null
 
 // Drag-to-select multiline comment state
 const isDraggingSelection = ref(false)
@@ -952,6 +961,77 @@ async function handleCreateFileDraft(body: string) {
   fileComposerOpen.value = false
 }
 
+function startEditingDraft(id: string) {
+  activeComposer.value = null
+  fileComposerOpen.value = false
+  draftEditError.value = null
+  editingDraftId.value = id
+}
+
+function cancelEditingDraft() {
+  editingDraftId.value = null
+  draftEditError.value = null
+}
+
+async function handleUpdateDraft(id: string, body: string) {
+  draftEditError.value = null
+  try {
+    await review.updateDraftComment(id, body)
+    editingDraftId.value = null
+  } catch (err) {
+    draftEditError.value = err instanceof Error ? err.message : 'Failed to update pending comment'
+  }
+}
+
+function findDraftCard(id: string): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`[data-draft-id="${CSS.escape(id)}"]`)
+}
+
+/**
+ * Scrolls to the draft requested via `review.focusDraftComment` once it is
+ * rendered. Unfolds the gap / switches views its line needs, and gives up if
+ * the loaded diff has no matching line.
+ */
+async function revealFocusedDraft() {
+  const id = review.focusedDraftId
+  if (!id) return
+  const draft = review.draftComments.find((d) => d.id === id)
+  if (!draft || draft.path !== props.step.file.path) return
+
+  if (draft.subjectType !== 'FILE') {
+    if (allDiffLines.value.length === 0) return // diff not loaded yet; retry when it is
+    const line = allDiffLines.value.find(
+      (l) => l.commentLine === draft.line && l.commentSide === draft.side,
+    )
+    if (!line) {
+      review.focusedDraftId = null
+      return
+    }
+    ensureLineRendered(line.key)
+  }
+
+  await nextTick()
+  const card = findDraftCard(id)
+  if (!card || review.focusedDraftId !== id) return
+  review.focusedDraftId = null
+  card.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
+  flashDraftId.value = id
+  if (flashTimer) clearTimeout(flashTimer)
+  flashTimer = setTimeout(() => {
+    flashDraftId.value = null
+  }, 1600)
+}
+
+watch(
+  () => [review.focusedDraftId, allDiffLines.value] as const,
+  () => void revealFocusedDraft(),
+  { immediate: true, flush: 'post' },
+)
+
+onBeforeUnmount(() => {
+  if (flashTimer) clearTimeout(flashTimer)
+})
+
 function statusBadgeClass(status: string): string {
   switch (status) {
     case 'added':
@@ -1109,18 +1189,43 @@ function statusBadgeClass(status: string): string {
         :thread="thread"
       />
 
-      <div v-for="draft in fileLevelDrafts" :key="draft.id" class="py-1.5">
-        <div class="animate-pop-in mx-3 rounded-xl border border-ochre-border bg-ochre-soft p-3 font-sans">
+      <div v-for="draft in fileLevelDrafts" :key="draft.id" class="py-1.5" :data-draft-id="draft.id">
+        <template v-if="editingDraftId === draft.id">
+          <CommentComposer
+            :line="0"
+            side="RIGHT"
+            file-level
+            :initial-body="draft.body"
+            @submit="(body) => handleUpdateDraft(draft.id, body)"
+            @cancel="cancelEditingDraft"
+          />
+          <p v-if="draftEditError" class="mx-3 text-[11px] text-crimson-text">{{ draftEditError }}</p>
+        </template>
+        <div
+          v-else
+          class="animate-pop-in mx-3 rounded-xl border border-ochre-border bg-ochre-soft p-3 font-sans transition-shadow"
+          :class="flashDraftId === draft.id ? 'ring-2 ring-ochre-text' : ''"
+        >
           <div class="flex items-center justify-between text-[11px]">
             <span class="font-semibold text-ochre-text">Pending Draft (File)</span>
-            <button
-              class="inline-flex items-center gap-1 text-ink-muted hover:text-crimson-text"
-              title="Delete draft"
-              @click.stop="review.deleteDraftComment(draft.id)"
-            >
-              <Trash2 class="h-3 w-3" />
-              <span>Discard</span>
-            </button>
+            <div class="flex items-center gap-3">
+              <button
+                class="inline-flex items-center gap-1 text-ink-muted hover:text-ink"
+                title="Edit draft"
+                @click.stop="startEditingDraft(draft.id)"
+              >
+                <Pencil class="h-3 w-3" />
+                <span>Edit</span>
+              </button>
+              <button
+                class="inline-flex items-center gap-1 text-ink-muted hover:text-crimson-text"
+                title="Delete draft"
+                @click.stop="review.deleteDraftComment(draft.id)"
+              >
+                <Trash2 class="h-3 w-3" />
+                <span>Discard</span>
+              </button>
+            </div>
           </div>
           <MarkdownContent :content="draft.body" class="mt-1 text-xs leading-relaxed text-ink" />
         </div>
@@ -1689,9 +1794,27 @@ function statusBadgeClass(status: string): string {
                 v-for="draft in draftsForLine(line)"
                 :key="draft.id"
                 class="sticky left-0 w-[100cqw] py-1.5"
+                :data-draft-id="draft.id"
               >
+              <template v-if="editingDraftId === draft.id">
+                <CommentComposer
+                  :line="draft.line"
+                  :side="draft.side"
+                  :start-line="draft.startLine"
+                  :start-side="draft.startSide"
+                  :original-code="getOriginalCodeForRange(draft.line, draft.side, draft.startLine)"
+                  :initial-body="draft.body"
+                  @submit="(body) => handleUpdateDraft(draft.id, body)"
+                  @cancel="cancelEditingDraft"
+                />
+                <p v-if="draftEditError" class="mx-3 font-sans text-[11px] text-crimson-text">
+                  {{ draftEditError }}
+                </p>
+              </template>
               <div
-                class="animate-pop-in mx-3 rounded-xl border border-ochre-border bg-ochre-soft p-3 font-sans"
+                v-else
+                class="animate-pop-in mx-3 rounded-xl border border-ochre-border bg-ochre-soft p-3 font-sans transition-shadow"
+                :class="flashDraftId === draft.id ? 'ring-2 ring-ochre-text' : ''"
               >
                 <div class="flex items-center justify-between text-[11px]">
                   <span class="font-semibold text-ochre-text">
@@ -1701,14 +1824,24 @@ function statusBadgeClass(status: string): string {
                         : `Line ${draft.line}`
                     }})
                   </span>
-                  <button
-                    class="inline-flex items-center gap-1 text-ink-muted hover:text-crimson-text"
-                    title="Delete draft"
-                    @click.stop="review.deleteDraftComment(draft.id)"
-                  >
-                    <Trash2 class="h-3 w-3" />
-                    <span>Discard</span>
-                  </button>
+                  <div class="flex items-center gap-3">
+                    <button
+                      class="inline-flex items-center gap-1 text-ink-muted hover:text-ink"
+                      title="Edit draft"
+                      @click.stop="startEditingDraft(draft.id)"
+                    >
+                      <Pencil class="h-3 w-3" />
+                      <span>Edit</span>
+                    </button>
+                    <button
+                      class="inline-flex items-center gap-1 text-ink-muted hover:text-crimson-text"
+                      title="Delete draft"
+                      @click.stop="review.deleteDraftComment(draft.id)"
+                    >
+                      <Trash2 class="h-3 w-3" />
+                      <span>Discard</span>
+                    </button>
+                  </div>
                 </div>
                 <MarkdownContent
                   :content="draft.body"
