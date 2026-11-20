@@ -727,6 +727,7 @@ async function handleResetDefaults() {
                   <button
                     class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-terra-border bg-terra-soft px-3 py-2 text-xs font-semibold text-terra-text transition-colors hover:bg-terra hover:text-white disabled:opacity-50"
                     :disabled="auth.isLoading"
+                    :aria-busy="auth.isLoading"
                     @click="handleSignInWithGh"
                   >
                     <Loader2 v-if="auth.isLoading" class="h-3.5 w-3.5 animate-spin" />
@@ -816,6 +817,7 @@ async function handleResetDefaults() {
                   <button
                     class="inline-flex items-center gap-1.5 rounded-xl bg-terra px-4 py-1.5 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-terra-hover disabled:opacity-40"
                     :disabled="auth.isLoading || !tokenInput.trim()"
+                    :aria-busy="auth.isLoading"
                     @click="handleSavePat"
                   >
                     <Loader2 v-if="auth.isLoading" class="h-3.5 w-3.5 animate-spin" />
@@ -934,6 +936,7 @@ async function handleResetDefaults() {
                         Boolean(pathValidationError) ||
                         isInspectingPath
                       "
+                      :aria-busy="isInspectingPath"
                       @click="handleLinkRepo"
                     >
                       <Loader2 v-if="isInspectingPath" class="h-3.5 w-3.5 animate-spin" />
@@ -986,6 +989,7 @@ async function handleResetDefaults() {
                       type="button"
                       class="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-border bg-canvas-subtle px-3 py-1.5 text-xs text-ink-secondary hover:bg-canvas-elevated disabled:opacity-50"
                       :disabled="updateState === 'checking' || updateState === 'installing'"
+                      :aria-busy="updateState === 'checking' || updateState === 'installing'"
                       @click="handleCheckForUpdates"
                     >
                       <Loader2
