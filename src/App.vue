@@ -287,6 +287,7 @@ onBeforeUnmount(() => {
             type="button"
             class="inline-flex items-center gap-1 rounded-lg bg-terra px-2.5 py-0.5 text-[11px] font-semibold text-white transition-colors hover:bg-terra-hover disabled:opacity-50"
             :disabled="review.isRefreshingPR"
+            :aria-busy="review.isRefreshingPR"
             @click="review.refreshCurrentPR()"
           >
             <RefreshCw class="h-3 w-3" :class="{ 'animate-spin': review.isRefreshingPR }" />

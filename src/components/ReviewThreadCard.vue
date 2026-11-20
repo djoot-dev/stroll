@@ -150,6 +150,7 @@ async function handleToggleResolve() {
       <button
         class="inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-0.5 text-[10.5px] text-ink-secondary transition-colors hover:bg-canvas-elevated disabled:opacity-40"
         :disabled="isTogglingResolve"
+        :aria-busy="isTogglingResolve"
         @click="handleToggleResolve"
       >
         <Loader2 v-if="isTogglingResolve" class="h-3 w-3 animate-spin" />
@@ -186,6 +187,7 @@ async function handleToggleResolve() {
                 title="Delete comment"
                 class="rounded p-0.5 text-ink-faint transition-colors hover:bg-crimson-soft hover:text-crimson-text disabled:opacity-40"
                 :disabled="deletingCommentId === comment.id"
+                :aria-busy="deletingCommentId === comment.id"
                 @click="handleDeleteComment(comment.id)"
               >
                 <Loader2 v-if="deletingCommentId === comment.id" class="h-3 w-3 animate-spin" />
@@ -216,6 +218,7 @@ async function handleToggleResolve() {
               type="button"
               class="inline-flex items-center gap-1 rounded-lg bg-terra px-3 py-1 text-[11px] font-semibold text-white hover:bg-terra-hover disabled:opacity-40"
               :disabled="isSavingEdit || !editBody.trim()"
+              :aria-busy="isSavingEdit"
               @click="handleSaveEdit(comment.id)"
             >
               <Loader2 v-if="isSavingEdit" class="h-3 w-3 animate-spin" />
@@ -268,6 +271,7 @@ async function handleToggleResolve() {
             <button
               class="inline-flex items-center gap-1 rounded-lg bg-terra px-3 py-1 text-[11px] font-semibold text-white hover:bg-terra-hover disabled:opacity-40"
               :disabled="isSubmitting || !replyBody.trim()"
+              :aria-busy="isSubmitting"
               @click="handleReply"
             >
               <Loader2 v-if="isSubmitting" class="h-3 w-3 animate-spin" />

@@ -245,6 +245,7 @@ onBeforeUnmount(() => {
             v-if="auth.isAuthenticated"
             class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-canvas px-3 py-1.5 text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated disabled:opacity-50"
             :disabled="auth.isLoading"
+            :aria-busy="auth.isLoading"
             title="Refresh pending PRs"
             @click="handleRefresh(false)"
           >
@@ -316,6 +317,7 @@ onBeforeUnmount(() => {
             <button
               class="inline-flex items-center gap-1.5 rounded-xl bg-terra px-4 py-2 text-xs font-semibold text-white shadow-xs transition-all hover:bg-terra-hover active:scale-[0.98] disabled:opacity-40"
               :disabled="review.isLoadingPR || !urlInput.trim()"
+              :aria-busy="review.isLoadingPR"
               @click="handleLoadUrl"
             >
               <Loader2 v-if="review.isLoadingPR" class="h-3.5 w-3.5 animate-spin" />
@@ -670,6 +672,7 @@ onBeforeUnmount(() => {
                   v-if="auth.hasMorePRs"
                   class="inline-flex items-center gap-1.5 rounded-xl border border-border bg-canvas-subtle px-3.5 py-1.5 text-xs font-medium text-ink-secondary transition-colors hover:border-terra-border hover:bg-canvas-elevated hover:text-ink disabled:opacity-50"
                   :disabled="auth.isLoadingMore"
+                  :aria-busy="auth.isLoadingMore"
                   @click="auth.loadMorePRs()"
                 >
                   <Loader2 v-if="auth.isLoadingMore" class="h-3.5 w-3.5 animate-spin" />
