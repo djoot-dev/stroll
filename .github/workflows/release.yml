@@ -96,6 +96,10 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
           shared-key: ${{ matrix.platform }}
+          # Restore the cache warmed on `main` by rust-cache.yml. Don't save from
+          # tag runs: tag-scoped caches are invisible to every other tag and
+          # only eat into the repo's 10 GB cache quota.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
