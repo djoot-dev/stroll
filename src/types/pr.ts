@@ -12,6 +12,12 @@ export type PRMergeMethod = 'MERGE' | 'SQUASH' | 'REBASE'
 
 export type DiffSide = 'LEFT' | 'RIGHT'
 
+export type DiffViewMode = 'unified' | 'split'
+
+export type LocalEditor = 'vscode' | 'cursor' | 'zed'
+
+export type RepoPermission = 'ADMIN' | 'MAINTAIN' | 'WRITE' | 'TRIAGE' | 'READ'
+
 export type PRFilterMode = 'review-requested' | 'authored' | 'involves'
 
 export type PRInboxSortOption = 'updated-desc' | 'updated-asc' | 'diff-asc' | 'diff-desc'
@@ -244,6 +250,7 @@ export interface PullRequestData {
   issueComments: PRIssueComment[]
   statusCheckRollup: PRStatusCheckRollup | null
   pendingReviewId: string | null
+  viewerPermission?: RepoPermission | null
   isMock?: boolean
 }
 
@@ -265,4 +272,15 @@ export interface PRSummary {
   totalCommentsCount: number
   headRefName: string
   isCrossRepository: boolean
+}
+
+export interface RecentPRItem {
+  summary: PRSummary
+  viewedAt: string
+  pinned: boolean
+}
+
+export interface PRLocalProgress {
+  draftCount: number
+  reviewedCount: number
 }

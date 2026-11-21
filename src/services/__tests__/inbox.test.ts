@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import type { PRSummary } from '@/types/pr'
-import { diffNewPRs, extractInboxRepos, filterAndSortInboxPRs } from '../inbox'
+import { MOCK_PR } from '@/data/mockPR'
+import type { PRSummary, RecentPRItem } from '@/types/pr'
+import {
+  diffNewPRs,
+  extractInboxRepos,
+  filterAndSortInboxPRs,
+  formatLocalProgressBadge,
+  recordRecentPR,
+  removeRecentPR,
+  summarizePullRequest,
+  togglePinRecentPR,
+} from '../inbox'
 
 function makePR(overrides: Partial<PRSummary> & { id: string; number: number }): PRSummary {
   return {
@@ -133,5 +143,66 @@ describe('inbox filtering, sorting & notification diffing', () => {
     const prev = new Set(['pr-1', 'pr-2'])
     const added = diffNewPRs(prev, SAMPLE_PRS)
     expect(added.map((p) => p.id)).toEqual(['pr-3'])
+  })
+})
+
+describe('recent/pinned PRs & local progress formatting', () => {
+  it('summarizes full PullRequestData into a PRSummary', () => {
+    const summary = summarizePullRequest(MOCK_PR)
+    expect(summary.owner).toBe(MOCK_PR.owner)
+    expect(summary.repo).toBe(MOCK_PR.repo)
+    expect(summary.number).toBe(MOCK_PR.number)
+    expect(summary.changedFiles).toBe(MOCK_PR.files.length)
+    expect(summary.additions).toBe(
+      MOCK_PR.files.reduce((sum, f) => sum + f.additions, 0),
+    )
+    expect(summary.deletions).toBe(
+      MOCK_PR.files.reduce((sum, f) => sum + f.deletions, 0),
+    )
+  })
+
+  it('records, deduplicates, pins, caps unpinned, and removes recent PRs', () => {
+    let list: RecentPRItem[] = []
+    for (let i = 1; i <= 7; i += 1) {
+      list = recordRecentPR(
+        list,
+        makePR({ id: `pr-${i}`, number: i }),
+        `2026-11-20T0${i}:00:00Z`,
+        5,
+      )
+    }
+    expect(list.map((r) => r.summary.number)).toEqual([7, 6, 5, 4, 3])
+
+    // Pin #3 and ensure it stays at top even when more PRs are viewed
+    list = togglePinRecentPR(list, 'acme/stroll#3')
+    expect(list[0].summary.number).toBe(3)
+    expect(list[0].pinned).toBe(true)
+
+    list = recordRecentPR(list, makePR({ id: 'pr-8', number: 8 }), '2026-11-20T08:00:00Z', 5)
+    expect(list[0].summary.number).toBe(3)
+    expect(list.map((r) => r.summary.number)).toEqual([3, 8, 7, 6, 5, 4])
+
+    // Re-viewing pinned PR preserves its pinned flag
+    list = recordRecentPR(list, makePR({ id: 'pr-3', number: 3 }), '2026-11-20T09:00:00Z', 5)
+    expect(list[0].summary.number).toBe(3)
+    expect(list[0].pinned).toBe(true)
+
+    list = removeRecentPR(list, 'acme/stroll#3')
+    expect(list.some((r) => r.summary.number === 3)).toBe(false)
+  })
+
+  it('formats local draft and review progress badges', () => {
+    expect(formatLocalProgressBadge(undefined, 10)).toEqual({
+      draftLabel: null,
+      reviewLabel: null,
+    })
+    expect(formatLocalProgressBadge({ draftCount: 1, reviewedCount: 4 }, 10)).toEqual({
+      draftLabel: '1 draft',
+      reviewLabel: '4/10 files reviewed',
+    })
+    expect(formatLocalProgressBadge({ draftCount: 3, reviewedCount: 12 }, 10)).toEqual({
+      draftLabel: '3 drafts',
+      reviewLabel: '10/10 files reviewed',
+    })
   })
 })

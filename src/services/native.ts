@@ -6,6 +6,7 @@ import {
   sendNotification,
 } from '@tauri-apps/plugin-notification'
 import { openUrl } from '@tauri-apps/plugin-opener'
+import type { LocalEditor } from '@/types/pr'
 
 export interface RuntimeInfo {
   app_version: string
@@ -139,6 +140,33 @@ export async function getGhAuthToken(): Promise<{ token: string | null; error: s
       token: null,
       error: typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to read gh auth token',
     }
+  }
+}
+
+export async function openFileInEditor(
+  repoPath: string,
+  filePath: string,
+  line: number,
+  editor: LocalEditor,
+): Promise<void> {
+  const safeLine = Math.max(1, Math.floor(line || 1))
+  if (isTauriRuntime()) {
+    await invoke<void>('open_in_local_editor', {
+      repoPath,
+      filePath,
+      line: safeLine,
+      editor,
+    })
+    return
+  }
+
+  const normalizedRepo = repoPath.replace(/\\/g, '/').replace(/\/+$/, '')
+  const normalizedFile = filePath.replace(/\\/g, '/').replace(/^\/+/, '')
+  const fullPath = `${normalizedRepo}/${normalizedFile}`
+  const prefix = fullPath.startsWith('/') ? '' : '/'
+  const url = `${editor}://file${prefix}${fullPath}:${safeLine}:1`
+  if (typeof window !== 'undefined') {
+    window.open(url, '_blank', 'noopener,noreferrer')
   }
 }
 

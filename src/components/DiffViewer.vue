@@ -2,21 +2,28 @@
 import {
   ArrowRight,
   ArrowRightLeft,
+  Check,
   CheckCircle2,
   ChevronsUpDown,
   ChevronRight,
   Code2,
   Columns2,
+  Copy,
   ExternalLink,
   Eye,
   FileArchive,
   FileCode2,
   FileText,
+  Filter,
   Image as ImageIcon,
+  Link2,
   Loader2,
+  Maximize2,
   MessageSquare,
   MessageSquarePlus,
+  Minimize2,
   Pencil,
+  Rows2,
   Search,
   Sparkles,
   Trash2,
@@ -53,10 +60,13 @@ import {
   buildExternalEditorUrl,
   gitBlameLine,
   isTauriRuntime,
+  openFileInEditor,
   openInExternalEditor,
   type GitBlameInfo,
 } from '@/services/native'
 import { isLockfile, LAYER_META } from '@/services/readingOrder'
+import { buildSplitDiffRows, type SplitDiffRow } from '@/services/splitDiff'
+import { buildGitHubPermalink } from '@/services/suggestions'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore } from '@/stores/settings'
@@ -65,6 +75,7 @@ import CodeHoverPopover from './CodeHoverPopover.vue'
 import CommentComposer from './CommentComposer.vue'
 import DiffSearchPalette from './DiffSearchPalette.vue'
 import FileCommitsBar from './FileCommitsBar.vue'
+import ImageDiffViewer from './ImageDiffViewer.vue'
 import MarkdownContent from './MarkdownContent.vue'
 import ReferencedContextCard from './ReferencedContextCard.vue'
 import ReviewThreadCard from './ReviewThreadCard.vue'
@@ -118,6 +129,9 @@ const dragFocusKey = ref<string | null>(null)
 // Hover context & UX guardrails state
 const activeScopes = ref<string[]>([])
 const activeReplacedCount = ref(0)
+const activeLineNumber = ref<number | null>(null)
+const copiedState = ref<'path' | 'permalink' | null>(null)
+let copiedTimer: ReturnType<typeof setTimeout> | null = null
 const hoverState = ref<{
   info: HoverSymbolInfo | null
   blame: GitBlameInfo | null
@@ -316,6 +330,8 @@ watch(
     fileComposerOpen.value = false
     activeScopes.value = []
     activeReplacedCount.value = 0
+    activeLineNumber.value = null
+    copiedState.value = null
     closePopoverImmediately()
     void loadImageDiffAssets()
   },
@@ -385,6 +401,31 @@ const hoverableSymbols = computed<HoverableSymbols>(() => {
 const segments = computed(() =>
   buildDiffSegments(props.step.file, { ignoreWhitespace: review.ignoreWhitespace }),
 )
+
+const gapSegments = computed(() => segments.value.filter((seg) => seg.kind === 'gap'))
+
+const allGapsExpanded = computed(
+  () =>
+    gapSegments.value.length > 0 &&
+    gapSegments.value.every((seg) => expandedGaps.value.has(seg.id)),
+)
+
+function toggleViewFullFile() {
+  if (allGapsExpanded.value) {
+    expandedGaps.value = new Set()
+  } else {
+    expandedGaps.value = new Set(gapSegments.value.map((seg) => seg.id))
+  }
+}
+
+const splitRowsBySegmentId = computed(() => {
+  const map = new Map<string, SplitDiffRow[]>()
+  if (settings.diffViewMode !== 'split') return map
+  for (const seg of segments.value) {
+    map.set(seg.id, buildSplitDiffRows(seg.lines))
+  }
+  return map
+})
 
 // ── Find-in-file palette ────────────────────────────────────────────────────
 // Searches every line of the file (collapsed gaps included). Opening it never
@@ -730,10 +771,26 @@ const fileDrafts = computed<DraftComment[]>(() =>
 )
 
 /** Threads and drafts that target the file as a whole rather than a line. */
-const fileLevelThreads = computed<ReviewThread[]>(() =>
+const allFileLevelThreads = computed<ReviewThread[]>(() =>
   (review.pr?.threads ?? []).filter(
     (t) => t.path === props.step.file.path && t.subjectType === 'FILE',
   ),
+)
+
+const fileLevelThreads = computed<ReviewThread[]>(() =>
+  review.showUnresolvedOnly
+    ? allFileLevelThreads.value.filter((t) => !t.isResolved)
+    : allFileLevelThreads.value,
+)
+
+const totalFileThreadCount = computed(
+  () => fileThreads.value.length + allFileLevelThreads.value.length,
+)
+
+const resolvedFileThreadCount = computed(
+  () =>
+    fileThreads.value.filter((t) => t.isResolved).length +
+    allFileLevelThreads.value.filter((t) => t.isResolved).length,
 )
 
 const fileLevelDrafts = computed<DraftComment[]>(() =>
@@ -751,8 +808,44 @@ const hasFileLevelSection = computed(
 
 function threadsForLine(line: DiffLine): ReviewThread[] {
   return fileThreads.value.filter(
-    (t) => t.line === line.commentLine && t.side === line.commentSide,
+    (t) =>
+      t.line === line.commentLine &&
+      t.side === line.commentSide &&
+      (!review.showUnresolvedOnly || !t.isResolved),
   )
+}
+
+function splitRowThreads(row: SplitDiffRow): ReviewThread[] {
+  const threads: ReviewThread[] = []
+  if (row.left && row.left.type === 'del') {
+    threads.push(...threadsForLine(row.left))
+  }
+  if (row.right) {
+    threads.push(...threadsForLine(row.right))
+  }
+  return threads
+}
+
+function splitRowDrafts(row: SplitDiffRow): DraftComment[] {
+  const drafts: DraftComment[] = []
+  if (row.left && row.left.type === 'del') {
+    drafts.push(...draftsForLine(row.left))
+  }
+  if (row.right) {
+    drafts.push(...draftsForLine(row.right))
+  }
+  return drafts
+}
+
+function splitRowActiveComposer(row: SplitDiffRow) {
+  if (!activeComposer.value) return null
+  if (row.left && row.left.type === 'del' && activeComposer.value.key === row.left.key) {
+    return activeComposer.value
+  }
+  if (row.right && activeComposer.value.key === row.right.key) {
+    return activeComposer.value
+  }
+  return null
 }
 
 function draftsForLine(line: DiffLine): DraftComment[] {
@@ -813,6 +906,7 @@ function handleLineMouseEnter(line: DiffLine, hunkLines: DiffLine[], lineIdx: nu
     dragFocusKey.value = line.key
   }
   const targetLine = line.newLineNumber ?? line.oldLineNumber ?? line.commentLine
+  activeLineNumber.value = targetLine
   activeScopes.value = getEnclosingScope(props.step.file, targetLine)
   activeReplacedCount.value =
     line.type === 'add' ? getReplacedLinesForAddedLine(hunkLines, lineIdx).length : 0
@@ -929,12 +1023,75 @@ function getOriginalLinesForRange(
   startLine?: number,
 ): string[] | undefined {
   const content = side === 'LEFT' ? props.step.file.baseContent : props.step.file.headContent
-  if (!content) return undefined
-  const all = content.split('\n')
-  const start = Math.max(1, startLine ?? line)
-  const end = Math.min(all.length, line)
-  if (start > end) return undefined
-  return all.slice(start - 1, end)
+  if (content) {
+    const all = content.split('\n')
+    const start = Math.max(1, startLine ?? line)
+    const end = Math.min(all.length, line)
+    if (start <= end) return all.slice(start - 1, end)
+  }
+
+  // Fallback to rendered diff lines when full file content is unavailable (e.g. large files)
+  if (activeComposer.value && activeComposer.value.line === line && activeComposer.value.side === side) {
+    const keys = activeComposer.value.selectedKeys
+    const matched = allDiffLines.value.filter((l) => keys.has(l.key)).map((l) => l.content)
+    if (matched.length > 0) return matched
+  }
+  return undefined
+}
+
+const editorLabel = computed(() => {
+  switch (settings.localEditor) {
+    case 'cursor':
+      return 'Cursor'
+    case 'zed':
+      return 'Zed'
+    default:
+      return 'VS Code'
+  }
+})
+
+function setCopiedFeedback(kind: 'path' | 'permalink') {
+  copiedState.value = kind
+  if (copiedTimer) clearTimeout(copiedTimer)
+  copiedTimer = setTimeout(() => {
+    copiedState.value = null
+  }, 1500)
+}
+
+async function copyFilePath() {
+  try {
+    await navigator.clipboard.writeText(props.step.file.path)
+    setCopiedFeedback('path')
+  } catch {
+    // Ignore clipboard errors in restricted contexts
+  }
+}
+
+async function copyPermalink() {
+  const pr = review.pr
+  if (!pr) return
+  const line = activeComposer.value?.line ?? activeLineNumber.value
+  const url = buildGitHubPermalink(
+    settings.githubHost,
+    pr.owner,
+    pr.repo,
+    pr.headRefOid,
+    props.step.file.path,
+    line,
+  )
+  try {
+    await navigator.clipboard.writeText(url)
+    setCopiedFeedback('permalink')
+  } catch {
+    // Ignore clipboard errors in restricted contexts
+  }
+}
+
+async function openInLocalEditor() {
+  const repoPath = review.currentRepoPath
+  if (!repoPath) return
+  const line = activeComposer.value?.line ?? activeLineNumber.value ?? 1
+  await openFileInEditor(repoPath, props.step.file.path, line, settings.localEditor)
 }
 
 function getOriginalCodeForRange(
@@ -1091,49 +1248,10 @@ async function openStepInEditor(line = 1) {
   }
 }
 
-interface SplitDiffRow {
-  key: string
-  left: DiffLine | null
-  right: DiffLine | null
-}
-
-function buildSplitRows(lines: DiffLine[]): SplitDiffRow[] {
-  const rows: SplitDiffRow[] = []
-  let i = 0
-  while (i < lines.length) {
-    const line = lines[i]
-    if (line.type === 'context') {
-      rows.push({ key: `ctx:${line.key}`, left: line, right: line })
-      i += 1
-      continue
-    }
-    const dels: DiffLine[] = []
-    while (i < lines.length && lines[i].type === 'del') {
-      dels.push(lines[i])
-      i += 1
-    }
-    const adds: DiffLine[] = []
-    while (i < lines.length && lines[i].type === 'add') {
-      adds.push(lines[i])
-      i += 1
-    }
-    const maxLen = Math.max(dels.length, adds.length)
-    for (let j = 0; j < maxLen; j += 1) {
-      const left = dels[j] ?? null
-      const right = adds[j] ?? null
-      rows.push({
-        key: `split:${left?.key ?? 'none'}:${right?.key ?? 'none'}`,
-        left,
-        right,
-      })
-    }
-  }
-  return rows
-}
-
 onBeforeUnmount(() => {
   if (flashTimer) clearTimeout(flashTimer)
   if (flashLineTimer) clearTimeout(flashLineTimer)
+  if (copiedTimer) clearTimeout(copiedTimer)
 })
 
 function statusBadgeClass(status: string): string {
@@ -1179,6 +1297,31 @@ function statusBadgeClass(status: string): string {
             <h1 class="truncate font-mono text-sm font-semibold text-ink">
               {{ step.file.path }}
             </h1>
+            <button
+              type="button"
+              class="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-canvas px-1.5 py-0.5 text-[10px] text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+              title="Copy file path"
+              @click="copyFilePath"
+            >
+              <Check v-if="copiedState === 'path'" class="h-3 w-3 text-pine-text" />
+              <Copy v-else class="h-3 w-3" />
+              <span v-if="copiedState === 'path'" class="text-pine-text">Copied</span>
+            </button>
+            <button
+              v-if="review.pr"
+              type="button"
+              class="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-canvas px-1.5 py-0.5 text-[10px] text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+              :title="
+                activeLineNumber
+                  ? `Copy GitHub permalink (line ${activeLineNumber})`
+                  : 'Copy GitHub file permalink'
+              "
+              @click="copyPermalink"
+            >
+              <Check v-if="copiedState === 'permalink'" class="h-3 w-3 text-pine-text" />
+              <Link2 v-else class="h-3 w-3" />
+              <span v-if="copiedState === 'permalink'" class="text-pine-text">Copied</span>
+            </button>
           </div>
 
           <div
@@ -1198,12 +1341,58 @@ function statusBadgeClass(status: string): string {
           <FileCommitsBar :path="step.file.path" :step-index="step.stepIndex" />
         </div>
 
-        <div class="flex items-center gap-2.5">
+        <div class="flex flex-wrap items-center gap-2">
           <div class="font-mono text-xs">
             <span class="text-pine-text">+{{ step.file.additions }}</span>
             <span class="mx-1 text-ink-faint">/</span>
             <span class="text-crimson-text">-{{ step.file.deletions }}</span>
           </div>
+
+          <div
+            class="inline-flex rounded-lg border border-border bg-canvas p-0.5 text-[11px]"
+            role="group"
+            aria-label="Diff layout"
+          >
+            <button
+              type="button"
+              title="Unified diff"
+              class="inline-flex items-center gap-1 rounded-md px-2 py-0.5 transition-colors"
+              :class="
+                settings.diffViewMode === 'unified'
+                  ? 'bg-terra font-semibold text-white'
+                  : 'text-ink-muted hover:text-ink'
+              "
+              @click="settings.setDiffViewMode('unified')"
+            >
+              <Rows2 class="h-3 w-3" />
+              <span class="hidden md:inline">Unified</span>
+            </button>
+            <button
+              type="button"
+              title="Side-by-side split diff"
+              class="inline-flex items-center gap-1 rounded-md px-2 py-0.5 transition-colors"
+              :class="
+                settings.diffViewMode === 'split'
+                  ? 'bg-terra font-semibold text-white'
+                  : 'text-ink-muted hover:text-ink'
+              "
+              @click="settings.setDiffViewMode('split')"
+            >
+              <Columns2 class="h-3 w-3" />
+              <span class="hidden md:inline">Split</span>
+            </button>
+          </div>
+
+          <button
+            v-if="review.currentRepoPath"
+            type="button"
+            :title="`Open in ${editorLabel}${activeLineNumber ? ` at line ${activeLineNumber}` : ''}`"
+            class="inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-1 text-[11px] font-medium text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+            @click="openInLocalEditor"
+          >
+            <ExternalLink class="h-3 w-3" />
+            <span class="hidden lg:inline">{{ editorLabel }}</span>
+          </button>
 
           <button
             type="button"
@@ -1473,109 +1662,17 @@ function statusBadgeClass(status: string): string {
           </button>
         </div>
 
-        <div class="p-6">
-          <div
-            v-if="isLoadingImages"
-            class="flex items-center justify-center gap-2 py-10 text-xs text-ink-muted"
-          >
-            <Loader2 class="h-4 w-4 animate-spin text-terra" />
-            <span>Loading image preview…</span>
-          </div>
-
-          <div
-            v-else-if="imageLoadError"
-            class="rounded-xl border border-crimson-border bg-crimson-soft p-4 text-center text-xs text-crimson-text"
-          >
-            {{ imageLoadError }}
-          </div>
-
-          <!-- Added Image -->
-          <div
-            v-else-if="step.file.status === 'added'"
-            class="mx-auto max-w-2xl overflow-hidden rounded-xl border border-pine-border bg-canvas-subtle"
-          >
-            <div class="flex items-center justify-between border-b border-pine-border bg-pine-soft px-3.5 py-2 text-xs">
-              <span class="font-semibold text-pine-text">Added Image</span>
-              <span v-if="headImageDims" class="font-mono text-[11px] text-pine-text">
-                {{ headImageDims.width }} × {{ headImageDims.height }} px
-              </span>
-            </div>
-            <div class="flex items-center justify-center bg-canvas-inset p-6">
-              <img
-                v-if="headImageSrc"
-                :src="headImageSrc"
-                :alt="step.file.path"
-                class="max-h-[420px] max-w-full rounded-lg border border-border object-contain shadow-xs"
-                @load="handleHeadImageLoad"
-              />
-              <span v-else class="text-xs text-ink-muted">Image preview unavailable</span>
-            </div>
-          </div>
-
-          <!-- Deleted Image -->
-          <div
-            v-else-if="step.file.status === 'deleted'"
-            class="mx-auto max-w-2xl overflow-hidden rounded-xl border border-crimson-border bg-canvas-subtle"
-          >
-            <div class="flex items-center justify-between border-b border-crimson-border bg-crimson-soft px-3.5 py-2 text-xs">
-              <span class="font-semibold text-crimson-text">Deleted Image</span>
-              <span v-if="baseImageDims" class="font-mono text-[11px] text-crimson-text">
-                {{ baseImageDims.width }} × {{ baseImageDims.height }} px
-              </span>
-            </div>
-            <div class="flex items-center justify-center bg-canvas-inset p-6">
-              <img
-                v-if="baseImageSrc"
-                :src="baseImageSrc"
-                :alt="step.file.path"
-                class="max-h-[420px] max-w-full rounded-lg border border-crimson-border object-contain opacity-65 shadow-xs"
-                @load="handleBaseImageLoad"
-              />
-              <span v-else class="text-xs text-ink-muted">Image preview unavailable</span>
-            </div>
-          </div>
-
-          <!-- Modified / Renamed Image: Side-by-Side Comparison -->
-          <div v-else class="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div class="overflow-hidden rounded-xl border border-crimson-border bg-canvas-subtle">
-              <div class="flex items-center justify-between border-b border-crimson-border bg-crimson-soft px-3.5 py-2 text-xs">
-                <span class="font-semibold text-crimson-text">Before (Base)</span>
-                <span v-if="baseImageDims" class="font-mono text-[11px] text-crimson-text">
-                  {{ baseImageDims.width }} × {{ baseImageDims.height }} px
-                </span>
-              </div>
-              <div class="flex min-h-[180px] items-center justify-center bg-canvas-inset p-5">
-                <img
-                  v-if="baseImageSrc"
-                  :src="baseImageSrc"
-                  :alt="`Base ${step.file.path}`"
-                  class="max-h-[360px] max-w-full rounded-lg border border-border object-contain shadow-xs"
-                  @load="handleBaseImageLoad"
-                />
-                <span v-else class="text-xs text-ink-muted">Base preview unavailable</span>
-              </div>
-            </div>
-
-            <div class="overflow-hidden rounded-xl border border-pine-border bg-canvas-subtle">
-              <div class="flex items-center justify-between border-b border-pine-border bg-pine-soft px-3.5 py-2 text-xs">
-                <span class="font-semibold text-pine-text">After (Head)</span>
-                <span v-if="headImageDims" class="font-mono text-[11px] text-pine-text">
-                  {{ headImageDims.width }} × {{ headImageDims.height }} px
-                </span>
-              </div>
-              <div class="flex min-h-[180px] items-center justify-center bg-canvas-inset p-5">
-                <img
-                  v-if="headImageSrc"
-                  :src="headImageSrc"
-                  :alt="`Head ${step.file.path}`"
-                  class="max-h-[360px] max-w-full rounded-lg border border-border object-contain shadow-xs"
-                  @load="handleHeadImageLoad"
-                />
-                <span v-else class="text-xs text-ink-muted">Head preview unavailable</span>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ImageDiffViewer
+          :file="step.file"
+          :base-src="baseImageSrc"
+          :head-src="headImageSrc"
+          :is-loading="isLoadingImages"
+          :load-error="imageLoadError"
+          :base-dims="baseImageDims"
+          :head-dims="headImageDims"
+          @base-load="handleBaseImageLoad"
+          @head-load="handleHeadImageLoad"
+        />
       </template>
 
       <!-- Non-Image Binary File Card -->
@@ -1660,7 +1757,47 @@ function statusBadgeClass(status: string): string {
             </span>
           </div>
 
-          <div class="flex items-center gap-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              v-if="gapSegments.length > 0"
+              type="button"
+              class="inline-flex shrink-0 items-center gap-1 rounded-lg border px-2 py-0.5 text-[10.5px] transition-colors"
+              :class="
+                allGapsExpanded
+                  ? 'border-terra-border bg-terra-soft text-terra-text'
+                  : 'border-border bg-canvas text-ink-secondary hover:bg-canvas-elevated hover:text-ink'
+              "
+              :aria-pressed="allGapsExpanded"
+              @click="toggleViewFullFile"
+            >
+              <Minimize2 v-if="allGapsExpanded" class="h-3 w-3" />
+              <Maximize2 v-else class="h-3 w-3" />
+              <span>{{ allGapsExpanded ? 'Hunks only' : 'View full file' }}</span>
+            </button>
+
+            <button
+              v-if="totalFileThreadCount > 0"
+              type="button"
+              class="inline-flex shrink-0 items-center gap-1 rounded-lg border px-2 py-0.5 text-[10.5px] transition-colors"
+              :class="
+                review.showUnresolvedOnly
+                  ? 'border-terra-border bg-terra-soft text-terra-text'
+                  : 'border-border bg-canvas text-ink-secondary hover:bg-canvas-elevated hover:text-ink'
+              "
+              :aria-pressed="review.showUnresolvedOnly"
+              title="Filter inline and file-level threads to show unresolved threads only"
+              @click="review.toggleShowUnresolvedOnly()"
+            >
+              <Filter class="h-3 w-3" />
+              <span>
+                {{
+                  review.showUnresolvedOnly && resolvedFileThreadCount > 0
+                    ? `Unresolved only (${resolvedFileThreadCount} hidden)`
+                    : 'Unresolved only'
+                }}
+              </span>
+            </button>
+
             <button
               v-if="isSvgFile"
               class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-0.5 text-[10.5px] text-ink-secondary transition-colors hover:bg-canvas-elevated hover:text-ink"
@@ -1742,7 +1879,7 @@ function statusBadgeClass(status: string): string {
             With line wrapping on, the track is exactly the viewport width and
             long lines soft-wrap within their row instead.
           -->
-          <div :class="settings.wrapLines ? 'w-full' : 'w-max min-w-full'">
+          <div :class="settings.diffViewMode === 'split' || settings.wrapLines ? 'w-full' : 'w-max min-w-full'">
           <template v-for="seg in segments" :key="seg.id">
           <!-- Collapsed Unchanged Gap -->
           <template v-if="seg.kind === 'gap'">
@@ -1765,7 +1902,90 @@ function statusBadgeClass(status: string): string {
                 <span>Expanded unchanged context ({{ seg.lineCount }} lines)</span>
                 <button class="hover:text-ink" @click="toggleGap(seg.id)">Collapse</button>
               </div>
-              <template v-for="(line, lIdx) in seg.lines" :key="line.key">
+              <template v-if="settings.diffViewMode === 'split'">
+                <template v-for="row in splitRowsBySegmentId.get(seg.id) ?? []" :key="row.key">
+                  <div class="grid grid-cols-2 divide-x divide-border-muted">
+                    <div
+                      v-for="(cellLine, sideIdx) in [row.left, row.right]"
+                      :key="sideIdx"
+                      :data-diff-line-key="cellLine?.key"
+                      class="group flex min-w-0 cursor-pointer items-stretch"
+                      :class="
+                        cellLine
+                          ? [
+                              selectedRange.keys.has(cellLine.key)
+                                ? selectionRowClass(cellLine.key)
+                                : 'hover:bg-diff-hover',
+                              activeMatchKey === cellLine.key
+                                ? 'ring-1 ring-inset ring-terra bg-terra-soft/30'
+                                : searchMatchSet.has(cellLine.key)
+                                  ? 'bg-ochre-soft/20'
+                                  : '',
+                              isHoveredUsageLine(cellLine)
+                                ? 'inset-ring-1 inset-ring-plum-border shadow-[inset_0_0_0_9999px_var(--color-plum-soft)]'
+                                : '',
+                            ]
+                          : 'bg-canvas-subtle/40'
+                      "
+                      @mousedown.left="cellLine && startLineDrag(cellLine)"
+                      @mouseenter="cellLine && handleLineMouseEnter(cellLine, seg.lines, 0)"
+                    >
+                      <template v-if="cellLine">
+                        <span class="w-11 shrink-0 select-none border-r border-border-muted px-2 text-right text-[11px] text-code-gutter-text">
+                          {{ sideIdx === 0 ? (cellLine.oldLineNumber ?? '') : (cellLine.newLineNumber ?? '') }}
+                        </span>
+                        <span class="w-5 shrink-0 select-none text-center text-code-gutter-text">
+                          <MessageSquarePlus class="mx-auto mt-1 hidden h-3 w-3 text-terra group-hover:block" />
+                        </span>
+                        <pre
+                          class="min-w-0 flex-1 pr-3 text-ink"
+                          :class="
+                            settings.wrapLines
+                              ? 'whitespace-pre-wrap [overflow-wrap:anywhere]'
+                              : 'overflow-x-auto whitespace-pre'
+                          "
+                        ><template
+                          v-for="(pt, pIdx) in tokenizedByKey.get(cellLine.key)"
+                          :key="pIdx"
+                        ><span
+                          v-if="pt.ident"
+                          :class="[pt.className, 'cursor-help hover:underline hover:decoration-terra hover:decoration-dotted']"
+                          @mouseenter="handleIdentMouseEnter($event, pt.ident, seg.lines, 0, cellLine)"
+                          @mouseleave="handleIdentMouseLeave"
+                        >{{ pt.text }}</span><span v-else :class="pt.className">{{ pt.text }}</span></template></pre>
+                      </template>
+                    </div>
+                  </div>
+                  <div
+                    v-for="thread in splitRowThreads(row)"
+                    :key="thread.id"
+                    class="w-full"
+                  >
+                    <ReviewThreadCard :thread="thread" />
+                  </div>
+                  <div
+                    v-if="splitRowActiveComposer(row)"
+                    class="w-full"
+                  >
+                    <CommentComposer
+                      :line="splitRowActiveComposer(row)!.line"
+                      :side="splitRowActiveComposer(row)!.side"
+                      :start-line="splitRowActiveComposer(row)!.startLine"
+                      :start-side="splitRowActiveComposer(row)!.startSide"
+                      :original-code="
+                        getOriginalCodeForRange(
+                          splitRowActiveComposer(row)!.line,
+                          splitRowActiveComposer(row)!.side,
+                          splitRowActiveComposer(row)!.startLine,
+                        )
+                      "
+                      @submit="handleCreateDraft"
+                      @cancel="activeComposer = null"
+                    />
+                  </div>
+                </template>
+              </template>
+              <template v-else v-for="(line, lIdx) in seg.lines" :key="line.key">
                 <div
                   :data-diff-line-key="line.key"
                   class="group flex cursor-pointer items-stretch border-l-2 border-l-transparent"
@@ -1851,92 +2071,149 @@ function statusBadgeClass(status: string): string {
             </div>
 
             <template v-if="settings.diffViewMode === 'split'">
-              <template v-for="row in buildSplitRows(seg.lines)" :key="row.key">
+              <template v-for="row in splitRowsBySegmentId.get(seg.id) ?? []" :key="row.key">
                 <div class="grid grid-cols-2 divide-x divide-border-muted">
-                  <!-- Left (Base) Pane -->
                   <div
-                    v-if="row.left"
-                    :data-diff-line-key="row.left.key"
+                    v-for="(cellLine, sideIdx) in [row.left, row.right]"
+                    :key="sideIdx"
+                    :data-diff-line-key="cellLine?.key"
                     class="group flex min-w-0 cursor-pointer items-stretch border-l-2"
-                    :class="[
-                      selectedRange.keys.has(row.left.key)
-                        ? ['border-l-transparent', selectionRowClass(row.left.key)]
-                        : row.left.type === 'del'
-                          ? 'border-l-crimson bg-diff-del hover:bg-diff-del-hover'
-                          : 'border-l-transparent hover:bg-diff-hover',
-                      flashLineKey === row.left.key ? 'ring-2 ring-inset ring-terra bg-terra-soft/40' : '',
-                    ]"
-                    @mousedown.left="startLineDrag(row.left)"
+                    :class="
+                      cellLine
+                        ? [
+                            selectedRange.keys.has(cellLine.key)
+                              ? ['border-l-transparent', selectionRowClass(cellLine.key)]
+                              : {
+                                  'border-l-pine bg-diff-add hover:bg-diff-add-hover': cellLine.type === 'add',
+                                  'border-l-crimson bg-diff-del hover:bg-diff-del-hover': cellLine.type === 'del',
+                                  'border-l-transparent hover:bg-diff-hover': cellLine.type === 'context',
+                                },
+                            activeMatchKey === cellLine.key
+                              ? 'ring-1 ring-inset ring-terra bg-terra-soft/30'
+                              : searchMatchSet.has(cellLine.key)
+                                ? 'bg-ochre-soft/20'
+                                : '',
+                            isHoveredUsageLine(cellLine)
+                              ? 'inset-ring-1 inset-ring-plum-border shadow-[inset_0_0_0_9999px_var(--color-plum-soft)]'
+                              : '',
+                          ]
+                        : 'border-l-transparent bg-canvas-subtle/40'
+                    "
+                    @mousedown.left="cellLine && startLineDrag(cellLine)"
+                    @mouseenter="
+                      cellLine &&
+                        handleLineMouseEnter(
+                          cellLine,
+                          seg.lines,
+                          seg.lines.indexOf(cellLine),
+                        )
+                    "
                   >
-                    <span class="w-11 shrink-0 select-none border-r border-border-muted px-1.5 text-right text-[11px] text-code-gutter-text">
-                      {{ row.left.oldLineNumber ?? '' }}
-                    </span>
-                    <span class="w-5 shrink-0 select-none text-center font-bold" :class="row.left.type === 'del' ? 'text-crimson-text' : 'text-code-gutter-text'">
-                      {{ row.left.type === 'del' ? '-' : ' ' }}
-                    </span>
-                    <pre
-                      class="flex-1 pr-2 text-ink"
-                      :class="settings.wrapLines ? 'min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre overflow-x-auto'"
-                    ><template v-for="(pt, pIdx) in tokenizedByKey.get(row.left.key)" :key="pIdx"><span :class="[pt.className, inlineChangeClass(pt, row.left.type)]">{{ pt.text }}</span></template></pre>
+                    <template v-if="cellLine">
+                      <span class="w-11 shrink-0 select-none border-r border-border-muted px-2 text-right text-[11px] text-code-gutter-text">
+                        {{ sideIdx === 0 ? (cellLine.oldLineNumber ?? '') : (cellLine.newLineNumber ?? '') }}
+                      </span>
+                      <span
+                        class="w-5 shrink-0 select-none text-center font-bold"
+                        :class="{
+                          'text-pine-text': cellLine.type === 'add',
+                          'text-crimson-text': cellLine.type === 'del',
+                          'text-code-gutter-text': cellLine.type === 'context',
+                        }"
+                      >
+                        <span class="group-hover:hidden">
+                          {{ cellLine.type === 'add' ? '+' : cellLine.type === 'del' ? '-' : ' ' }}
+                        </span>
+                        <MessageSquarePlus class="mx-auto mt-1 hidden h-3 w-3 text-terra group-hover:block" />
+                      </span>
+                      <pre
+                        class="min-w-0 flex-1 pr-3 text-ink"
+                        :class="
+                          settings.wrapLines
+                            ? 'whitespace-pre-wrap [overflow-wrap:anywhere]'
+                            : 'overflow-x-auto whitespace-pre'
+                        "
+                      ><template
+                        v-for="(pt, pIdx) in tokenizedByKey.get(cellLine.key)"
+                        :key="pIdx"
+                      ><span
+                        v-if="pt.ident"
+                        :class="[
+                          pt.className,
+                          inlineChangeClass(pt, cellLine.type),
+                          'cursor-help hover:underline hover:decoration-terra hover:decoration-dotted',
+                        ]"
+                        @mouseenter="
+                          handleIdentMouseEnter(
+                            $event,
+                            pt.ident,
+                            seg.lines,
+                            seg.lines.indexOf(cellLine),
+                            cellLine,
+                          )
+                        "
+                        @mouseleave="handleIdentMouseLeave"
+                      >{{ pt.text }}</span><span
+                        v-else
+                        :class="[pt.className, inlineChangeClass(pt, cellLine.type)]"
+                      >{{ pt.text }}</span></template></pre>
+                    </template>
                   </div>
-                  <div v-else class="bg-canvas-inset/40" />
-
-                  <!-- Right (Head) Pane -->
-                  <div
-                    v-if="row.right"
-                    :data-diff-line-key="row.right.key"
-                    class="group flex min-w-0 cursor-pointer items-stretch border-l-2"
-                    :class="[
-                      selectedRange.keys.has(row.right.key)
-                        ? ['border-l-transparent', selectionRowClass(row.right.key)]
-                        : row.right.type === 'add'
-                          ? 'border-l-pine bg-diff-add hover:bg-diff-add-hover'
-                          : 'border-l-transparent hover:bg-diff-hover',
-                      flashLineKey === row.right.key ? 'ring-2 ring-inset ring-terra bg-terra-soft/40' : '',
-                    ]"
-                    @mousedown.left="startLineDrag(row.right)"
-                  >
-                    <span class="w-11 shrink-0 select-none border-r border-border-muted px-1.5 text-right text-[11px] text-code-gutter-text">
-                      {{ row.right.newLineNumber ?? '' }}
-                    </span>
-                    <span class="w-5 shrink-0 select-none text-center font-bold" :class="row.right.type === 'add' ? 'text-pine-text' : 'text-code-gutter-text'">
-                      {{ row.right.type === 'add' ? '+' : ' ' }}
-                    </span>
-                    <pre
-                      class="flex-1 pr-2 text-ink"
-                      :class="settings.wrapLines ? 'min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre overflow-x-auto'"
-                    ><template v-for="(pt, pIdx) in tokenizedByKey.get(row.right.key)" :key="pIdx"><span :class="[pt.className, inlineChangeClass(pt, row.right.type)]">{{ pt.text }}</span></template></pre>
-                  </div>
-                  <div v-else class="bg-canvas-inset/40" />
                 </div>
 
-                <!-- Threads & Drafts for Split Row -->
-                <template
-                  v-for="sideLine in (row.left && row.left === row.right ? [row.left] : [row.left, row.right].filter((l): l is DiffLine => Boolean(l)))"
-                  :key="`meta:${sideLine.key}`"
+                <!-- Existing GitHub Review Threads -->
+                <div
+                  v-for="thread in splitRowThreads(row)"
+                  :key="thread.id"
+                  class="w-full"
                 >
-                  <div
-                    v-for="thread in threadsForLine(sideLine)"
-                    :key="thread.id"
-                    class="sticky left-0 w-[100cqw]"
-                  >
-                    <ReviewThreadCard :thread="thread" />
-                  </div>
+                  <ReviewThreadCard :thread="thread" />
+                </div>
 
+                <!-- Local Pending Draft Comments -->
+                <div
+                  v-for="draft in splitRowDrafts(row)"
+                  :key="draft.id"
+                  class="w-full py-1.5"
+                  :data-draft-id="draft.id"
+                >
+                  <template v-if="editingDraftId === draft.id">
+                    <CommentComposer
+                      :line="draft.line"
+                      :side="draft.side"
+                      :start-line="draft.startLine"
+                      :start-side="draft.startSide"
+                      :original-code="getOriginalCodeForRange(draft.line, draft.side, draft.startLine)"
+                      :initial-body="draft.body"
+                      @submit="(body) => handleUpdateDraft(draft.id, body)"
+                      @cancel="cancelEditingDraft"
+                    />
+                    <p v-if="draftEditError" class="mx-3 font-sans text-[11px] text-crimson-text">
+                      {{ draftEditError }}
+                    </p>
+                  </template>
                   <div
-                    v-for="draft in draftsForLine(sideLine)"
-                    :key="draft.id"
-                    class="sticky left-0 w-[100cqw] py-1.5"
-                    :data-draft-id="draft.id"
+                    v-else
+                    class="animate-pop-in mx-3 rounded-xl border border-ochre-border bg-ochre-soft p-3 font-sans transition-shadow"
+                    :class="flashDraftId === draft.id ? 'ring-2 ring-ochre-text' : ''"
                   >
-                    <div
-                      class="animate-pop-in mx-3 rounded-xl border border-ochre-border bg-ochre-soft p-3 font-sans transition-shadow"
-                      :class="flashDraftId === draft.id ? 'ring-2 ring-ochre-text' : ''"
-                    >
-                      <div class="flex items-center justify-between text-[11px]">
-                        <span class="font-semibold text-ochre-text">
-                          Pending Draft (Line {{ draft.line }})
-                        </span>
+                    <div class="flex items-center justify-between text-[11px]">
+                      <span class="font-semibold text-ochre-text">
+                        Pending Draft ({{
+                          draft.startLine && draft.startLine !== draft.line
+                            ? `Lines ${draft.startLine}–${draft.line}`
+                            : `Line ${draft.line}`
+                        }})
+                      </span>
+                      <div class="flex items-center gap-3">
+                        <button
+                          class="inline-flex items-center gap-1 text-ink-muted hover:text-ink"
+                          title="Edit draft"
+                          @click.stop="startEditingDraft(draft.id)"
+                        >
+                          <Pencil class="h-3 w-3" />
+                          <span>Edit</span>
+                        </button>
                         <button
                           class="inline-flex items-center gap-1 text-ink-muted hover:text-crimson-text"
                           title="Delete draft"
@@ -1946,14 +2223,38 @@ function statusBadgeClass(status: string): string {
                           <span>Discard</span>
                         </button>
                       </div>
-                      <MarkdownContent
-                        :content="draft.body"
-                        :original-lines="getOriginalLinesForRange(draft.line, draft.side, draft.startLine)"
-                        class="mt-1 text-xs leading-relaxed text-ink"
-                      />
                     </div>
+                    <MarkdownContent
+                      :content="draft.body"
+                      :original-lines="
+                        getOriginalLinesForRange(draft.line, draft.side, draft.startLine)
+                      "
+                      class="mt-1 text-xs leading-relaxed text-ink"
+                    />
                   </div>
-                </template>
+                </div>
+
+                <!-- Inline Comment Composer -->
+                <div
+                  v-if="splitRowActiveComposer(row)"
+                  class="w-full"
+                >
+                  <CommentComposer
+                    :line="splitRowActiveComposer(row)!.line"
+                    :side="splitRowActiveComposer(row)!.side"
+                    :start-line="splitRowActiveComposer(row)!.startLine"
+                    :start-side="splitRowActiveComposer(row)!.startSide"
+                    :original-code="
+                      getOriginalCodeForRange(
+                        splitRowActiveComposer(row)!.line,
+                        splitRowActiveComposer(row)!.side,
+                        splitRowActiveComposer(row)!.startLine,
+                      )
+                    "
+                    @submit="handleCreateDraft"
+                    @cancel="activeComposer = null"
+                  />
+                </div>
               </template>
             </template>
 

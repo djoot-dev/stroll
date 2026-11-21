@@ -1133,6 +1133,32 @@ async function handleResetDefaults() {
                   </span>
                 </div>
 
+                <div class="rounded-xl border border-border bg-canvas/60 p-4">
+                  <p class="text-xs font-medium text-ink">Preferred Local Editor</p>
+                  <p class="mt-0.5 text-[11px] text-ink-muted">
+                    Used by "Open in editor" when a local repository is linked.
+                  </p>
+                  <div class="mt-3 grid grid-cols-3 gap-2">
+                    <button
+                      v-for="ed in [
+                        { id: 'vscode', label: 'VS Code' },
+                        { id: 'cursor', label: 'Cursor' },
+                        { id: 'zed', label: 'Zed' },
+                      ] as const"
+                      :key="ed.id"
+                      class="rounded-xl border px-3 py-2 text-center text-xs font-semibold transition-colors"
+                      :class="
+                        settings.localEditor === ed.id
+                          ? 'border-terra-border bg-terra-soft text-terra-text'
+                          : 'border-border bg-canvas-subtle text-ink hover:bg-canvas-elevated/60'
+                      "
+                      @click="settings.setLocalEditor(ed.id)"
+                    >
+                      {{ ed.label }}
+                    </button>
+                  </div>
+                </div>
+
                 <div v-if="linkedRepos.length > 0" class="max-h-40 space-y-1.5 overflow-y-auto">
                   <div
                     v-for="[ownerRepo, localPath] in linkedRepos"
