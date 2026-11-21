@@ -12,6 +12,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             commands::get_runtime_info,
+            commands::open_in_local_editor,
             commands::ast::resolve_repo_symbol,
             commands::checkout::git_checkout_pr,
             commands::checkout::git_local_status,

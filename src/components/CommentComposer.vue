@@ -123,11 +123,11 @@ function handleSubmit() {
         v-if="!props.fileLevel"
         type="button"
         class="inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary transition-colors hover:border-pine-border hover:text-pine-text"
-        title="Insert a GitHub code suggestion block"
+        title="Insert a GitHub code suggestion block pre-filled with the selected line(s)"
         @click="insertSuggestion"
       >
         <FileDiff class="h-3 w-3" />
-        <span>Suggest change</span>
+        <span>Insert suggestion</span>
       </button>
       <span v-else />
 
