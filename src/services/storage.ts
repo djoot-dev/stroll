@@ -120,6 +120,14 @@ export async function saveTourDirection(direction: TourDirection): Promise<void>
   await setItem('tour_direction', direction)
 }
 
+export async function loadOnboardingCompleted(): Promise<boolean> {
+  return (await getItem<boolean>('onboarding_completed')) ?? false
+}
+
+export async function saveOnboardingCompleted(completed: boolean): Promise<void> {
+  await setItem('onboarding_completed', completed)
+}
+
 export async function loadDraftComments(prKey: string): Promise<DraftComment[]> {
   const all = (await getItem<Record<string, DraftComment[]>>('draft_comments')) ?? {}
   return all[prKey] ?? []

@@ -122,4 +122,30 @@ describe('useAuthStore', () => {
     expect(mockSaveGitHubPat).toHaveBeenCalledTimes(3)
     expect(mockSaveGitHubPat).toHaveBeenLastCalledWith('ghp_new_token')
   })
+
+  it('reports live initStatus while validating a saved GitHub session', async () => {
+    mockLoadGitHubPat.mockResolvedValue('ghp_saved_token')
+    let resolveFetch: (value: unknown) => void = () => {}
+    mockFetchViewerAndRequestedPRs.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFetch = resolve
+      }),
+    )
+
+    const auth = useAuthStore()
+    const pending = auth.init()
+
+    await vi.waitFor(() => {
+      expect(auth.initStatus).toBe('Validating GitHub session & loading PR inbox…')
+    })
+
+    resolveFetch({
+      viewer: { login: 'octocat', avatarUrl: 'https://example.com/a.png', name: 'Octo' },
+      requestedPRs: [],
+      hasNextPage: false,
+      endCursor: null,
+    })
+    await pending
+    expect(auth.isAuthenticated).toBe(true)
+  })
 })

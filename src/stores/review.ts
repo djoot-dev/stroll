@@ -226,6 +226,10 @@ export const useReviewStore = defineStore('review', () => {
     return Math.round(((currentStepIndex.value + 1) / tourSteps.value.length) * 100)
   })
 
+  const hasUnreviewedSteps = computed(() =>
+    tourSteps.value.some((s) => !reviewedPaths.value.has(s.file.path)),
+  )
+
   async function init(): Promise<void> {
     const settings = useSettingsStore()
     await settings.init()
@@ -329,6 +333,8 @@ export const useReviewStore = defineStore('review', () => {
   }
 
   async function loadMockPR(): Promise<void> {
+    const settings = useSettingsStore()
+    void settings.completeOnboarding()
     await activatePR(structuredClone(MOCK_PR))
   }
 
@@ -562,6 +568,25 @@ export const useReviewStore = defineStore('review', () => {
     }
   }
 
+  function nextUnreviewedStep(): void {
+    const steps = tourSteps.value
+    if (steps.length === 0) return
+    const startAfter = activeView.value === 'overview' ? -1 : currentStepIndex.value
+    const afterIdx = steps.findIndex(
+      (s, idx) => idx > startAfter && !reviewedPaths.value.has(s.file.path),
+    )
+    if (afterIdx >= 0) {
+      currentStepIndex.value = afterIdx
+      activeView.value = 'step'
+      return
+    }
+    const wrapIdx = steps.findIndex((s) => !reviewedPaths.value.has(s.file.path))
+    if (wrapIdx >= 0) {
+      currentStepIndex.value = wrapIdx
+      activeView.value = 'step'
+    }
+  }
+
   async function toggleReviewed(path?: string): Promise<void> {
     const target = path ?? currentStep.value?.file.path
     if (!target) return
@@ -676,6 +701,42 @@ export const useReviewStore = defineStore('review', () => {
     ;[next[idx], next[targetIdx]] = [next[targetIdx], next[idx]]
     customOrderPaths.value = next
     restoreActiveStep(activePath)
+  }
+
+  function reorderStep(fromPath: string, toPath: string): void {
+    if (fromPath === toPath) return
+    const activePath = currentStep.value?.file.path
+    const currentOrder = tourSteps.value.map((s) => s.file.path)
+    const fromIdx = currentOrder.indexOf(fromPath)
+    const toIdx = currentOrder.indexOf(toPath)
+    if (fromIdx < 0 || toIdx < 0) return
+    const next = [...currentOrder]
+    const [moved] = next.splice(fromIdx, 1)
+    next.splice(toIdx, 0, moved)
+    customOrderPaths.value = next
+    restoreActiveStep(activePath)
+  }
+
+  function hideGeneratedSteps(): void {
+    const generated = tourSteps.value.filter((s) => s.isGenerated).map((s) => s.file.path)
+    if (generated.length === 0) return
+    const activePath = currentStep.value?.file.path
+    const next = new Set(hiddenPaths.value)
+    for (const p of generated) next.add(p)
+    hiddenPaths.value = next
+    if (tourSteps.value.length === 0) {
+      activeView.value = 'overview'
+      currentStepIndex.value = 0
+      return
+    }
+    if (!tourStarted.value) {
+      currentStepIndex.value = 0
+    } else if (activePath && next.has(activePath)) {
+      currentStepIndex.value = Math.min(currentStepIndex.value, tourSteps.value.length - 1)
+    } else if (activePath) {
+      const idx = tourSteps.value.findIndex((s) => s.file.path === activePath)
+      if (idx >= 0) currentStepIndex.value = idx
+    }
   }
 
   function resetTourCustomization(): void {
@@ -1417,6 +1478,7 @@ export const useReviewStore = defineStore('review', () => {
     currentStep,
     reviewedCount,
     progressPercent,
+    hasUnreviewedSteps,
     init,
     linkRepoPath,
     unlinkRepoPath,
@@ -1438,6 +1500,7 @@ export const useReviewStore = defineStore('review', () => {
     goToFile,
     nextStep,
     prevStep,
+    nextUnreviewedStep,
     toggleReviewed,
     isStepReviewed,
     toggleIgnoreWhitespace,
@@ -1449,6 +1512,8 @@ export const useReviewStore = defineStore('review', () => {
     togglePinStep,
     toggleHideStep,
     moveStep,
+    reorderStep,
+    hideGeneratedSteps,
     resetTourCustomization,
     addDraftComment,
     addFileDraftComment,
