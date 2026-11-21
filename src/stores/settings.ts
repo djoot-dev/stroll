@@ -3,17 +3,18 @@ import { computed, ref } from 'vue'
 import { normalizeGitHubHost, setGitHubHost as syncGitHubHost } from '@/services/github'
 import {
   loadAppSettings,
+  loadOnboardingCompleted,
   loadTourDirection,
   saveAppSettings,
+  saveOnboardingCompleted,
   saveTourDirection,
-  type DiffViewMode,
   type ExternalEditorPreset,
   type HistoryOrder,
   type PersistedAppSettings,
   type TabSizeOption,
   type ThemeMode,
 } from '@/services/storage'
-import type { TourDirection } from '@/types/pr'
+import type { DiffViewMode, LocalEditor, TourDirection } from '@/types/pr'
 
 export type { DiffViewMode, ExternalEditorPreset, HistoryOrder, TabSizeOption, ThemeMode }
 
@@ -54,6 +55,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   externalEditor: 'vscode',
   externalEditorCustomCommand: '',
   tourIgnorePatterns: [],
+  localEditor: 'vscode',
   showShortcutsBar: true,
   inboxAutoRefreshSeconds: 60,
   inboxNotificationsEnabled: false,
@@ -70,6 +72,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const isOpen = ref(false)
   const activeSection = ref<SettingsSection>('general')
   const initialized = ref(false)
+  const onboardingCompleted = ref(false)
 
   const theme = ref<ThemeMode>(DEFAULT_APP_SETTINGS.theme)
   const systemPrefersDark = ref<boolean>(getSystemPrefersDark())
@@ -88,6 +91,7 @@ export const useSettingsStore = defineStore('settings', () => {
     DEFAULT_APP_SETTINGS.externalEditorCustomCommand,
   )
   const tourIgnorePatterns = ref<string[]>([...DEFAULT_APP_SETTINGS.tourIgnorePatterns])
+  const localEditor = ref<LocalEditor>(DEFAULT_APP_SETTINGS.localEditor)
   const showShortcutsBar = ref<boolean>(DEFAULT_APP_SETTINGS.showShortcutsBar)
   const inboxAutoRefreshSeconds = ref<number>(DEFAULT_APP_SETTINGS.inboxAutoRefreshSeconds)
   const inboxNotificationsEnabled = ref<boolean>(DEFAULT_APP_SETTINGS.inboxNotificationsEnabled)
@@ -121,10 +125,12 @@ export const useSettingsStore = defineStore('settings', () => {
   async function init(): Promise<void> {
     if (initialized.value) return
     bindSystemThemeListener()
-    const [savedDirection, savedSettings] = await Promise.all([
+    const [savedDirection, savedSettings, savedOnboarding] = await Promise.all([
       loadTourDirection(),
       loadAppSettings(),
+      loadOnboardingCompleted(),
     ])
+    onboardingCompleted.value = savedOnboarding
     defaultTourDirection.value = savedDirection
     if (
       savedSettings.theme === 'light' ||
@@ -177,6 +183,13 @@ export const useSettingsStore = defineStore('settings', () => {
         .map((p) => p.trim())
         .filter(Boolean)
     }
+    if (
+      savedSettings.localEditor === 'vscode' ||
+      savedSettings.localEditor === 'cursor' ||
+      savedSettings.localEditor === 'zed'
+    ) {
+      localEditor.value = savedSettings.localEditor
+    }
     if (typeof savedSettings.showShortcutsBar === 'boolean') {
       showShortcutsBar.value = savedSettings.showShortcutsBar
     }
@@ -214,6 +227,7 @@ export const useSettingsStore = defineStore('settings', () => {
         externalEditor: externalEditor.value,
         externalEditorCustomCommand: externalEditorCustomCommand.value,
         tourIgnorePatterns: tourIgnorePatterns.value,
+        localEditor: localEditor.value,
         showShortcutsBar: showShortcutsBar.value,
         inboxAutoRefreshSeconds: inboxAutoRefreshSeconds.value,
         inboxNotificationsEnabled: inboxNotificationsEnabled.value,
@@ -230,6 +244,12 @@ export const useSettingsStore = defineStore('settings', () => {
     activeSection.value = section
     linkRepoPrefill.value = options.linkRepo ?? null
     isOpen.value = true
+  }
+
+  async function completeOnboarding(): Promise<void> {
+    if (onboardingCompleted.value) return
+    onboardingCompleted.value = true
+    await saveOnboardingCompleted(true)
   }
 
   function closeSettings(): void {
@@ -316,6 +336,11 @@ export const useSettingsStore = defineStore('settings', () => {
     await persist()
   }
 
+  async function setLocalEditor(editor: LocalEditor): Promise<void> {
+    localEditor.value = editor
+    await persist()
+  }
+
   async function setShowShortcutsBar(visible: boolean): Promise<void> {
     showShortcutsBar.value = visible
     await persist()
@@ -362,6 +387,7 @@ export const useSettingsStore = defineStore('settings', () => {
     externalEditor.value = DEFAULT_APP_SETTINGS.externalEditor
     externalEditorCustomCommand.value = DEFAULT_APP_SETTINGS.externalEditorCustomCommand
     tourIgnorePatterns.value = [...DEFAULT_APP_SETTINGS.tourIgnorePatterns]
+    localEditor.value = DEFAULT_APP_SETTINGS.localEditor
     showShortcutsBar.value = DEFAULT_APP_SETTINGS.showShortcutsBar
     inboxAutoRefreshSeconds.value = DEFAULT_APP_SETTINGS.inboxAutoRefreshSeconds
     inboxNotificationsEnabled.value = DEFAULT_APP_SETTINGS.inboxNotificationsEnabled
@@ -377,6 +403,9 @@ export const useSettingsStore = defineStore('settings', () => {
     linkRepoPrefill,
     activeSection,
     theme,
+    initialized,
+    onboardingCompleted,
+    completeOnboarding,
     resolvedTheme,
     defaultTourDirection,
     autoAdvanceOnReview,
@@ -391,6 +420,7 @@ export const useSettingsStore = defineStore('settings', () => {
     externalEditor,
     externalEditorCustomCommand,
     tourIgnorePatterns,
+    localEditor,
     showShortcutsBar,
     inboxAutoRefreshSeconds,
     inboxNotificationsEnabled,
@@ -414,6 +444,7 @@ export const useSettingsStore = defineStore('settings', () => {
     setExternalEditor,
     setExternalEditorCustomCommand,
     setTourIgnorePatterns,
+    setLocalEditor,
     setShowShortcutsBar,
     setInboxAutoRefreshSeconds,
     setInboxNotificationsEnabled,

@@ -25,6 +25,7 @@ import type {
   PullRequestData,
   ReactionContent,
   ReactionGroup,
+  RepoPermission,
   ReviewComment,
   ReviewEvent,
   ReviewThread,
@@ -1073,6 +1074,7 @@ export async function fetchPullRequest(
   const query = `
     query PullRequestDetails($owner: String!, $repo: String!, $number: Int!) {
       repository(owner: $owner, name: $repo) {
+        viewerPermission
         pullRequest(number: $number) {
           id
           number
@@ -1280,6 +1282,7 @@ export async function fetchPullRequest(
 
   interface RawPRResp {
     repository: {
+      viewerPermission?: RepoPermission | null
       pullRequest: {
         id: string
         number: number
@@ -1630,6 +1633,7 @@ export async function fetchPullRequest(
     issueComments,
     statusCheckRollup,
     pendingReviewId: pr.pendingReviews?.nodes?.[0]?.id ?? null,
+    viewerPermission: prResp.repository?.viewerPermission ?? null,
   }
 }
 
@@ -2328,12 +2332,16 @@ export async function removePullRequestReviewers(
   repo: string,
   number: number,
   reviewers: string[],
+  teamReviewers: string[] = [],
 ): Promise<void> {
+  const payload: { reviewers?: string[]; team_reviewers?: string[] } = {}
+  if (reviewers.length > 0) payload.reviewers = reviewers
+  if (teamReviewers.length > 0) payload.team_reviewers = teamReviewers
   await restJsonRequest(
     pat,
     'DELETE',
     `/repos/${owner}/${repo}/pulls/${number}/requested_reviewers`,
-    { reviewers },
+    payload,
   )
 }
 
@@ -2513,4 +2521,68 @@ export async function fetchPRHeadPulse(
     commentCount: pr.comments.totalCount,
     threadCount: pr.reviewThreads.totalCount,
   }
+}
+
+function encodeUtf8Base64(text: string): string {
+  const bytes = new TextEncoder().encode(text)
+  let binary = ''
+  for (const b of bytes) {
+    binary += String.fromCharCode(b)
+  }
+  return btoa(binary)
+}
+
+/**
+ * Commits updated file content to a branch using the GitHub Contents API.
+ * Used when applying a review comment's code suggestion.
+ */
+export async function commitFileContentToBranch(
+  pat: string,
+  owner: string,
+  repo: string,
+  path: string,
+  branch: string,
+  message: string,
+  content: string,
+): Promise<{ commitSha: string }> {
+  const { restUrl } = getGitHubEndpoints()
+  const encodedPath = path
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')
+  const url = `${restUrl}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodedPath}`
+
+  const headers = {
+    Authorization: `Bearer ${pat}`,
+    Accept: 'application/vnd.github+json',
+    'Content-Type': 'application/json',
+    'User-Agent': 'Stroll-Desktop',
+  }
+
+  const getRes = await httpFetch(`${url}?ref=${encodeURIComponent(branch)}`, { headers })
+  if (!getRes.ok) {
+    const text = await getRes.text()
+    throw new Error(`Failed to fetch file metadata (${getRes.status}): ${text}`)
+  }
+  const meta = (await getRes.json()) as { sha?: string }
+  if (!meta.sha) {
+    throw new Error('Could not determine current file SHA on branch')
+  }
+
+  const putRes = await httpFetch(url, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify({
+      message,
+      content: encodeUtf8Base64(content),
+      sha: meta.sha,
+      branch,
+    }),
+  })
+  if (!putRes.ok) {
+    const text = await putRes.text()
+    throw new Error(`Failed to commit suggestion (${putRes.status}): ${text}`)
+  }
+  const putJson = (await putRes.json()) as { commit?: { sha?: string } }
+  return { commitSha: putJson.commit?.sha ?? '' }
 }

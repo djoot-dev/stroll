@@ -10,16 +10,20 @@ import {
   ChevronRight,
   Clock,
   ExternalLink,
+  FileCode,
   GitBranch,
   GitCommitHorizontal,
   GitMerge,
   GitPullRequest,
   GitPullRequestClosed,
   GitPullRequestDraft,
+  ListChecks,
   Loader2,
   MessageSquare,
   Pencil,
   Plus,
+  RotateCcw,
+  RotateCw,
   Send,
   ShieldAlert,
   ShieldCheck,
@@ -29,13 +33,24 @@ import {
   XCircle,
 } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
-import { renderSafeMarkdown } from '@/services/markdown'
+import {
+  parseChecklistProgress,
+  renderSafeMarkdown,
+  toggleChecklistItem,
+} from '@/services/markdown'
 import { openExternalUrl } from '@/services/native'
 import type { CheckoutTarget } from '@/services/localCheckout'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore } from '@/stores/settings'
-import type { PRMergeMethod, PRReviewState, PRStatusCheck, ReactionGroup } from '@/types/pr'
+import type {
+  PRMergeMethod,
+  PRReviewState,
+  PRStatusCheck,
+  ReactionGroup,
+  ReviewComment,
+  ReviewSubjectType,
+} from '@/types/pr'
 import LocalCheckoutPanel from './LocalCheckoutPanel.vue'
 import MarkdownContent from './MarkdownContent.vue'
 import ReactionBar from './ReactionBar.vue'
@@ -294,13 +309,23 @@ function reviewStatusMeta(status: ReviewerSummary['status'] | PRReviewState): {
 interface ConversationItem {
   id: string
   rawId: string
-  kind: 'comment' | 'review'
+  kind: 'comment' | 'review' | 'thread'
   author: { login: string; avatarUrl: string }
   body: string
   createdAt: string
   reviewState?: PRReviewState
   reactions?: ReactionGroup[]
+  threadPath?: string
+  threadLine?: number
+  threadSubjectType?: ReviewSubjectType
+  isResolved?: boolean
+  isOutdated?: boolean
+  openingCommentId?: string
+  replies?: ReviewComment[]
 }
+
+const showUnresolvedOnly = ref(false)
+const togglingThreadId = ref<string | null>(null)
 
 const conversationItems = computed<ConversationItem[]>(() => {
   if (!pr.value) return []
@@ -333,9 +358,56 @@ const conversationItems = computed<ConversationItem[]>(() => {
     })
   }
 
+  for (const t of pr.value.threads) {
+    const first = t.comments[0]
+    if (!first) continue
+    items.push({
+      id: `thread:${t.id}`,
+      rawId: t.id,
+      kind: 'thread',
+      author: first.author,
+      body: first.body,
+      createdAt: first.createdAt,
+      reactions: first.reactions,
+      threadPath: t.path,
+      threadLine: t.line,
+      threadSubjectType: t.subjectType,
+      isResolved: t.isResolved,
+      isOutdated: t.isOutdated,
+      openingCommentId: first.id,
+      replies: t.comments.slice(1),
+    })
+  }
+
   items.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
   return historyNewestFirst.value ? items.reverse() : items
 })
+
+const unresolvedThreadCount = computed(
+  () => (pr.value?.threads ?? []).filter((t) => !t.isResolved && t.comments.length > 0).length,
+)
+
+const filteredConversationItems = computed(() => {
+  if (pr.value?.state === 'OPEN' && showUnresolvedOnly.value) {
+    return conversationItems.value.filter(
+      (item) => item.kind === 'thread' && !item.isResolved,
+    )
+  }
+  return conversationItems.value
+})
+
+async function handleToggleThreadResolved(threadId: string) {
+  if (togglingThreadId.value) return
+  togglingThreadId.value = threadId
+  commentError.value = null
+  try {
+    await review.toggleThreadResolved(threadId)
+  } catch (err) {
+    commentError.value = err instanceof Error ? err.message : 'Failed to update thread state'
+  } finally {
+    togglingThreadId.value = null
+  }
+}
 
 function canModifyIssueComment(item: ConversationItem): boolean {
   if (item.kind !== 'comment') return false
@@ -380,7 +452,20 @@ async function handleDeleteIssueComment(commentId: string) {
 const isEditingDescription = ref(false)
 const descriptionDraft = ref('')
 const isSavingDescription = ref(false)
+const isTogglingChecklist = ref(false)
 const descriptionError = ref<string | null>(null)
+const reviewerActionKey = ref<string | null>(null)
+const reviewerError = ref<string | null>(null)
+
+const checklistProgress = computed(() =>
+  pr.value?.body ? parseChecklistProgress(pr.value.body) : { total: 0, completed: 0 },
+)
+
+const canToggleChecklist = computed(() => {
+  if (!pr.value) return false
+  if (pr.value.isMock) return true
+  return Boolean(auth.viewer?.login && auth.viewer.login === pr.value.author.login)
+})
 
 watch(
   () => (pr.value ? `${pr.value.owner}/${pr.value.repo}#${pr.value.number}` : null),
@@ -388,8 +473,32 @@ watch(
     isEditingDescription.value = false
     descriptionDraft.value = ''
     descriptionError.value = null
+    showUnresolvedOnly.value = false
+    reviewerError.value = null
   },
 )
+
+async function handleToggleChecklistItem(index: number) {
+  if (
+    !pr.value ||
+    !canToggleChecklist.value ||
+    isTogglingChecklist.value ||
+    isSavingDescription.value
+  ) {
+    return
+  }
+  const nextBody = toggleChecklistItem(pr.value.body, index)
+  if (nextBody === pr.value.body) return
+  isTogglingChecklist.value = true
+  descriptionError.value = null
+  try {
+    await review.editPRDescription(nextBody)
+  } catch (err) {
+    descriptionError.value = err instanceof Error ? err.message : 'Failed to update checklist'
+  } finally {
+    isTogglingChecklist.value = false
+  }
+}
 
 function startEditDescription() {
   if (!pr.value) return
@@ -528,21 +637,38 @@ async function handleRemoveLabel(name: string) {
 
 async function handleAddReviewer(login: string) {
   if (!login.trim()) return
-  lifecycleError.value = null
+  reviewerError.value = null
   try {
     await review.addReviewer(login)
     isAddingReviewer.value = false
   } catch (err) {
-    lifecycleError.value = err instanceof Error ? err.message : 'Failed to request reviewer'
+    reviewerError.value = err instanceof Error ? err.message : 'Failed to request reviewer'
   }
 }
 
-async function handleRemoveReviewer(login: string) {
-  lifecycleError.value = null
+async function handleRemoveReviewer(reviewer: ReviewerSummary) {
+  if (reviewerActionKey.value) return
+  reviewerActionKey.value = reviewer.key
+  reviewerError.value = null
   try {
-    await review.removeReviewer(login)
+    await review.removeReviewer(reviewer.login, reviewer.isTeam)
   } catch (err) {
-    lifecycleError.value = err instanceof Error ? err.message : 'Failed to remove reviewer'
+    reviewerError.value = err instanceof Error ? err.message : 'Failed to remove reviewer'
+  } finally {
+    reviewerActionKey.value = null
+  }
+}
+
+async function handleRerequestReviewer(reviewer: ReviewerSummary) {
+  if (reviewerActionKey.value || reviewer.isTeam) return
+  reviewerActionKey.value = reviewer.key
+  reviewerError.value = null
+  try {
+    await review.addReviewer(reviewer.login)
+  } catch (err) {
+    reviewerError.value = err instanceof Error ? err.message : 'Failed to re-request review'
+  } finally {
+    reviewerActionKey.value = null
   }
 }
 </script>
@@ -794,9 +920,31 @@ async function handleRemoveReviewer(login: string) {
     <!-- PR Description -->
     <section class="stroll-card rounded-2xl border border-border bg-canvas-subtle p-5">
       <div class="mb-3 flex items-center justify-between gap-2">
-        <h2 class="text-xs font-semibold uppercase tracking-wider text-ink-muted">
-          Description
-        </h2>
+        <div class="flex flex-wrap items-center gap-2.5">
+          <h2 class="text-xs font-semibold uppercase tracking-wider text-ink-muted">
+            Description
+          </h2>
+          <span
+            v-if="checklistProgress.total > 0"
+            class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium"
+            :class="
+              checklistProgress.completed === checklistProgress.total
+                ? 'border-pine-border bg-pine-soft text-pine-text'
+                : 'border-border bg-canvas-elevated text-ink-secondary'
+            "
+            :title="
+              canToggleChecklist
+                ? 'Click checkboxes below to update checklist progress'
+                : 'Checklist progress'
+            "
+          >
+            <ListChecks class="h-3 w-3" />
+            <span>
+              {{ checklistProgress.completed }}/{{ checklistProgress.total }} checklist
+              item{{ checklistProgress.total === 1 ? '' : 's' }}
+            </span>
+          </span>
+        </div>
         <button
           v-if="pr && !isEditingDescription"
           type="button"
@@ -846,11 +994,17 @@ async function handleRemoveReviewer(login: string) {
           {{ descriptionError }}
         </p>
       </div>
-      <MarkdownContent
-        v-else-if="hasDescription && pr"
-        :content="pr.body"
-        class="text-[13px] leading-relaxed text-ink-secondary"
-      />
+      <template v-else-if="hasDescription && pr">
+        <MarkdownContent
+          :content="pr.body"
+          :interactive-checklist="canToggleChecklist && !isTogglingChecklist"
+          class="text-[13px] leading-relaxed text-ink-secondary"
+          @toggle-task="handleToggleChecklistItem"
+        />
+        <p v-if="descriptionError" class="mt-2 text-[11px] text-crimson-text">
+          {{ descriptionError }}
+        </p>
+      </template>
       <p v-else class="text-xs italic text-ink-faint">
         No description provided.
       </p>
@@ -998,17 +1152,49 @@ async function handleRemoveReviewer(login: string) {
                 {{ reviewStatusMeta(reviewer.status).label }}
               </span>
               <button
-                v-if="reviewer.status === 'REQUESTED' && !reviewer.isTeam"
+                v-if="reviewer.status === 'REQUESTED'"
                 type="button"
                 title="Remove reviewer request"
-                class="rounded p-0.5 text-ink-faint transition-colors hover:bg-canvas-elevated hover:text-ink"
-                @click="handleRemoveReviewer(reviewer.login)"
+                :disabled="reviewerActionKey === reviewer.key"
+                :aria-busy="reviewerActionKey === reviewer.key"
+                class="rounded p-0.5 text-ink-faint transition-colors hover:bg-canvas-elevated hover:text-ink disabled:opacity-40"
+                @click="handleRemoveReviewer(reviewer)"
               >
-                <X class="h-3 w-3" />
+                <Loader2
+                  v-if="reviewerActionKey === reviewer.key"
+                  class="h-3 w-3 animate-spin"
+                />
+                <X v-else class="h-3 w-3" />
+              </button>
+              <button
+                v-else-if="
+                  !reviewer.isTeam &&
+                  reviewer.login !== pr.author.login &&
+                  pr.state === 'OPEN'
+                "
+                type="button"
+                title="Re-request review"
+                :disabled="reviewerActionKey === reviewer.key"
+                :aria-busy="reviewerActionKey === reviewer.key"
+                class="rounded p-0.5 text-ink-faint transition-colors hover:bg-canvas-elevated hover:text-terra-text disabled:opacity-40"
+                @click="handleRerequestReviewer(reviewer)"
+              >
+                <Loader2
+                  v-if="reviewerActionKey === reviewer.key"
+                  class="h-3 w-3 animate-spin"
+                />
+                <RotateCw v-else class="h-3 w-3" />
               </button>
             </div>
           </li>
         </ul>
+
+        <p
+          v-if="reviewerError"
+          class="border-t border-border-muted px-5 py-2.5 text-[11px] text-crimson-text"
+        >
+          {{ reviewerError }}
+        </p>
       </section>
     </div>
 
@@ -1078,41 +1264,72 @@ async function handleRemoveReviewer(login: string) {
 
     <!-- Conversation Feed -->
     <section class="stroll-card overflow-hidden rounded-2xl border border-border bg-canvas-subtle">
-      <div class="flex items-center justify-between border-b border-border-muted px-5 py-3.5">
+      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-border-muted px-5 py-3.5">
         <div class="flex items-center gap-2">
           <MessageSquare class="h-4 w-4 text-ink-muted" />
           <h2 class="text-xs font-semibold uppercase tracking-wider text-ink-muted">
             Conversation
           </h2>
           <span class="rounded-full bg-canvas-elevated px-2 py-0.5 font-mono text-[10.5px] text-ink-secondary">
-            {{ conversationItems.length }}
+            {{ filteredConversationItems.length }}
           </span>
         </div>
-        <button
-          type="button"
-          class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-1 text-[11px] text-ink-secondary transition-colors hover:border-terra-border hover:text-terra-text"
-          :title="`Showing ${historyOrderLabel.toLowerCase()} — click to flip`"
-          :aria-label="`History order: ${historyOrderLabel}. Click to flip.`"
-          @click="settings.toggleHistoryOrder()"
-        >
-          <ArrowDownWideNarrow v-if="historyNewestFirst" class="h-3 w-3" />
-          <ArrowUpNarrowWide v-else class="h-3 w-3" />
-          <span>{{ historyOrderLabel }}</span>
-        </button>
+        <div class="flex items-center gap-2">
+          <button
+            v-if="pr.state === 'OPEN'"
+            type="button"
+            :aria-pressed="showUnresolvedOnly"
+            class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] transition-colors"
+            :class="
+              showUnresolvedOnly
+                ? 'border-terra-border bg-terra-soft font-medium text-terra-text'
+                : 'border-border bg-canvas text-ink-secondary hover:border-terra-border hover:text-terra-text'
+            "
+            @click="showUnresolvedOnly = !showUnresolvedOnly"
+          >
+            <span>Show unresolved only</span>
+            <span
+              v-if="unresolvedThreadCount > 0"
+              class="rounded-full px-1.5 py-0.2 font-mono text-[10px]"
+              :class="
+                showUnresolvedOnly
+                  ? 'bg-terra/15 text-terra-text'
+                  : 'bg-canvas-elevated text-ink-muted'
+              "
+            >
+              {{ unresolvedThreadCount }}
+            </span>
+          </button>
+          <button
+            type="button"
+            class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-1 text-[11px] text-ink-secondary transition-colors hover:border-terra-border hover:text-terra-text"
+            :title="`Showing ${historyOrderLabel.toLowerCase()} — click to flip`"
+            :aria-label="`History order: ${historyOrderLabel}. Click to flip.`"
+            @click="settings.toggleHistoryOrder()"
+          >
+            <ArrowDownWideNarrow v-if="historyNewestFirst" class="h-3 w-3" />
+            <ArrowUpNarrowWide v-else class="h-3 w-3" />
+            <span>{{ historyOrderLabel }}</span>
+          </button>
+        </div>
       </div>
 
-      <div v-if="conversationItems.length === 0" class="px-5 py-5 text-xs text-ink-faint">
-        No general comments or review summaries yet.
+      <div v-if="filteredConversationItems.length === 0" class="px-5 py-5 text-xs text-ink-faint">
+        {{
+          pr.state === 'OPEN' && showUnresolvedOnly
+            ? 'No unresolved review threads.'
+            : 'No general comments or review summaries yet.'
+        }}
       </div>
 
       <div v-else class="divide-y divide-border-muted">
         <article
-          v-for="item in conversationItems"
+          v-for="item in filteredConversationItems"
           :key="item.id"
           class="space-y-2 px-5 py-4"
         >
           <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-2">
               <img
                 v-if="item.author.avatarUrl"
                 :src="item.author.avatarUrl"
@@ -1127,11 +1344,56 @@ async function handleRemoveReviewer(login: string) {
               >
                 {{ reviewStatusMeta(item.reviewState).label }}
               </span>
+              <template v-if="item.kind === 'thread' && item.threadPath">
+                <button
+                  type="button"
+                  title="Jump to file in tour"
+                  class="inline-flex items-center gap-1 rounded-md border border-border bg-canvas px-1.5 py-0.5 font-mono text-[10.5px] text-ink-secondary transition-colors hover:border-terra-border hover:text-terra-text"
+                  @click="review.goToFile(item.threadPath)"
+                >
+                  <FileCode class="h-3 w-3 text-ink-faint" />
+                  <span>
+                    {{ item.threadPath }}{{ item.threadSubjectType === 'FILE' ? ' · file' : `:${item.threadLine}` }}
+                  </span>
+                </button>
+                <span
+                  class="rounded-full border px-2 py-0.2 text-[10px] font-medium"
+                  :class="
+                    item.isResolved
+                      ? 'border-pine-border bg-pine-soft text-pine-text'
+                      : 'border-ochre-border bg-ochre-soft text-ochre-text'
+                  "
+                >
+                  {{ item.isResolved ? 'Resolved' : 'Unresolved' }}
+                </span>
+                <span
+                  v-if="item.isOutdated"
+                  class="rounded-full border border-border bg-canvas-elevated px-2 py-0.2 text-[10px] text-ink-faint"
+                >
+                  Outdated
+                </span>
+              </template>
             </div>
             <div class="flex items-center gap-2">
               <span class="text-[11px] text-ink-faint">
                 {{ formatRelativeTime(item.createdAt) }}
               </span>
+              <button
+                v-if="item.kind === 'thread'"
+                type="button"
+                :disabled="togglingThreadId === item.rawId"
+                :aria-busy="togglingThreadId === item.rawId"
+                class="inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-0.5 text-[10.5px] text-ink-secondary transition-colors hover:border-terra-border hover:text-terra-text disabled:opacity-40"
+                @click="handleToggleThreadResolved(item.rawId)"
+              >
+                <Loader2
+                  v-if="togglingThreadId === item.rawId"
+                  class="h-2.5 w-2.5 animate-spin"
+                />
+                <RotateCcw v-else-if="item.isResolved" class="h-2.5 w-2.5" />
+                <CheckCircle2 v-else class="h-2.5 w-2.5" />
+                <span>{{ item.isResolved ? 'Unresolve' : 'Resolve' }}</span>
+              </button>
               <template v-if="canModifyIssueComment(item)">
                 <button
                   type="button"
@@ -1190,7 +1452,37 @@ async function handleRemoveReviewer(login: string) {
               :content="item.body"
               class="text-xs leading-relaxed text-ink-secondary"
             />
-            <ReactionBar :subject-id="item.rawId" :reactions="item.reactions" />
+            <ReactionBar
+              :subject-id="item.openingCommentId ?? item.rawId"
+              :reactions="item.reactions"
+            />
+            <div
+              v-if="item.replies && item.replies.length > 0"
+              class="mt-2 space-y-2 border-l-2 border-border-muted pl-3"
+            >
+              <div
+                v-for="reply in item.replies"
+                :key="reply.id"
+                class="space-y-1 text-xs"
+              >
+                <div class="flex items-center gap-2">
+                  <img
+                    v-if="reply.author.avatarUrl"
+                    :src="reply.author.avatarUrl"
+                    :alt="reply.author.login"
+                    class="h-4 w-4 rounded-full border border-border object-cover"
+                  />
+                  <span class="font-semibold text-ink">@{{ reply.author.login }}</span>
+                  <span class="text-[10.5px] text-ink-faint">
+                    {{ formatRelativeTime(reply.createdAt) }}
+                  </span>
+                </div>
+                <MarkdownContent
+                  :content="reply.body"
+                  class="text-xs leading-relaxed text-ink-secondary"
+                />
+              </div>
+            </div>
           </template>
         </article>
       </div>

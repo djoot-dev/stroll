@@ -3,13 +3,21 @@ import {
   ArrowDown,
   ArrowUp,
   Check,
+  CheckCheck,
+  ChevronDown,
+  ChevronRight,
+  Eye,
   EyeOff,
   FileText,
   GitCommitHorizontal,
+  GripVertical,
+  Layers,
   Loader2,
   MessageSquare,
   Pin,
   RotateCcw,
+  SkipForward,
+  Sparkles,
 } from '@lucide/vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { isLockfile, LAYER_META } from '@/services/readingOrder'
@@ -21,10 +29,21 @@ import {
   SIDEBAR_MIN_WIDTH,
   useSettingsStore,
 } from '@/stores/settings'
+import type { ArchitecturalLayer, TourStep } from '@/types/pr'
+
+type StepStatusFilter = 'all' | 'unreviewed' | 'commented' | 'unresolved'
 
 const review = useReviewStore()
 const settings = useSettingsStore()
 const stepListRef = ref<HTMLElement | null>(null)
+
+const statusFilter = ref<StepStatusFilter>('all')
+const hideReviewed = ref(false)
+const groupByLayer = ref(false)
+const collapsedLayers = ref<Set<ArchitecturalLayer>>(new Set())
+const showHiddenList = ref(false)
+const draggedPath = ref<string | null>(null)
+const dragOverPath = ref<string | null>(null)
 
 // --- Resizing -------------------------------------------------------------
 const isResizing = ref(false)
@@ -140,6 +159,116 @@ function draftCountForFile(path: string): number {
   return drafts + existing
 }
 
+function unresolvedCountForFile(path: string): number {
+  return review.pr?.threads.filter((t) => t.path === path && !t.isResolved).length ?? 0
+}
+
+const filterCounts = computed(() => {
+  let unreviewed = 0
+  let commented = 0
+  let unresolved = 0
+  for (const step of review.tourSteps) {
+    if (!review.isStepReviewed(step.file.path)) unreviewed += 1
+    if (draftCountForFile(step.file.path) > 0) commented += 1
+    if (unresolvedCountForFile(step.file.path) > 0) unresolved += 1
+  }
+  return { unreviewed, commented, unresolved }
+})
+
+const hasGeneratedVisibleSteps = computed(() =>
+  review.tourSteps.some((s) => s.isGenerated),
+)
+
+const filteredSteps = computed<TourStep[]>(() => {
+  return review.tourSteps.filter((step) => {
+    const path = step.file.path
+    if (hideReviewed.value && review.isStepReviewed(path)) return false
+    if (statusFilter.value === 'unreviewed') return !review.isStepReviewed(path)
+    if (statusFilter.value === 'commented') return draftCountForFile(path) > 0
+    if (statusFilter.value === 'unresolved') return unresolvedCountForFile(path) > 0
+    return true
+  })
+})
+
+interface LayerGroup {
+  layer: ArchitecturalLayer
+  label: string
+  steps: TourStep[]
+  reviewedCount: number
+}
+
+const groupedSteps = computed<LayerGroup[]>(() => {
+  const groups = new Map<ArchitecturalLayer, TourStep[]>()
+  for (const step of filteredSteps.value) {
+    const list = groups.get(step.layer) ?? []
+    list.push(step)
+    groups.set(step.layer, list)
+  }
+  const result: LayerGroup[] = []
+  for (const [layer, steps] of groups.entries()) {
+    result.push({
+      layer,
+      label: LAYER_META[layer].label,
+      steps,
+      reviewedCount: steps.filter((s) => review.isStepReviewed(s.file.path)).length,
+    })
+  }
+  return result
+})
+
+function toggleLayerCollapsed(layer: ArchitecturalLayer) {
+  const next = new Set(collapsedLayers.value)
+  if (next.has(layer)) next.delete(layer)
+  else next.add(layer)
+  collapsedLayers.value = next
+}
+
+watch(
+  () => review.currentStep?.layer,
+  (layer) => {
+    if (groupByLayer.value && layer && collapsedLayers.value.has(layer)) {
+      const next = new Set(collapsedLayers.value)
+      next.delete(layer)
+      collapsedLayers.value = next
+    }
+  },
+)
+
+function onStepDragStart(e: DragEvent, path: string) {
+  if (groupByLayer.value) return
+  draggedPath.value = path
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', path)
+  }
+}
+
+function onStepDragOver(e: DragEvent, path: string) {
+  if (groupByLayer.value || !draggedPath.value || draggedPath.value === path) return
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  dragOverPath.value = path
+}
+
+function onStepDrop(e: DragEvent, targetPath: string) {
+  e.preventDefault()
+  const sourcePath = draggedPath.value
+  draggedPath.value = null
+  dragOverPath.value = null
+  if (!sourcePath || sourcePath === targetPath || groupByLayer.value) return
+  review.reorderStep(sourcePath, targetPath)
+}
+
+function onStepDragEnd() {
+  draggedPath.value = null
+  dragOverPath.value = null
+}
+
+function resetSidebarFilters() {
+  statusFilter.value = 'all'
+  hideReviewed.value = false
+}
+
 function fileNameOnly(path: string): string {
   return path.split('/').pop() ?? path
 }
@@ -184,9 +313,21 @@ function dirOnly(path: string): string {
           {{ review.pr.title }}
         </h2>
         <div class="mt-2 flex items-center justify-between gap-2 text-[11px] text-ink-muted">
-          <span class="shrink-0 whitespace-nowrap">
-            {{ review.reviewedCount }} / {{ review.tourSteps.length }} reviewed
-          </span>
+          <div class="flex items-center gap-1.5">
+            <span class="shrink-0 whitespace-nowrap">
+              {{ review.reviewedCount }} / {{ review.tourSteps.length }} reviewed
+            </span>
+            <button
+              v-if="review.hasUnreviewedSteps"
+              type="button"
+              class="inline-flex items-center gap-0.5 rounded-md border border-border bg-canvas px-1.5 py-0.5 text-[10px] font-medium text-terra-text transition-colors hover:border-terra-border hover:bg-terra-soft"
+              title="Jump to next unreviewed step (N)"
+              @click="review.nextUnreviewedStep()"
+            >
+              <SkipForward class="h-2.5 w-2.5" />
+              <span>Next</span>
+            </button>
+          </div>
           <span class="truncate font-mono text-[10.5px] text-ink-faint">
             {{ review.pr.headRefName }} → {{ review.pr.baseRefName }}
           </span>
@@ -280,26 +421,255 @@ function dirOnly(path: string): string {
         </button>
       </div>
 
-      <!-- Ordered Tour Steps — Connected Stepping-Stone Trail -->
+      <!-- Status Filters & Grouping Controls -->
+      <div class="space-y-1.5 border-b border-border-muted px-2.5 py-2">
+        <div class="flex flex-wrap items-center gap-1">
+          <button
+            type="button"
+            class="rounded-md px-1.5 py-0.5 text-[10.5px] font-medium transition-colors"
+            :class="
+              statusFilter === 'all'
+                ? 'bg-terra-soft text-terra-text'
+                : 'text-ink-muted hover:bg-canvas-elevated hover:text-ink'
+            "
+            @click="statusFilter = 'all'"
+          >
+            All
+          </button>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium transition-colors"
+            :class="
+              statusFilter === 'unreviewed'
+                ? 'bg-terra-soft text-terra-text'
+                : 'text-ink-muted hover:bg-canvas-elevated hover:text-ink'
+            "
+            @click="statusFilter = statusFilter === 'unreviewed' ? 'all' : 'unreviewed'"
+          >
+            <span>Unreviewed</span>
+            <span v-if="filterCounts.unreviewed > 0" class="font-mono text-[9.5px] opacity-80">
+              {{ filterCounts.unreviewed }}
+            </span>
+          </button>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium transition-colors"
+            :class="
+              statusFilter === 'commented'
+                ? 'bg-terra-soft text-terra-text'
+                : 'text-ink-muted hover:bg-canvas-elevated hover:text-ink'
+            "
+            @click="statusFilter = statusFilter === 'commented' ? 'all' : 'commented'"
+          >
+            <span>Comments</span>
+            <span v-if="filterCounts.commented > 0" class="font-mono text-[9.5px] opacity-80">
+              {{ filterCounts.commented }}
+            </span>
+          </button>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium transition-colors"
+            :class="
+              statusFilter === 'unresolved'
+                ? 'bg-terra-soft text-terra-text'
+                : 'text-ink-muted hover:bg-canvas-elevated hover:text-ink'
+            "
+            @click="statusFilter = statusFilter === 'unresolved' ? 'all' : 'unresolved'"
+          >
+            <span>Unresolved</span>
+            <span v-if="filterCounts.unresolved > 0" class="font-mono text-[9.5px] opacity-80">
+              {{ filterCounts.unresolved }}
+            </span>
+          </button>
+        </div>
+
+        <div class="flex items-center justify-between gap-1.5">
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium transition-colors"
+            :class="
+              hideReviewed
+                ? 'border-pine-border bg-pine-soft text-pine-text'
+                : 'border-border-muted bg-canvas text-ink-muted hover:bg-canvas-elevated hover:text-ink'
+            "
+            title="Hide reviewed files"
+            @click="hideReviewed = !hideReviewed"
+          >
+            <CheckCheck class="h-3 w-3" />
+            <span>Hide reviewed</span>
+          </button>
+
+          <div class="flex items-center gap-1">
+            <button
+              v-if="hasGeneratedVisibleSteps"
+              type="button"
+              class="inline-flex items-center gap-1 rounded-md border border-border-muted bg-canvas px-1.5 py-0.5 text-[10px] font-medium text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+              title="Hide generated files & lockfiles from tour"
+              @click="review.hideGeneratedSteps()"
+            >
+              <Sparkles class="h-2.5 w-2.5" />
+              <span>Mute gen</span>
+            </button>
+
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium transition-colors"
+              :class="
+                groupByLayer
+                  ? 'border-terra-border bg-terra-soft text-terra-text'
+                  : 'border-border-muted bg-canvas text-ink-muted hover:bg-canvas-elevated hover:text-ink'
+              "
+              title="Group steps by architectural layer"
+              @click="groupByLayer = !groupByLayer"
+            >
+              <Layers class="h-3 w-3" />
+              <span>Layers</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ordered Tour Steps — Connected Stepping-Stone Trail or Layer Groups -->
       <div ref="stepListRef" class="relative flex-1 overflow-y-auto px-2.5 py-2.5">
-        <div class="relative space-y-1">
+        <div
+          v-if="filteredSteps.length === 0"
+          class="flex flex-col items-center justify-center gap-2 px-3 py-8 text-center text-xs text-ink-faint"
+        >
+          <span>No files match the current filter.</span>
+          <button
+            v-if="statusFilter !== 'all' || hideReviewed"
+            type="button"
+            class="rounded-md border border-border bg-canvas px-2 py-1 text-[11px] font-medium text-terra-text transition-colors hover:bg-terra-soft"
+            @click="resetSidebarFilters"
+          >
+            Show all files
+          </button>
+        </div>
+
+        <!-- Grouped by Layer -->
+        <div v-else-if="groupByLayer" class="space-y-2.5">
+          <div v-for="group in groupedSteps" :key="group.layer" class="space-y-1">
+            <button
+              type="button"
+              class="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1 text-left text-[11px] font-semibold text-ink-secondary transition-colors hover:bg-canvas-elevated"
+              @click="toggleLayerCollapsed(group.layer)"
+            >
+              <span class="flex min-w-0 items-center gap-1.5">
+                <ChevronRight v-if="collapsedLayers.has(group.layer)" class="h-3.5 w-3.5 shrink-0 text-ink-faint" />
+                <ChevronDown v-else class="h-3.5 w-3.5 shrink-0 text-ink-faint" />
+                <span
+                  class="shrink-0 rounded border px-1 py-0.2 font-mono text-[9px] font-semibold"
+                  :class="LAYER_META[group.layer].badgeClass"
+                >
+                  {{ LAYER_META[group.layer].shortLabel }}
+                </span>
+                <span class="truncate">{{ group.label }}</span>
+              </span>
+              <span class="shrink-0 font-mono text-[10px] text-ink-faint">
+                {{ group.reviewedCount }}/{{ group.steps.length }}
+              </span>
+            </button>
+
+            <div v-if="!collapsedLayers.has(group.layer)" class="space-y-1 pl-1">
+              <button
+                v-for="step in group.steps"
+                :key="step.file.path"
+                :data-step-index="step.stepIndex"
+                class="group relative flex w-full items-start gap-2.5 rounded-xl border px-2 py-2 text-left transition-all"
+                :class="
+                  review.activeView === 'step' && step.stepIndex === review.currentStepIndex
+                    ? 'stroll-card border-terra-border bg-terra-soft'
+                    : 'border-transparent hover:border-border-muted hover:bg-canvas-elevated/60'
+                "
+                @click="review.goToStep(step.stepIndex)"
+              >
+                <span
+                  class="relative z-10 mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full font-mono text-[10px] font-semibold transition-all"
+                  :class="
+                    review.isStepReviewed(step.file.path)
+                      ? 'animate-check-pop bg-pine text-white shadow-xs'
+                      : review.activeView === 'step' && step.stepIndex === review.currentStepIndex
+                        ? 'bg-terra text-white ring-3 ring-terra-soft shadow-xs'
+                        : 'border border-border bg-canvas-subtle text-ink-muted group-hover:border-terra-border group-hover:text-ink'
+                  "
+                  :title="review.isStepReviewed(step.file.path) ? 'Reviewed' : `Step ${step.stepIndex + 1}`"
+                >
+                  <Check v-if="review.isStepReviewed(step.file.path)" class="h-3 w-3" />
+                  <template v-else>{{ step.stepIndex + 1 }}</template>
+                </span>
+
+                <div class="min-w-0 flex-1 space-y-1">
+                  <div class="flex items-center justify-between gap-1.5">
+                    <div class="flex min-w-0 items-center gap-1.5">
+                      <span
+                        v-if="step.isGenerated"
+                        class="shrink-0 rounded border border-border bg-canvas-elevated px-1 py-0.2 font-mono text-[9px] font-semibold text-ink-muted"
+                      >
+                        {{ isLockfile(step.file.path) ? 'LOCKFILE' : 'GENERATED' }}
+                      </span>
+                      <span
+                        class="truncate font-mono text-xs font-medium"
+                        :class="
+                          review.activeView === 'step' && step.stepIndex === review.currentStepIndex
+                            ? 'text-ink'
+                            : step.isGenerated
+                              ? 'text-ink-muted group-hover:text-ink'
+                              : 'text-ink-secondary group-hover:text-ink'
+                        "
+                      >
+                        {{ fileNameOnly(step.file.path) }}
+                      </span>
+                    </div>
+
+                    <span
+                      v-if="draftCountForFile(step.file.path) > 0"
+                      class="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-terra-soft px-1.5 py-0.2 font-mono text-[10px] font-medium text-terra-text"
+                    >
+                      <MessageSquare class="h-2.5 w-2.5" />
+                      {{ draftCountForFile(step.file.path) }}
+                    </span>
+                  </div>
+
+                  <div class="flex items-center justify-between gap-2 text-[10px] text-ink-faint">
+                    <span class="truncate">{{ dirOnly(step.file.path) || '.' }}</span>
+                    <span class="shrink-0 font-mono">
+                      <span class="text-pine-text">+{{ step.file.additions }}</span>
+                      <span class="mx-0.5 text-ink-faint">/</span>
+                      <span class="text-crimson-text">-{{ step.file.deletions }}</span>
+                    </span>
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Flat Connected Stepping-Stone Trail (supports drag-and-drop) -->
+        <div v-else class="relative space-y-1">
           <!-- Subtle vertical trail rail connecting the stepping stones -->
           <div
-            v-if="review.tourSteps.length > 1"
+            v-if="filteredSteps.length > 1"
             class="pointer-events-none absolute top-5 bottom-5 left-[17px] w-px bg-border"
           />
 
           <button
-            v-for="step in review.tourSteps"
+            v-for="step in filteredSteps"
             :key="step.file.path"
             :data-step-index="step.stepIndex"
+            draggable="true"
             class="group relative flex w-full items-start gap-2.5 rounded-xl border px-2 py-2 text-left transition-all"
-            :class="
+            :class="[
               review.activeView === 'step' && step.stepIndex === review.currentStepIndex
                 ? 'stroll-card border-terra-border bg-terra-soft'
-                : 'border-transparent hover:border-border-muted hover:bg-canvas-elevated/60'
-            "
+                : 'border-transparent hover:border-border-muted hover:bg-canvas-elevated/60',
+              dragOverPath === step.file.path ? 'ring-1 ring-terra-border bg-terra-soft/40' : '',
+              draggedPath === step.file.path ? 'opacity-50' : '',
+            ]"
             @click="review.goToStep(step.stepIndex)"
+            @dragstart="onStepDragStart($event, step.file.path)"
+            @dragover="onStepDragOver($event, step.file.path)"
+            @drop="onStepDrop($event, step.file.path)"
+            @dragend="onStepDragEnd"
           >
             <!-- Stepping-Stone Trail Node -->
             <span
@@ -364,6 +734,10 @@ function dirOnly(path: string): string {
                     class="hidden items-center gap-0.5 group-hover:flex"
                     @click.stop
                   >
+                    <GripVertical
+                      class="h-2.5 w-2.5 cursor-grab text-ink-faint"
+                      title="Drag to reorder"
+                    />
                     <button
                       type="button"
                       :title="review.pinnedPaths.has(step.file.path) ? 'Unpin step' : 'Pin step to top'"
@@ -419,22 +793,48 @@ function dirOnly(path: string): string {
       <!-- Tour Customization Reset Footer -->
       <div
         v-if="review.hiddenPaths.size > 0 || review.customOrderPaths.length > 0 || review.pinnedPaths.size > 0"
-        class="flex items-center justify-between border-t border-border-muted bg-canvas px-3 py-2 text-[11px] text-ink-muted"
+        class="border-t border-border-muted bg-canvas text-[11px] text-ink-muted"
       >
-        <span>
-          <template v-if="review.hiddenPaths.size > 0">
-            {{ review.hiddenPaths.size }} hidden
-          </template>
-          <template v-else>Custom tour order</template>
-        </span>
-        <button
-          type="button"
-          class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium text-terra-text transition-colors hover:bg-terra-soft"
-          @click="review.resetTourCustomization()"
+        <div class="flex items-center justify-between px-3 py-2">
+          <button
+            v-if="review.hiddenPaths.size > 0"
+            type="button"
+            class="inline-flex items-center gap-1 rounded px-1 py-0.5 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+            @click="showHiddenList = !showHiddenList"
+          >
+            <Eye class="h-3 w-3" />
+            <span>{{ review.hiddenPaths.size }} hidden</span>
+          </button>
+          <span v-else>Custom tour order</span>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium text-terra-text transition-colors hover:bg-terra-soft"
+            @click="review.resetTourCustomization()"
+          >
+            <RotateCcw class="h-2.5 w-2.5" />
+            <span>Reset</span>
+          </button>
+        </div>
+
+        <div
+          v-if="showHiddenList && review.hiddenPaths.size > 0"
+          class="max-h-32 space-y-1 overflow-y-auto border-t border-border-muted px-3 py-2"
         >
-          <RotateCcw class="h-2.5 w-2.5" />
-          <span>Reset</span>
-        </button>
+          <div
+            v-for="path in Array.from(review.hiddenPaths)"
+            :key="path"
+            class="flex items-center justify-between gap-2 text-[10.5px]"
+          >
+            <span class="truncate font-mono text-ink-muted" :title="path">{{ path }}</span>
+            <button
+              type="button"
+              class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium text-terra-text hover:bg-terra-soft"
+              @click="review.toggleHideStep(path)"
+            >
+              Unhide
+            </button>
+          </div>
+        </div>
       </div>
     </aside>
   </Transition>

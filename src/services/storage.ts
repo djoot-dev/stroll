@@ -4,7 +4,16 @@ import {
   loadGitHubTokenKeychain,
   saveGitHubTokenKeychain,
 } from './native'
-import type { DraftComment, PRFile, ReviewEvent, TourDirection } from '@/types/pr'
+import type {
+  DiffViewMode,
+  DraftComment,
+  LocalEditor,
+  PRFile,
+  PRLocalProgress,
+  RecentPRItem,
+  ReviewEvent,
+  TourDirection,
+} from '@/types/pr'
 
 const STORE_FILE = 'stroll-settings.json'
 const FALLBACK_PREFIX = 'stroll_'
@@ -120,6 +129,14 @@ export async function saveTourDirection(direction: TourDirection): Promise<void>
   await setItem('tour_direction', direction)
 }
 
+export async function loadOnboardingCompleted(): Promise<boolean> {
+  return (await getItem<boolean>('onboarding_completed')) ?? false
+}
+
+export async function saveOnboardingCompleted(completed: boolean): Promise<void> {
+  await setItem('onboarding_completed', completed)
+}
+
 export async function loadDraftComments(prKey: string): Promise<DraftComment[]> {
   const all = (await getItem<Record<string, DraftComment[]>>('draft_comments')) ?? {}
   return all[prKey] ?? []
@@ -136,7 +153,7 @@ export type ThemeMode = 'light' | 'dark' | 'system'
 /** Display order for the overview's commit and conversation history. */
 export type HistoryOrder = 'newest' | 'oldest'
 
-export type DiffViewMode = 'unified' | 'split'
+export type { DiffViewMode }
 export type TabSizeOption = 2 | 4 | 8
 export type ExternalEditorPreset = 'vscode' | 'cursor' | 'zed' | 'custom'
 
@@ -165,6 +182,7 @@ export interface PersistedAppSettings {
   externalEditor: ExternalEditorPreset
   externalEditorCustomCommand: string
   tourIgnorePatterns: string[]
+  localEditor: LocalEditor
   showShortcutsBar: boolean
   inboxAutoRefreshSeconds: number
   inboxNotificationsEnabled: boolean
@@ -283,4 +301,37 @@ export async function clearReviewCache(): Promise<void> {
     deleteItem('viewed_files'),
     deleteItem('review_summary_drafts'),
   ])
+}
+
+export async function loadAllPRProgress(): Promise<Record<string, PRLocalProgress>> {
+  await viewedFilesWriteQueue
+  const [allDrafts, allViewed] = await Promise.all([
+    getItem<Record<string, DraftComment[]>>('draft_comments'),
+    getItem<Record<string, ViewedFilesMap>>('viewed_files'),
+  ])
+
+  const progress: Record<string, PRLocalProgress> = {}
+  const keys = new Set([
+    ...Object.keys(allDrafts ?? {}),
+    ...Object.keys(allViewed ?? {}),
+  ])
+
+  for (const key of keys) {
+    const draftCount = allDrafts?.[key]?.length ?? 0
+    const reviewedCount = Object.keys(allViewed?.[key] ?? {}).length
+    if (draftCount > 0 || reviewedCount > 0) {
+      progress[key] = { draftCount, reviewedCount }
+    }
+  }
+
+  return progress
+}
+
+export async function loadRecentPRs(): Promise<RecentPRItem[]> {
+  const items = await getItem<RecentPRItem[]>('recent_prs')
+  return Array.isArray(items) ? items : []
+}
+
+export async function saveRecentPRs(items: RecentPRItem[]): Promise<void> {
+  await setItem('recent_prs', items)
 }
