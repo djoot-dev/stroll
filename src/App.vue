@@ -174,12 +174,16 @@ function handleKeydown(e: KeyboardEvent) {
     }
     if (review.showFinishModal) {
       e.preventDefault()
-      review.showFinishModal = false
+      if (!review.isSubmittingReview) {
+        review.showFinishModal = false
+      }
       return
     }
     if (review.showLoaderModal) {
       e.preventDefault()
-      review.showLoaderModal = false
+      if (!review.isLoadingPR) {
+        review.showLoaderModal = false
+      }
       return
     }
   }
@@ -383,6 +387,26 @@ onBeforeUnmount(() => {
             <X class="h-3.5 w-3.5" />
           </button>
         </div>
+      </div>
+
+      <!-- Active Commit Filter Banner when Sidebar is Collapsed -->
+      <div
+        v-if="review.commitFilter !== 'all' && !review.sidebarOpen"
+        class="flex items-center justify-between gap-3 border-b border-ochre-border bg-ochre-soft px-4 py-1 text-xs text-ochre-text"
+      >
+        <span class="font-medium">
+          Tour is filtered to
+          <code class="rounded bg-canvas px-1 py-0.5 font-mono text-[11px]">
+            {{ review.commitFilter === 'since-last-review' ? 'since last review' : review.commitFilter.slice(0, 7) }}
+          </code>
+        </span>
+        <button
+          type="button"
+          class="rounded-md border border-ochre-border bg-canvas px-2 py-0.5 text-[11px] font-medium text-ochre-text hover:bg-canvas-elevated"
+          @click="review.setCommitFilter('all')"
+        >
+          Show all commits
+        </button>
       </div>
 
       <div class="flex min-h-0 flex-1 overflow-hidden">

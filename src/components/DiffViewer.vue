@@ -87,6 +87,7 @@ const props = defineProps<{
 const auth = useAuthStore()
 const review = useReviewStore()
 const settings = useSettingsStore()
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 
 const expandedGaps = ref<Set<string>>(new Set())
 const isGeneratedExpanded = ref(false)
@@ -1040,13 +1041,21 @@ function getOriginalLinesForRange(
 }
 
 const editorLabel = computed(() => {
-  switch (settings.localEditor) {
+  if (settings.externalEditor === 'custom') return 'Editor'
+  switch (settings.externalEditor) {
     case 'cursor':
       return 'Cursor'
     case 'zed':
       return 'Zed'
     default:
-      return 'VS Code'
+      switch (settings.localEditor) {
+        case 'cursor':
+          return 'Cursor'
+        case 'zed':
+          return 'Zed'
+        default:
+          return 'VS Code'
+      }
   }
 })
 
@@ -1091,7 +1100,15 @@ async function openInLocalEditor() {
   const repoPath = review.currentRepoPath
   if (!repoPath) return
   const line = activeComposer.value?.line ?? activeLineNumber.value ?? 1
-  await openFileInEditor(repoPath, props.step.file.path, line, settings.localEditor)
+  if (settings.externalEditor === 'custom' && settings.externalEditorCustomCommand.trim()) {
+    await openStepInEditor(line)
+    return
+  }
+  const editor =
+    settings.externalEditor === 'cursor' || settings.externalEditor === 'zed'
+      ? settings.externalEditor
+      : settings.localEditor
+  await openFileInEditor(repoPath, props.step.file.path, line, editor)
 }
 
 function getOriginalCodeForRange(
@@ -1294,7 +1311,7 @@ function statusBadgeClass(status: string): string {
             >
               {{ step.file.status }}
             </span>
-            <h1 class="truncate font-mono text-sm font-semibold text-ink">
+            <h1 class="truncate font-mono text-sm font-semibold text-ink" :title="step.file.path">
               {{ step.file.path }}
             </h1>
             <button
@@ -1396,7 +1413,7 @@ function statusBadgeClass(status: string): string {
 
           <button
             type="button"
-            title="Find in file (Cmd+F)"
+            :title="isMac ? 'Find in file (⌘F)' : 'Find in file (Ctrl+F)'"
             data-diff-search-toggle
             class="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors"
             :class="
@@ -1407,36 +1424,6 @@ function statusBadgeClass(status: string): string {
             @click="searchOpen ? closeDiffSearch('dismiss') : openDiffSearch()"
           >
             <Search class="h-3 w-3" />
-          </button>
-
-          <button
-            v-if="linkedRepoPath"
-            type="button"
-            title="Open file in configured external editor"
-            class="inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-1 text-[11px] font-medium text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
-            @click="openStepInEditor(1)"
-          >
-            <ExternalLink class="h-3 w-3" />
-            <span class="hidden sm:inline">Editor</span>
-          </button>
-
-          <button
-            type="button"
-            :title="
-              settings.diffViewMode === 'split'
-                ? 'Side-by-side split diff (click for unified)'
-                : 'Unified diff (click for side-by-side split)'
-            "
-            class="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors"
-            :class="
-              settings.diffViewMode === 'split'
-                ? 'border-terra-border bg-terra-soft text-terra-text'
-                : 'border-border bg-canvas text-ink-muted hover:bg-canvas-elevated hover:text-ink'
-            "
-            @click="settings.setDiffViewMode(settings.diffViewMode === 'split' ? 'unified' : 'split')"
-          >
-            <Columns2 class="h-3 w-3" />
-            <span class="hidden sm:inline">{{ settings.diffViewMode === 'split' ? 'Split' : 'Unified' }}</span>
           </button>
 
           <button
@@ -1470,6 +1457,12 @@ function statusBadgeClass(status: string): string {
           </button>
 
           <button
+            type="button"
+            :title="
+              review.isStepReviewed(step.file.path)
+                ? 'Mark as unreviewed (M)'
+                : 'Mark as reviewed (M)'
+            "
             class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors"
             :class="
               review.isStepReviewed(step.file.path)
@@ -1491,7 +1484,7 @@ function statusBadgeClass(status: string): string {
         v-for="ctx in step.referencedContexts"
         :key="ctx.sourcePath"
         :context="ctx"
-        @jump-to-file="(p) => review.goToFile(p)"
+        @jump-to-file="(p, line) => (line ? review.goToFileLine(p, line) : review.goToFile(p))"
       />
     </div>
 
@@ -1736,16 +1729,16 @@ function statusBadgeClass(status: string): string {
       <template v-else>
         <!-- Sticky Diff Context Toolbar (Enclosing Scope Breadcrumb + Hover Guardrail Toggle) -->
         <div
-          class="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b border-border bg-canvas-subtle/95 px-3.5 py-1.5 text-[11px] text-ink-muted backdrop-blur-sm"
+          class="sticky top-0 z-10 flex flex-nowrap items-center justify-between gap-2 border-b border-border bg-canvas-subtle/95 px-3.5 py-1.5 text-[11px] text-ink-muted backdrop-blur-sm"
         >
-          <div class="flex min-w-0 items-center gap-2">
-            <span class="shrink-0 text-ink-muted">Click or drag lines to comment</span>
+          <div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+            <span class="shrink-0 text-ink-muted">Click or drag line numbers to comment</span>
             <template v-if="activeScopes.length > 0">
-              <span class="text-ink-faint">·</span>
-              <div class="flex min-w-0 items-center gap-1 font-mono text-[11px] text-terra-text">
+              <span class="shrink-0 text-ink-faint">·</span>
+              <div class="flex min-w-0 items-center gap-1 overflow-hidden font-mono text-[11px] text-terra-text">
                 <template v-for="(sc, idx) in activeScopes" :key="sc">
                   <ChevronRight v-if="idx > 0" class="h-3 w-3 shrink-0 text-ink-faint" />
-                  <span class="truncate">{{ sc }}</span>
+                  <span class="truncate" :title="sc">{{ sc }}</span>
                 </template>
               </div>
             </template>
@@ -1757,7 +1750,7 @@ function statusBadgeClass(status: string): string {
             </span>
           </div>
 
-          <div class="flex flex-wrap items-center gap-2">
+          <div class="flex shrink-0 items-center gap-2">
             <button
               v-if="gapSegments.length > 0"
               type="button"
@@ -1825,12 +1818,14 @@ function statusBadgeClass(status: string): string {
             </button>
 
             <button
+              type="button"
               class="inline-flex shrink-0 items-center gap-1 rounded-lg border px-2 py-0.5 text-[10.5px] transition-colors"
               :class="
                 !settings.requireAltForHover
                   ? 'border-terra-border bg-terra-soft text-terra-text'
                   : 'border-border bg-canvas text-ink-secondary hover:bg-canvas-elevated'
               "
+              :aria-pressed="!settings.requireAltForHover"
               title="Toggle whether symbol hover popovers open automatically (250ms delay) or only when holding Option/Alt"
               @click="settings.setRequireAltForHover(!settings.requireAltForHover)"
             >
@@ -1909,32 +1904,39 @@ function statusBadgeClass(status: string): string {
                       v-for="(cellLine, sideIdx) in [row.left, row.right]"
                       :key="sideIdx"
                       :data-diff-line-key="cellLine?.key"
-                      class="group flex min-w-0 cursor-pointer items-stretch"
+                      class="group flex min-w-0 items-stretch"
                       :class="
                         cellLine
                           ? [
                               selectedRange.keys.has(cellLine.key)
                                 ? selectionRowClass(cellLine.key)
                                 : 'hover:bg-diff-hover',
-                              activeMatchKey === cellLine.key
-                                ? 'ring-1 ring-inset ring-terra bg-terra-soft/30'
-                                : searchMatchSet.has(cellLine.key)
-                                  ? 'bg-ochre-soft/20'
-                                  : '',
+                              flashLineKey === cellLine.key
+                                ? 'ring-2 ring-inset ring-terra bg-terra-soft/40'
+                                : activeMatchKey === cellLine.key
+                                  ? 'ring-1 ring-inset ring-terra bg-terra-soft/30'
+                                  : searchMatchSet.has(cellLine.key)
+                                    ? 'bg-ochre-soft/20'
+                                    : '',
                               isHoveredUsageLine(cellLine)
                                 ? 'inset-ring-1 inset-ring-plum-border shadow-[inset_0_0_0_9999px_var(--color-plum-soft)]'
                                 : '',
                             ]
                           : 'bg-canvas-subtle/40'
                       "
-                      @mousedown.left="cellLine && startLineDrag(cellLine)"
                       @mouseenter="cellLine && handleLineMouseEnter(cellLine, seg.lines, 0)"
                     >
                       <template v-if="cellLine">
-                        <span class="w-11 shrink-0 select-none border-r border-border-muted px-2 text-right text-[11px] text-code-gutter-text">
+                        <span
+                          class="w-11 shrink-0 cursor-pointer select-none border-r border-border-muted px-2 text-right text-[11px] text-code-gutter-text"
+                          @mousedown.left="startLineDrag(cellLine)"
+                        >
                           {{ sideIdx === 0 ? (cellLine.oldLineNumber ?? '') : (cellLine.newLineNumber ?? '') }}
                         </span>
-                        <span class="w-5 shrink-0 select-none text-center text-code-gutter-text">
+                        <span
+                          class="w-5 shrink-0 cursor-pointer select-none text-center text-code-gutter-text"
+                          @mousedown.left="startLineDrag(cellLine)"
+                        >
                           <MessageSquarePlus class="mx-auto mt-1 hidden h-3 w-3 text-terra group-hover:block" />
                         </span>
                         <pre
@@ -1964,6 +1966,68 @@ function statusBadgeClass(status: string): string {
                     <ReviewThreadCard :thread="thread" />
                   </div>
                   <div
+                    v-for="draft in splitRowDrafts(row)"
+                    :key="draft.id"
+                    class="w-full py-1.5"
+                    :data-draft-id="draft.id"
+                  >
+                    <template v-if="editingDraftId === draft.id">
+                      <CommentComposer
+                        :line="draft.line"
+                        :side="draft.side"
+                        :start-line="draft.startLine"
+                        :start-side="draft.startSide"
+                        :original-code="getOriginalCodeForRange(draft.line, draft.side, draft.startLine)"
+                        :initial-body="draft.body"
+                        @submit="(body) => handleUpdateDraft(draft.id, body)"
+                        @cancel="cancelEditingDraft"
+                      />
+                      <p v-if="draftEditError" class="mx-3 font-sans text-[11px] text-crimson-text">
+                        {{ draftEditError }}
+                      </p>
+                    </template>
+                    <div
+                      v-else
+                      class="animate-pop-in mx-3 rounded-xl border border-ochre-border bg-ochre-soft p-3 font-sans transition-shadow"
+                      :class="flashDraftId === draft.id ? 'ring-2 ring-ochre-text' : ''"
+                    >
+                      <div class="flex items-center justify-between text-[11px]">
+                        <span class="font-semibold text-ochre-text">
+                          Pending Draft ({{
+                            draft.startLine && draft.startLine !== draft.line
+                              ? `Lines ${draft.startLine}–${draft.line}`
+                              : `Line ${draft.line}`
+                          }} · {{ draft.side === 'LEFT' ? 'Base' : 'Head' }})
+                        </span>
+                        <div class="flex items-center gap-3">
+                          <button
+                            class="inline-flex items-center gap-1 text-ink-muted hover:text-ink"
+                            title="Edit draft"
+                            @click.stop="startEditingDraft(draft.id)"
+                          >
+                            <Pencil class="h-3 w-3" />
+                            <span>Edit</span>
+                          </button>
+                          <button
+                            class="inline-flex items-center gap-1 text-ink-muted hover:text-crimson-text"
+                            title="Delete draft"
+                            @click.stop="review.deleteDraftComment(draft.id)"
+                          >
+                            <Trash2 class="h-3 w-3" />
+                            <span>Discard</span>
+                          </button>
+                        </div>
+                      </div>
+                      <MarkdownContent
+                        :content="draft.body"
+                        :original-lines="
+                          getOriginalLinesForRange(draft.line, draft.side, draft.startLine)
+                        "
+                        class="mt-1 text-xs leading-relaxed text-ink"
+                      />
+                    </div>
+                  </div>
+                  <div
                     v-if="splitRowActiveComposer(row)"
                     class="w-full"
                   >
@@ -1988,30 +2052,40 @@ function statusBadgeClass(status: string): string {
               <template v-else v-for="(line, lIdx) in seg.lines" :key="line.key">
                 <div
                   :data-diff-line-key="line.key"
-                  class="group flex cursor-pointer items-stretch border-l-2 border-l-transparent"
+                  class="group flex items-stretch border-l-2 border-l-transparent"
                   :class="[
                     selectedRange.keys.has(line.key)
                       ? selectionRowClass(line.key)
                       : 'hover:bg-diff-hover',
-                    activeMatchKey === line.key
-                      ? 'ring-1 ring-inset ring-terra bg-terra-soft/30'
-                      : searchMatchSet.has(line.key)
-                        ? 'bg-ochre-soft/20'
-                        : '',
+                    flashLineKey === line.key
+                      ? 'ring-2 ring-inset ring-terra bg-terra-soft/40'
+                      : activeMatchKey === line.key
+                        ? 'ring-1 ring-inset ring-terra bg-terra-soft/30'
+                        : searchMatchSet.has(line.key)
+                          ? 'bg-ochre-soft/20'
+                          : '',
                     isHoveredUsageLine(line)
                       ? 'inset-ring-1 inset-ring-plum-border shadow-[inset_0_0_0_9999px_var(--color-plum-soft)]'
                       : '',
                   ]"
-                  @mousedown.left="startLineDrag(line)"
                   @mouseenter="handleLineMouseEnter(line, seg.lines, lIdx)"
                 >
-                  <span class="w-12 shrink-0 select-none px-2 text-right text-[11px] text-code-gutter-text">
+                  <span
+                    class="w-12 shrink-0 cursor-pointer select-none px-2 text-right text-[11px] text-code-gutter-text"
+                    @mousedown.left="startLineDrag(line)"
+                  >
                     {{ line.oldLineNumber ?? '' }}
                   </span>
-                  <span class="w-12 shrink-0 select-none border-r border-border-muted px-2 text-right text-[11px] text-code-gutter-text">
+                  <span
+                    class="w-12 shrink-0 cursor-pointer select-none border-r border-border-muted px-2 text-right text-[11px] text-code-gutter-text"
+                    @mousedown.left="startLineDrag(line)"
+                  >
                     {{ line.newLineNumber ?? '' }}
                   </span>
-                  <span class="w-6 shrink-0 select-none text-center text-code-gutter-text">
+                  <span
+                    class="w-6 shrink-0 cursor-pointer select-none text-center text-code-gutter-text"
+                    @mousedown.left="startLineDrag(line)"
+                  >
                     <MessageSquarePlus class="mx-auto mt-1 hidden h-3 w-3 text-terra group-hover:block" />
                   </span>
                   <pre
@@ -2035,6 +2109,70 @@ function statusBadgeClass(status: string): string {
                   class="sticky left-0 w-[100cqw]"
                 >
                   <ReviewThreadCard :thread="thread" />
+                </div>
+
+                <!-- Local Pending Draft Comments -->
+                <div
+                  v-for="draft in draftsForLine(line)"
+                  :key="draft.id"
+                  class="sticky left-0 w-[100cqw] py-1.5"
+                  :data-draft-id="draft.id"
+                >
+                  <template v-if="editingDraftId === draft.id">
+                    <CommentComposer
+                      :line="draft.line"
+                      :side="draft.side"
+                      :start-line="draft.startLine"
+                      :start-side="draft.startSide"
+                      :original-code="getOriginalCodeForRange(draft.line, draft.side, draft.startLine)"
+                      :initial-body="draft.body"
+                      @submit="(body) => handleUpdateDraft(draft.id, body)"
+                      @cancel="cancelEditingDraft"
+                    />
+                    <p v-if="draftEditError" class="mx-3 font-sans text-[11px] text-crimson-text">
+                      {{ draftEditError }}
+                    </p>
+                  </template>
+                  <div
+                    v-else
+                    class="animate-pop-in mx-3 rounded-xl border border-ochre-border bg-ochre-soft p-3 font-sans transition-shadow"
+                    :class="flashDraftId === draft.id ? 'ring-2 ring-ochre-text' : ''"
+                  >
+                    <div class="flex items-center justify-between text-[11px]">
+                      <span class="font-semibold text-ochre-text">
+                        Pending Draft ({{
+                          draft.startLine && draft.startLine !== draft.line
+                            ? `Lines ${draft.startLine}–${draft.line}`
+                            : `Line ${draft.line}`
+                        }} · {{ draft.side === 'LEFT' ? 'Base' : 'Head' }})
+                      </span>
+                      <div class="flex items-center gap-3">
+                        <button
+                          class="inline-flex items-center gap-1 text-ink-muted hover:text-ink"
+                          title="Edit draft"
+                          @click.stop="startEditingDraft(draft.id)"
+                        >
+                          <Pencil class="h-3 w-3" />
+                          <span>Edit</span>
+                        </button>
+                        <button
+                          class="inline-flex items-center gap-1 text-ink-muted hover:text-crimson-text"
+                          title="Delete draft"
+                          @click.stop="review.deleteDraftComment(draft.id)"
+                        >
+                          <Trash2 class="h-3 w-3" />
+                          <span>Discard</span>
+                        </button>
+                      </div>
+                    </div>
+                    <MarkdownContent
+                      :content="draft.body"
+                      :original-lines="
+                        getOriginalLinesForRange(draft.line, draft.side, draft.startLine)
+                      "
+                      class="mt-1 text-xs leading-relaxed text-ink"
+                    />
+                  </div>
                 </div>
 
                 <!-- Inline Composer -->
@@ -2077,7 +2215,7 @@ function statusBadgeClass(status: string): string {
                     v-for="(cellLine, sideIdx) in [row.left, row.right]"
                     :key="sideIdx"
                     :data-diff-line-key="cellLine?.key"
-                    class="group flex min-w-0 cursor-pointer items-stretch border-l-2"
+                    class="group flex min-w-0 items-stretch border-l-2"
                     :class="
                       cellLine
                         ? [
@@ -2088,18 +2226,19 @@ function statusBadgeClass(status: string): string {
                                   'border-l-crimson bg-diff-del hover:bg-diff-del-hover': cellLine.type === 'del',
                                   'border-l-transparent hover:bg-diff-hover': cellLine.type === 'context',
                                 },
-                            activeMatchKey === cellLine.key
-                              ? 'ring-1 ring-inset ring-terra bg-terra-soft/30'
-                              : searchMatchSet.has(cellLine.key)
-                                ? 'bg-ochre-soft/20'
-                                : '',
+                            flashLineKey === cellLine.key
+                              ? 'ring-2 ring-inset ring-terra bg-terra-soft/40'
+                              : activeMatchKey === cellLine.key
+                                ? 'ring-1 ring-inset ring-terra bg-terra-soft/30'
+                                : searchMatchSet.has(cellLine.key)
+                                  ? 'bg-ochre-soft/20'
+                                  : '',
                             isHoveredUsageLine(cellLine)
                               ? 'inset-ring-1 inset-ring-plum-border shadow-[inset_0_0_0_9999px_var(--color-plum-soft)]'
                               : '',
                           ]
                         : 'border-l-transparent bg-canvas-subtle/40'
                     "
-                    @mousedown.left="cellLine && startLineDrag(cellLine)"
                     @mouseenter="
                       cellLine &&
                         handleLineMouseEnter(
@@ -2110,16 +2249,20 @@ function statusBadgeClass(status: string): string {
                     "
                   >
                     <template v-if="cellLine">
-                      <span class="w-11 shrink-0 select-none border-r border-border-muted px-2 text-right text-[11px] text-code-gutter-text">
+                      <span
+                        class="w-11 shrink-0 cursor-pointer select-none border-r border-border-muted px-2 text-right text-[11px] text-code-gutter-text"
+                        @mousedown.left="startLineDrag(cellLine)"
+                      >
                         {{ sideIdx === 0 ? (cellLine.oldLineNumber ?? '') : (cellLine.newLineNumber ?? '') }}
                       </span>
                       <span
-                        class="w-5 shrink-0 select-none text-center font-bold"
+                        class="w-5 shrink-0 cursor-pointer select-none text-center font-bold"
                         :class="{
                           'text-pine-text': cellLine.type === 'add',
                           'text-crimson-text': cellLine.type === 'del',
                           'text-code-gutter-text': cellLine.type === 'context',
                         }"
+                        @mousedown.left="startLineDrag(cellLine)"
                       >
                         <span class="group-hover:hidden">
                           {{ cellLine.type === 'add' ? '+' : cellLine.type === 'del' ? '-' : ' ' }}
@@ -2203,7 +2346,7 @@ function statusBadgeClass(status: string): string {
                           draft.startLine && draft.startLine !== draft.line
                             ? `Lines ${draft.startLine}–${draft.line}`
                             : `Line ${draft.line}`
-                        }})
+                        }} · {{ draft.side === 'LEFT' ? 'Base' : 'Head' }})
                       </span>
                       <div class="flex items-center gap-3">
                         <button
@@ -2261,7 +2404,7 @@ function statusBadgeClass(status: string): string {
             <template v-else v-for="(line, lIdx) in seg.lines" :key="line.key">
               <div
                 :data-diff-line-key="line.key"
-                class="group flex cursor-pointer items-stretch border-l-2"
+                class="group flex items-stretch border-l-2"
                 :class="[
                   selectedRange.keys.has(line.key)
                     ? ['border-l-transparent', selectionRowClass(line.key)]
@@ -2281,22 +2424,28 @@ function statusBadgeClass(status: string): string {
                     ? 'inset-ring-1 inset-ring-plum-border shadow-[inset_0_0_0_9999px_var(--color-plum-soft)]'
                     : '',
                 ]"
-                @mousedown.left="startLineDrag(line)"
                 @mouseenter="handleLineMouseEnter(line, seg.lines, lIdx)"
               >
-                <span class="w-12 shrink-0 select-none px-2 text-right text-[11px] text-code-gutter-text">
+                <span
+                  class="w-12 shrink-0 cursor-pointer select-none px-2 text-right text-[11px] text-code-gutter-text"
+                  @mousedown.left="startLineDrag(line)"
+                >
                   {{ line.oldLineNumber ?? '' }}
                 </span>
-                <span class="w-12 shrink-0 select-none border-r border-border-muted px-2 text-right text-[11px] text-code-gutter-text">
+                <span
+                  class="w-12 shrink-0 cursor-pointer select-none border-r border-border-muted px-2 text-right text-[11px] text-code-gutter-text"
+                  @mousedown.left="startLineDrag(line)"
+                >
                   {{ line.newLineNumber ?? '' }}
                 </span>
                 <span
-                  class="w-6 shrink-0 select-none text-center font-bold"
+                  class="w-6 shrink-0 cursor-pointer select-none text-center font-bold"
                   :class="{
                     'text-pine-text': line.type === 'add',
                     'text-crimson-text': line.type === 'del',
                     'text-code-gutter-text': line.type === 'context',
                   }"
+                  @mousedown.left="startLineDrag(line)"
                 >
                   <span class="group-hover:hidden">
                     {{ line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' ' }}

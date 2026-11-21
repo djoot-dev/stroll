@@ -126,6 +126,7 @@ function buildGapSegment(
   endNewLine: number,
   startOldLine: number,
   isDeletedFile: boolean,
+  isAddedFile = false,
 ): DiffGap | null {
   if (endNewLine < startNewLine) return null
   const lines: DiffLine[] = []
@@ -137,7 +138,7 @@ function buildGapSegment(
       key: `gap-${id}-${ln}`,
       type: 'context',
       content: text,
-      oldLineNumber: oldLn,
+      oldLineNumber: isAddedFile ? null : oldLn,
       newLineNumber: isDeletedFile ? null : ln,
       commentLine: isDeletedFile ? oldLn : ln,
       commentSide: isDeletedFile ? 'LEFT' : 'RIGHT',
@@ -218,8 +219,11 @@ export function buildDiffSegments(file: PRFile, options?: BuildDiffOptions): Dif
   if (file.isBinary && !file.patch.trim()) return []
 
   const isDeleted = file.status === 'deleted'
+  const isAdded = file.status === 'added'
   const fullText = isDeleted ? file.baseContent : file.headContent
-  const sourceLines = fullText !== null ? fullText.split('\n') : []
+  const normalizedText =
+    fullText !== null && fullText.endsWith('\n') ? fullText.slice(0, -1) : fullText
+  const sourceLines = normalizedText !== null ? normalizedText.split('\n') : []
   const hunks = parsePatchHunks(file.patch)
 
   // If there's no patch (e.g. newly added large file or full-file view), show headContent
@@ -259,6 +263,7 @@ export function buildDiffSegments(file: PRFile, options?: BuildDiffOptions): Dif
         gapEnd,
         prevOldEnd + 1,
         isDeleted,
+        isAdded,
       )
       if (gap) segments.push(gap)
     }
@@ -290,6 +295,7 @@ export function buildDiffSegments(file: PRFile, options?: BuildDiffOptions): Dif
       sourceLines.length,
       prevOldEnd + 1,
       isDeleted,
+      isAdded,
     )
     if (trailing) segments.push(trailing)
   }

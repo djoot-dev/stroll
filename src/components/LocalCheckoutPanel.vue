@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { AlertTriangle, CheckCircle2, FolderGit2, GitBranch, Loader2, RefreshCw, X } from '@lucide/vue'
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { AlertTriangle, Check, CheckCircle2, Copy, FolderGit2, GitBranch, Loader2, RefreshCw, X } from '@lucide/vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { checkoutKey, localBranchForPR, shortOid, type CheckoutTarget } from '@/services/localCheckout'
 import { useCheckoutStore } from '@/stores/checkout'
 import { useSettingsStore } from '@/stores/settings'
@@ -48,6 +48,20 @@ function runCheckout() {
   void checkout.checkout(props.target)
 }
 
+const copiedBranch = ref(false)
+
+async function copyBranch(branch: string) {
+  try {
+    await navigator.clipboard.writeText(branch)
+    copiedBranch.value = true
+    setTimeout(() => {
+      copiedBranch.value = false
+    }, 1500)
+  } catch {
+    // ignore clipboard errors
+  }
+}
+
 function linkCheckout() {
   settings.openSettings('repositories', { linkRepo: ownerRepo.value })
 }
@@ -81,20 +95,37 @@ onBeforeUnmount(() => window.removeEventListener('focus', onWindowFocus))
       </button>
 
       <template v-else>
-        <span v-if="statusError" class="inline-flex items-center gap-1 text-crimson-text" :title="statusError">
-          <AlertTriangle class="h-3 w-3" />
-          <span>Linked checkout unavailable</span>
+        <span v-if="statusError" class="inline-flex flex-wrap items-center gap-1.5 text-crimson-text">
+          <AlertTriangle class="h-3 w-3 shrink-0" />
+          <span>Linked checkout unavailable: {{ statusError }}</span>
+          <button
+            type="button"
+            class="rounded border border-crimson-border bg-crimson-soft px-1.5 py-0.5 text-[10px] font-medium hover:underline"
+            @click="linkCheckout"
+          >
+            Fix in Settings
+          </button>
         </span>
         <span v-else-if="!state" class="inline-flex items-center gap-1 text-ink-faint">
           <Loader2 class="h-3 w-3 animate-spin" />
           <span>Reading local checkout…</span>
         </span>
-        <span v-else-if="state.kind === 'on-pr'" class="inline-flex items-center gap-1 text-pine-text">
+        <span v-else-if="state.kind === 'on-pr'" class="inline-flex items-center gap-1.5 text-pine-text">
           <CheckCircle2 class="h-3 w-3" />
           <span>
             Checked out locally: <span class="font-mono">{{ state.branch }}</span>
             <span v-if="status?.headOid" class="font-mono text-ink-faint"> @ {{ shortOid(status.headOid) }}</span>
           </span>
+          <button
+            type="button"
+            class="rounded p-0.5 text-pine-text/80 transition-colors hover:bg-pine-soft hover:text-pine-text"
+            title="Copy branch name"
+            aria-label="Copy branch name"
+            @click="copyBranch(state.branch)"
+          >
+            <Check v-if="copiedBranch" class="h-3 w-3" />
+            <Copy v-else class="h-3 w-3" />
+          </button>
         </span>
         <span v-else-if="state.kind === 'on-pr-stale'" class="inline-flex items-center gap-1 text-ochre-text">
           <AlertTriangle class="h-3 w-3" />
@@ -117,7 +148,9 @@ onBeforeUnmount(() => window.removeEventListener('focus', onWindowFocus))
           class="text-ochre-text"
           :title="dirtyFiles.join('\n')"
         >
-          · {{ dirtyFiles.length }} uncommitted change{{ dirtyFiles.length === 1 ? '' : 's' }}
+          · {{ dirtyFiles.length }} uncommitted change{{ dirtyFiles.length === 1 ? '' : 's' }} ({{
+            dirtyFiles.slice(0, 2).join(', ')
+          }}{{ dirtyFiles.length > 2 ? `, +${dirtyFiles.length - 2} more` : '' }} — commit or stash to switch)
         </span>
 
         <button
@@ -132,7 +165,7 @@ onBeforeUnmount(() => window.removeEventListener('focus', onWindowFocus))
           <Loader2 v-if="isBusy" class="h-3 w-3 animate-spin" />
           <GitBranch v-else class="h-3 w-3" />
           <span>{{ isBusy ? 'Checking out…' : actionLabel }}</span>
-          <span v-if="!isBusy && state?.kind !== 'on-pr-stale'" class="font-mono font-normal">{{ localBranch }}</span>
+          <span v-if="!isBusy" class="font-mono font-normal">{{ localBranch }}</span>
         </button>
 
         <button

@@ -24,7 +24,21 @@ const body = ref(props.initialBody ?? '')
 const isEditing = computed(() => props.initialBody !== undefined)
 const verb = computed(() => (isEditing.value ? 'Edit' : 'Add'))
 const previewMode = ref(false)
+const confirmDiscard = ref(false)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
+const hasUnsavedChanges = computed(
+  () => body.value.trim().length > 0 && body.value.trim() !== (props.initialBody ?? '').trim(),
+)
+
+function requestCancel() {
+  if (hasUnsavedChanges.value && !confirmDiscard.value) {
+    confirmDiscard.value = true
+    return
+  }
+  confirmDiscard.value = false
+  emit('cancel')
+}
 
 const originalLines = computed(() =>
   props.originalCode !== undefined ? props.originalCode.split('\n') : undefined,
@@ -54,7 +68,12 @@ function handleSubmit() {
 </script>
 
 <template>
-  <div class="stroll-card my-2 mx-3 rounded-xl border border-terra-border bg-canvas-subtle p-3">
+  <div
+    class="stroll-card my-2 mx-3 rounded-xl border border-terra-border bg-canvas-subtle p-3"
+    @keydown.meta.enter.prevent="handleSubmit"
+    @keydown.ctrl.enter.prevent="handleSubmit"
+    @keydown.esc.stop.prevent="requestCancel"
+  >
     <div class="mb-2 flex items-center justify-between gap-2 text-[11px] text-ink-muted">
       <div class="flex items-center gap-2">
         <span>
@@ -95,12 +114,13 @@ function handleSubmit() {
           </button>
         </div>
       </div>
-      <span class="text-ink-faint">Saved locally until Finish Review</span>
+      <span class="text-ink-faint">{{ isMac ? '⌘↵' : 'Ctrl+↵' }} to save · Pending until Finish Review</span>
     </div>
 
     <div
       v-if="previewMode"
-      class="min-h-[76px] rounded-lg border border-border bg-canvas-inset px-3 py-2 text-xs text-ink-secondary"
+      tabindex="0"
+      class="min-h-[76px] rounded-lg border border-border bg-canvas-inset px-3 py-2 text-xs text-ink-secondary focus:border-terra focus:outline-none"
     >
       <MarkdownContent v-if="body.trim()" :content="body" :original-lines="originalLines" />
       <span v-else class="text-ink-faint">Nothing to preview.</span>
@@ -113,14 +133,12 @@ function handleSubmit() {
       rows="3"
       placeholder="Write a review comment (Markdown & ```suggestion supported)..."
       class="w-full rounded-lg border border-border bg-canvas-inset px-3 py-2 font-sans text-xs text-ink placeholder-ink-faint focus:border-terra focus:outline-none"
-      @keydown.meta.enter.prevent="handleSubmit"
-      @keydown.ctrl.enter.prevent="handleSubmit"
-      @keydown.esc.prevent="emit('cancel')"
+      @input="confirmDiscard = false"
     />
 
-    <div class="mt-2 flex items-center justify-between gap-2">
+    <div class="mt-2 flex flex-wrap items-center justify-between gap-2">
       <button
-        v-if="!props.fileLevel"
+        v-if="!props.fileLevel && props.side !== 'LEFT' && props.originalCode !== undefined"
         type="button"
         class="inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary transition-colors hover:border-pine-border hover:text-pine-text"
         title="Insert a GitHub code suggestion block pre-filled with the selected line(s)"
@@ -131,14 +149,34 @@ function handleSubmit() {
       </button>
       <span v-else />
 
-      <div class="flex items-center gap-2">
+      <div v-if="confirmDiscard" class="flex items-center gap-2 text-xs">
+        <span class="text-ochre-text">Discard unsaved text?</span>
         <button
-          class="rounded-lg border border-border bg-canvas px-3 py-1 text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated"
+          type="button"
+          class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-xs text-ink-secondary hover:bg-canvas-elevated"
+          @click="confirmDiscard = false"
+        >
+          Keep editing
+        </button>
+        <button
+          type="button"
+          class="rounded-lg bg-crimson px-2.5 py-1 text-xs font-semibold text-white hover:opacity-90"
           @click="emit('cancel')"
+        >
+          Discard
+        </button>
+      </div>
+
+      <div v-else class="flex items-center gap-2">
+        <button
+          type="button"
+          class="rounded-lg border border-border bg-canvas px-3 py-1 text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated"
+          @click="requestCancel"
         >
           Cancel
         </button>
         <button
+          type="button"
           class="rounded-lg bg-terra px-3 py-1 text-xs font-semibold text-white transition-colors hover:bg-terra-hover disabled:opacity-40"
           :disabled="!body.trim()"
           @click="handleSubmit"

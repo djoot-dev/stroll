@@ -188,6 +188,19 @@ async function deleteCustomTemplate(id: string) {
   await saveReviewTemplates(next)
 }
 
+const confirmDeleteDraftId = ref<string | null>(null)
+const validationError = ref<string | null>(null)
+
+async function handleDiscardDraftAndClose() {
+  summary.value = ''
+  selectedEvent.value = 'COMMENT'
+  validationError.value = null
+  if (review.prKey) {
+    await saveReviewSummaryDraft(review.prKey, null)
+  }
+  review.showFinishModal = false
+}
+
 async function handleSaveDraftAndClose() {
   if (review.prKey) {
     await saveReviewSummaryDraft(review.prKey, {
@@ -200,6 +213,16 @@ async function handleSaveDraftAndClose() {
 
 async function handleSubmit() {
   if (review.isSubmittingReview) return
+  validationError.value = null
+  if (
+    selectedEvent.value === 'REQUEST_CHANGES' &&
+    !summary.value.trim() &&
+    review.draftComments.length === 0
+  ) {
+    validationError.value =
+      'Requesting changes requires either an overall review summary or at least one inline comment.'
+    return
+  }
   const ok = await review.submitCompleteReview(selectedEvent.value, summary.value)
   if (ok) {
     summary.value = ''
@@ -213,6 +236,7 @@ async function handleSubmit() {
 function handleKeydown(e: KeyboardEvent) {
   if (!review.showFinishModal || !review.pr || settings.isOpen) return
   if (editingDraftId.value) return
+  if (approveCompletenessWarning.value) return
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !e.altKey) {
     e.preventDefault()
     void handleSubmit()
@@ -233,10 +257,15 @@ onBeforeUnmount(() => {
     <div
       v-if="review.showFinishModal && review.pr"
       class="stroll-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
-      @click.self="review.showFinishModal = false"
+      @click.self="!review.isSubmittingReview && (review.showFinishModal = false)"
     >
-      <div class="stroll-elevated w-full max-w-xl rounded-2xl border border-border bg-canvas-subtle">
-        <div class="flex items-center justify-between border-b border-border px-5 py-3.5">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Finish Review"
+        class="stroll-elevated flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-border bg-canvas-subtle"
+      >
+        <div class="flex shrink-0 items-center justify-between border-b border-border px-5 py-3.5">
           <div class="flex items-center gap-2">
             <Send class="h-4 w-4 text-pine" />
             <h2 class="text-sm font-semibold text-ink">
@@ -244,14 +273,16 @@ onBeforeUnmount(() => {
             </h2>
           </div>
           <button
-            class="rounded-lg p-1 text-ink-muted hover:bg-canvas-elevated hover:text-ink"
+            class="rounded-lg p-1 text-ink-muted hover:bg-canvas-elevated hover:text-ink disabled:opacity-40"
+            :disabled="review.isSubmittingReview"
+            aria-label="Close finish review modal"
             @click="review.showFinishModal = false"
           >
             <X class="h-4 w-4" />
           </button>
         </div>
 
-        <div class="space-y-4 p-5">
+        <div class="flex-1 space-y-4 overflow-y-auto p-5">
           <!-- Pending Draft Comments Summary -->
           <div class="space-y-2">
             <div class="flex items-center justify-between text-xs">
@@ -339,11 +370,31 @@ onBeforeUnmount(() => {
                     >
                       <CornerDownRight class="h-3.5 w-3.5" />
                     </button>
+                    <template v-if="confirmDeleteDraftId === draft.id">
+                      <button
+                        type="button"
+                        class="rounded bg-crimson px-1.5 py-0.5 text-[10px] font-semibold text-white hover:opacity-90"
+                        @click="
+                          confirmDeleteDraftId = null;
+                          review.deleteDraftComment(draft.id)
+                        "
+                      >
+                        Delete
+                      </button>
+                      <button
+                        type="button"
+                        class="rounded border border-border bg-canvas px-1.5 py-0.5 text-[10px] text-ink-secondary hover:bg-canvas-elevated"
+                        @click="confirmDeleteDraftId = null"
+                      >
+                        Keep
+                      </button>
+                    </template>
                     <button
+                      v-else
                       class="text-ink-muted hover:text-crimson-text"
                       title="Delete pending comment"
                       aria-label="Delete pending comment"
-                      @click="review.deleteDraftComment(draft.id)"
+                      @click="confirmDeleteDraftId = draft.id"
                     >
                       <Trash2 class="h-3.5 w-3.5" />
                     </button>
@@ -485,10 +536,11 @@ onBeforeUnmount(() => {
           </div>
 
           <div
-            v-if="review.submitError"
+            v-if="validationError || review.submitError"
+            role="alert"
             class="rounded-xl border border-crimson-border bg-crimson-soft px-3 py-2 text-xs text-crimson-text"
           >
-            {{ review.submitError }}
+            {{ validationError ?? review.submitError }}
           </div>
 
           <div
@@ -499,12 +551,23 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="flex items-center justify-between gap-2 border-t border-border px-5 py-3">
+        <div class="flex shrink-0 items-center justify-between gap-2 border-t border-border px-5 py-3">
           <span class="text-[11px] text-ink-faint">Ctrl+↵ / ⌘↵ to submit</span>
           <div class="flex items-center gap-2">
             <button
+              v-if="summary.trim() || selectedEvent !== 'COMMENT'"
               type="button"
-              class="rounded-xl border border-border bg-canvas px-3.5 py-1.5 text-xs text-ink-secondary hover:bg-canvas-elevated"
+              :disabled="review.isSubmittingReview"
+              class="rounded-xl border border-border bg-canvas px-3 py-1.5 text-xs text-ink-muted hover:text-crimson-text disabled:opacity-40"
+              title="Clear summary & verdict and close"
+              @click="handleDiscardDraftAndClose"
+            >
+              Discard
+            </button>
+            <button
+              type="button"
+              :disabled="review.isSubmittingReview"
+              class="rounded-xl border border-border bg-canvas px-3.5 py-1.5 text-xs text-ink-secondary hover:bg-canvas-elevated disabled:opacity-40"
               title="Keep summary & verdict saved for this PR and close"
               @click="handleSaveDraftAndClose"
             >

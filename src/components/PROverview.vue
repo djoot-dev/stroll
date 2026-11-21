@@ -93,6 +93,8 @@ const editingCommentId = ref<string | null>(null)
 const editCommentBody = ref('')
 const isSavingCommentEdit = ref(false)
 const deletingCommentId = ref<string | null>(null)
+const confirmDeleteCommentId = ref<string | null>(null)
+const confirmLifecycleAction = ref<'merge' | 'close' | null>(null)
 const mergeMenuOpen = ref(false)
 const mergeMethod = ref<PRMergeMethod>('SQUASH')
 const isUpdatingLifecycle = ref(false)
@@ -832,70 +834,115 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
 
           <div class="relative flex flex-wrap items-center justify-end gap-1.5 pt-1">
             <template v-if="pr.state === 'OPEN'">
-              <div class="relative inline-flex">
+              <div
+                v-if="confirmLifecycleAction"
+                class="flex flex-wrap items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px]"
+                :class="
+                  confirmLifecycleAction === 'close'
+                    ? 'border-crimson-border bg-crimson-soft text-crimson-text'
+                    : 'border-pine-border bg-pine-soft text-pine-text'
+                "
+              >
+                <span class="font-medium">
+                  {{
+                    confirmLifecycleAction === 'close'
+                      ? 'Close this PR?'
+                      : `Confirm ${mergeMethod.toLowerCase()} merge?`
+                  }}
+                </span>
                 <button
                   type="button"
-                  class="inline-flex items-center gap-1.5 rounded-l-lg border border-pine-border bg-pine-soft px-2.5 py-1 text-[11px] font-semibold text-pine-text transition-colors hover:bg-pine/20 disabled:opacity-40"
-                  :disabled="isUpdatingLifecycle || pr.isDraft || pr.mergeable === 'CONFLICTING'"
-                  :aria-busy="isUpdatingLifecycle"
-                  :title="pr.isDraft ? 'Mark ready for review before merging' : pr.mergeable === 'CONFLICTING' ? 'Resolve merge conflicts before merging' : `Merge using ${mergeMethod}`"
-                  @click="handleMerge(mergeMethod)"
-                >
-                  <Loader2 v-if="isUpdatingLifecycle" class="h-3 w-3 animate-spin" />
-                  <GitMerge v-else class="h-3 w-3" />
-                  <span>{{ mergeMethod === 'SQUASH' ? 'Squash & merge' : mergeMethod === 'REBASE' ? 'Rebase & merge' : 'Merge PR' }}</span>
-                </button>
-                <button
-                  type="button"
-                  class="inline-flex items-center rounded-r-lg border border-l-0 border-pine-border bg-pine-soft px-1.5 py-1 text-pine-text transition-colors hover:bg-pine/20 disabled:opacity-40"
+                  class="rounded px-2 py-0.5 font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                  :class="confirmLifecycleAction === 'close' ? 'bg-crimson' : 'bg-pine'"
                   :disabled="isUpdatingLifecycle"
-                  :aria-busy="isUpdatingLifecycle"
-                  @click="mergeMenuOpen = !mergeMenuOpen"
+                  @click="
+                    const action = confirmLifecycleAction;
+                    confirmLifecycleAction = null;
+                    action === 'close' ? handleToggleClose() : handleMerge(mergeMethod)
+                  "
                 >
-                  <ChevronDown class="h-3 w-3" />
+                  Confirm
                 </button>
-
-                <div
-                  v-if="mergeMenuOpen"
-                  class="animate-pop-in absolute right-0 top-full z-20 mt-1 w-44 rounded-xl border border-border bg-canvas-subtle p-1 shadow-lg"
+                <button
+                  type="button"
+                  class="rounded border border-border bg-canvas px-2 py-0.5 text-ink-secondary hover:bg-canvas-elevated"
+                  @click="confirmLifecycleAction = null"
                 >
-                  <button
-                    v-for="opt in [
-                      { value: 'SQUASH' as PRMergeMethod, label: 'Squash and merge' },
-                      { value: 'MERGE' as PRMergeMethod, label: 'Create a merge commit' },
-                      { value: 'REBASE' as PRMergeMethod, label: 'Rebase and merge' },
-                    ]"
-                    :key="opt.value"
-                    type="button"
-                    class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-[11px] transition-colors hover:bg-canvas-elevated"
-                    :class="mergeMethod === opt.value ? 'font-semibold text-terra-text' : 'text-ink-secondary'"
-                    @click="mergeMethod = opt.value; mergeMenuOpen = false"
-                  >
-                    <span>{{ opt.label }}</span>
-                    <CheckCircle2 v-if="mergeMethod === opt.value" class="h-3 w-3" />
-                  </button>
-                </div>
+                  Cancel
+                </button>
               </div>
 
-              <button
-                type="button"
-                class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary transition-colors hover:bg-canvas-elevated disabled:opacity-40"
-                :disabled="isUpdatingLifecycle"
-                :aria-busy="isUpdatingLifecycle"
-                @click="handleToggleDraft"
-              >
-                {{ pr.isDraft ? 'Ready for review' : 'Convert to draft' }}
-              </button>
+              <template v-else>
+                <div class="relative inline-flex">
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1.5 rounded-l-lg border border-pine-border bg-pine-soft px-2.5 py-1 text-[11px] font-semibold text-pine-text transition-colors hover:bg-pine/20 disabled:opacity-40"
+                    :disabled="isUpdatingLifecycle || pr.isDraft || pr.mergeable === 'CONFLICTING'"
+                    :aria-busy="isUpdatingLifecycle"
+                    :title="pr.isDraft ? 'Mark ready for review before merging' : pr.mergeable === 'CONFLICTING' ? 'Resolve merge conflicts before merging' : `Merge using ${mergeMethod}`"
+                    @click="confirmLifecycleAction = 'merge'; mergeMenuOpen = false"
+                  >
+                    <Loader2 v-if="isUpdatingLifecycle" class="h-3 w-3 animate-spin" />
+                    <GitMerge v-else class="h-3 w-3" />
+                    <span>{{ mergeMethod === 'SQUASH' ? 'Squash & merge' : mergeMethod === 'REBASE' ? 'Rebase & merge' : 'Merge PR' }}</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-haspopup="menu"
+                    :aria-expanded="mergeMenuOpen"
+                    aria-label="Choose merge method"
+                    class="inline-flex items-center rounded-r-lg border border-l-0 border-pine-border bg-pine-soft px-1.5 py-1 text-pine-text transition-colors hover:bg-pine/20 disabled:opacity-40"
+                    :disabled="isUpdatingLifecycle"
+                    :aria-busy="isUpdatingLifecycle"
+                    @click="mergeMenuOpen = !mergeMenuOpen"
+                  >
+                    <ChevronDown class="h-3 w-3" />
+                  </button>
 
-              <button
-                type="button"
-                class="rounded-lg border border-crimson-border/60 bg-canvas px-2.5 py-1 text-[11px] text-crimson-text transition-colors hover:bg-crimson-soft disabled:opacity-40"
-                :disabled="isUpdatingLifecycle"
-                :aria-busy="isUpdatingLifecycle"
-                @click="handleToggleClose"
-              >
-                Close PR
-              </button>
+                  <div
+                    v-if="mergeMenuOpen"
+                    role="menu"
+                    class="animate-pop-in absolute right-0 top-full z-20 mt-1 w-44 rounded-xl border border-border bg-canvas-subtle p-1 shadow-lg"
+                  >
+                    <button
+                      v-for="opt in [
+                        { value: 'SQUASH' as PRMergeMethod, label: 'Squash and merge' },
+                        { value: 'MERGE' as PRMergeMethod, label: 'Create a merge commit' },
+                        { value: 'REBASE' as PRMergeMethod, label: 'Rebase and merge' },
+                      ]"
+                      :key="opt.value"
+                      type="button"
+                      role="menuitem"
+                      class="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-[11px] transition-colors hover:bg-canvas-elevated"
+                      :class="mergeMethod === opt.value ? 'font-semibold text-terra-text' : 'text-ink-secondary'"
+                      @click="mergeMethod = opt.value; mergeMenuOpen = false"
+                    >
+                      <span>{{ opt.label }}</span>
+                      <CheckCircle2 v-if="mergeMethod === opt.value" class="h-3 w-3" />
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary transition-colors hover:bg-canvas-elevated disabled:opacity-40"
+                  :disabled="isUpdatingLifecycle"
+                  :aria-busy="isUpdatingLifecycle"
+                  @click="handleToggleDraft"
+                >
+                  {{ pr.isDraft ? 'Ready for review' : 'Convert to draft' }}
+                </button>
+
+                <button
+                  type="button"
+                  class="rounded-lg border border-crimson-border/60 bg-canvas px-2.5 py-1 text-[11px] text-crimson-text transition-colors hover:bg-crimson-soft disabled:opacity-40"
+                  :disabled="isUpdatingLifecycle"
+                  :aria-busy="isUpdatingLifecycle"
+                  @click="confirmLifecycleAction = 'close'; mergeMenuOpen = false"
+                >
+                  Close PR
+                </button>
+              </template>
             </template>
 
             <button
@@ -1240,9 +1287,13 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
           <li
             v-for="commit in orderedCommits"
             :key="commit.oid"
-            class="flex cursor-pointer items-center justify-between gap-3 px-5 py-2.5 text-xs transition-colors hover:bg-canvas-elevated/40"
-            title="Review changes in this commit"
+            role="button"
+            tabindex="0"
+            class="flex cursor-pointer items-center justify-between gap-3 px-5 py-2.5 text-xs transition-colors hover:bg-canvas-elevated/40 focus:outline-none focus-visible:bg-canvas-elevated/60"
+            title="Filter tour to this commit and open diff"
             @click="review.setCommitFilter(commit.oid).then(() => review.startTour())"
+            @keydown.enter.prevent="review.setCommitFilter(commit.oid).then(() => review.startTour())"
+            @keydown.space.prevent="review.setCommitFilter(commit.oid).then(() => review.startTour())"
           >
             <div class="flex min-w-0 items-center gap-2.5">
               <code class="shrink-0 rounded bg-canvas-elevated px-1.5 py-0.5 font-mono text-[11px] text-terra-text">
@@ -1347,9 +1398,13 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
               <template v-if="item.kind === 'thread' && item.threadPath">
                 <button
                   type="button"
-                  title="Jump to file in tour"
+                  title="Jump to thread in tour"
                   class="inline-flex items-center gap-1 rounded-md border border-border bg-canvas px-1.5 py-0.5 font-mono text-[10.5px] text-ink-secondary transition-colors hover:border-terra-border hover:text-terra-text"
-                  @click="review.goToFile(item.threadPath)"
+                  @click="
+                    item.threadSubjectType !== 'FILE' && item.threadLine
+                      ? review.goToFileLine(item.threadPath, item.threadLine)
+                      : review.goToFile(item.threadPath)
+                  "
                 >
                   <FileCode class="h-3 w-3 text-ink-faint" />
                   <span>
@@ -1403,13 +1458,36 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
                 >
                   <Pencil class="h-3 w-3" />
                 </button>
+                <template v-if="confirmDeleteCommentId === item.rawId">
+                  <span class="text-[10.5px] text-crimson-text">Delete?</span>
+                  <button
+                    type="button"
+                    class="rounded bg-crimson px-1.5 py-0.5 text-[10px] font-semibold text-white hover:opacity-90 disabled:opacity-40"
+                    :disabled="deletingCommentId === item.rawId"
+                    @click="
+                      confirmDeleteCommentId = null;
+                      handleDeleteIssueComment(item.rawId)
+                    "
+                  >
+                    Confirm
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded border border-border bg-canvas px-1.5 py-0.5 text-[10px] text-ink-secondary hover:bg-canvas-elevated"
+                    @click="confirmDeleteCommentId = null"
+                  >
+                    Cancel
+                  </button>
+                </template>
                 <button
+                  v-else
                   type="button"
                   title="Delete comment"
+                  aria-label="Delete comment"
                   class="rounded p-0.5 text-ink-faint transition-colors hover:bg-crimson-soft hover:text-crimson-text disabled:opacity-40"
                   :disabled="deletingCommentId === item.rawId"
                   :aria-busy="deletingCommentId === item.rawId"
-                  @click="handleDeleteIssueComment(item.rawId)"
+                  @click="confirmDeleteCommentId = item.rawId"
                 >
                   <Loader2 v-if="deletingCommentId === item.rawId" class="h-3 w-3 animate-spin" />
                   <Trash2 v-else class="h-3 w-3" />

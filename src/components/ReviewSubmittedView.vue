@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { AlertTriangle, CheckCircle2, MessageSquare } from '@lucide/vue'
+import { AlertTriangle, ArrowLeft, CheckCircle2, ExternalLink, MessageSquare, Pause } from '@lucide/vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { openExternalUrl } from '@/services/native'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 
@@ -8,10 +9,35 @@ const auth = useAuthStore()
 const review = useReviewStore()
 
 const progress = ref(0)
+const isPaused = ref(false)
 let timer: number | null = null
 let rafId: number | null = null
 
 const REDIRECT_MS = 2200
+
+function clearTimers() {
+  if (timer !== null) {
+    window.clearTimeout(timer)
+    timer = null
+  }
+  if (rafId !== null) {
+    window.cancelAnimationFrame(rafId)
+    rafId = null
+  }
+}
+
+function goToInboxNow() {
+  clearTimers()
+  review.backToInbox()
+  if (auth.isAuthenticated) {
+    void auth.refreshRequestedPRs()
+  }
+}
+
+function pauseRedirect() {
+  isPaused.value = true
+  clearTimers()
+}
 
 const verdictLabel = computed(() => {
   switch (review.lastSubmitted?.event) {
@@ -36,16 +62,12 @@ onMounted(() => {
   rafId = window.requestAnimationFrame(tick)
 
   timer = window.setTimeout(() => {
-    review.backToInbox()
-    if (auth.isAuthenticated) {
-      void auth.refreshRequestedPRs()
-    }
+    goToInboxNow()
   }, REDIRECT_MS)
 })
 
 onBeforeUnmount(() => {
-  if (timer !== null) window.clearTimeout(timer)
-  if (rafId !== null) window.cancelAnimationFrame(rafId)
+  clearTimers()
 })
 </script>
 
@@ -92,14 +114,48 @@ onBeforeUnmount(() => {
         included.
       </p>
 
-      <div class="space-y-2 pt-2">
-        <div class="h-1.5 w-full overflow-hidden rounded-full bg-canvas-elevated">
-          <div
-            class="h-full rounded-full bg-pine"
-            :style="{ width: `${progress}%` }"
-          />
+      <div class="space-y-3 pt-2">
+        <div v-if="!isPaused" class="space-y-2">
+          <div class="h-1.5 w-full overflow-hidden rounded-full bg-canvas-elevated">
+            <div
+              class="h-full rounded-full bg-pine"
+              :style="{ width: `${progress}%` }"
+            />
+          </div>
+          <p class="text-[11px] text-ink-faint">Returning to your PR list…</p>
         </div>
-        <p class="text-[11px] text-ink-faint">Returning to your PR list…</p>
+
+        <div class="flex flex-wrap items-center justify-center gap-2">
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-xl bg-terra px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-terra-hover"
+            @click="goToInboxNow"
+          >
+            <ArrowLeft class="h-3.5 w-3.5" />
+            <span>Return to Inbox now</span>
+          </button>
+          <button
+            v-if="!isPaused"
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-xl border border-border bg-canvas px-3 py-1.5 text-xs font-medium text-ink-secondary transition-colors hover:bg-canvas-elevated"
+            @click="pauseRedirect"
+          >
+            <Pause class="h-3.5 w-3.5" />
+            <span>Stay here</span>
+          </button>
+          <button
+            v-if="review.pr?.url"
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-xl border border-border bg-canvas px-3 py-1.5 text-xs font-medium text-ink-secondary transition-colors hover:bg-canvas-elevated"
+            @click="
+              pauseRedirect();
+              openExternalUrl(review.pr!.url)
+            "
+          >
+            <ExternalLink class="h-3.5 w-3.5" />
+            <span>View on GitHub</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>

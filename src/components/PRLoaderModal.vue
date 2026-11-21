@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { FolderGit2, Loader2, RefreshCw, Search, Sparkles, X } from '@lucide/vue'
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { filterAndSortInboxPRs } from '@/services/inbox'
 import { PR_FILTER_OPTIONS, useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
@@ -15,7 +15,20 @@ const activeFilterOption = computed(
 )
 
 const urlInput = ref('')
+const urlInputRef = ref<HTMLInputElement | null>(null)
 const listSearchQuery = ref('')
+
+watch(
+  () => review.showLoaderModal,
+  async (isOpen) => {
+    if (isOpen) {
+      listSearchQuery.value = ''
+      review.prError = null
+      await nextTick()
+      urlInputRef.value?.focus()
+    }
+  },
+)
 
 const filteredRequestedPRs = computed(() =>
   filterAndSortInboxPRs(auth.requestedPRs, {
@@ -47,7 +60,12 @@ function isItemLoading(owner: string, repo: string, number: number): boolean {
       class="stroll-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
       @click.self="!review.isLoadingPR && (review.showLoaderModal = false)"
     >
-      <div class="stroll-elevated relative w-full max-w-xl overflow-hidden rounded-2xl border border-border bg-canvas-subtle">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Load Pull Request"
+        class="stroll-elevated relative w-full max-w-xl overflow-hidden rounded-2xl border border-border bg-canvas-subtle"
+      >
         <div class="flex items-center justify-between border-b border-border px-5 py-3.5">
           <div class="flex items-center gap-2">
             <FolderGit2 class="h-4 w-4 text-terra" />
@@ -70,6 +88,7 @@ function isItemLoading(owner: string, repo: string, number: number): boolean {
             </label>
             <div class="flex gap-2">
               <input
+                ref="urlInputRef"
                 v-model="urlInput"
                 type="text"
                 :disabled="review.isLoadingPR"
@@ -122,11 +141,27 @@ function isItemLoading(owner: string, repo: string, number: number): boolean {
               </span>
               <button
                 v-if="auth.isAuthenticated"
-                class="inline-flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink"
+                type="button"
+                :disabled="auth.isLoading"
+                class="inline-flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink disabled:opacity-50"
                 @click="auth.refreshRequestedPRs()"
               >
-                <RefreshCw class="h-3 w-3" />
+                <RefreshCw class="h-3 w-3" :class="{ 'animate-spin': auth.isLoading }" />
                 <span>Refresh</span>
+              </button>
+            </div>
+
+            <div
+              v-if="auth.error && auth.isAuthenticated"
+              class="flex items-center justify-between gap-2 rounded-xl border border-crimson-border bg-crimson-soft px-3 py-2 text-xs text-crimson-text"
+            >
+              <span class="min-w-0 flex-1 truncate" :title="auth.error">{{ auth.error }}</span>
+              <button
+                type="button"
+                class="shrink-0 font-semibold underline hover:no-underline"
+                @click="auth.refreshRequestedPRs()"
+              >
+                Retry
               </button>
             </div>
 
@@ -146,6 +181,14 @@ function isItemLoading(owner: string, repo: string, number: number): boolean {
                 Connect your GitHub PAT
               </button>
               to list open PRs awaiting your review.
+            </div>
+
+            <div
+              v-else-if="auth.isReloadingList"
+              class="flex items-center justify-center gap-2 rounded-xl border border-border-muted bg-canvas-inset p-4 text-xs text-ink-muted"
+            >
+              <Loader2 class="h-3.5 w-3.5 animate-spin text-terra" />
+              <span>Loading pull requests…</span>
             </div>
 
             <div

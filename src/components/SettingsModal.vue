@@ -287,14 +287,17 @@ const fontSizeOptions = [
 
 const shortcutRows = [
   { keys: ['⌘K', 'Ctrl+K'], description: 'Open command palette (files, symbols, threads)' },
-  { keys: ['O', '0'], description: 'Go to PR overview' },
+  { keys: ['0'], description: 'Open PR overview' },
+  { keys: ['O'], description: 'Toggle between PR overview and current step' },
   { keys: ['L', '→'], description: 'Next tour step' },
   { keys: ['H', '←'], description: 'Previous tour step' },
+  { keys: ['N'], description: 'Jump to next unreviewed step' },
   { keys: ['J', '↓'], description: 'Smooth scroll down' },
   { keys: ['K', '↑'], description: 'Smooth scroll up' },
   { keys: ['M'], description: 'Mark current step reviewed / unreviewed' },
   { keys: ['['], description: 'Toggle tour outline sidebar' },
   { keys: ['R'], description: 'Open Finish & Submit Review modal' },
+  { keys: ['?'], description: 'Show keyboard shortcuts cheatsheet' },
   { keys: ['⌘,', 'Ctrl+,'], description: 'Open or close Settings' },
   { keys: ['Esc'], description: 'Close active modal or popover' },
 ]
@@ -302,6 +305,17 @@ const shortcutRows = [
 const activeSectionTitle = computed(
   () => navItems.find((item) => item.id === settings.activeSection)?.label ?? 'Settings',
 )
+
+const confirmClearCache = ref(false)
+const confirmResetDefaults = ref(false)
+const confirmSignOut = ref(false)
+const confirmUnlinkRepo = ref<string | null>(null)
+
+async function handleSignOut() {
+  confirmSignOut.value = false
+  tokenInput.value = ''
+  await auth.clearPat()
+}
 
 async function handleSavePat() {
   if (!tokenInput.value.trim()) return
@@ -415,6 +429,9 @@ async function handleResetDefaults() {
       @click.self="settings.closeSettings()"
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Settings"
         class="stroll-elevated flex h-[560px] max-h-[86vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-canvas-subtle sm:flex-row"
       >
         <!-- Sidebar Navigation -->
@@ -459,6 +476,12 @@ async function handleResetDefaults() {
           </div>
 
           <nav class="flex gap-1 overflow-x-auto px-2 pb-2 sm:flex-1 sm:flex-col sm:p-2">
+            <p
+              v-if="filteredNavItems.length === 0"
+              class="px-2 py-4 text-center text-[11px] text-ink-faint"
+            >
+              No matching sections
+            </p>
             <button
               v-for="item in filteredNavItems"
               :key="item.id"
@@ -621,10 +644,30 @@ async function handleResetDefaults() {
                         Remove locally cached viewed-file states, pending inline drafts, and saved summary drafts.
                       </p>
                     </div>
+                    <div v-if="confirmClearCache" class="flex shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        class="rounded-xl bg-crimson px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+                        @click="
+                          confirmClearCache = false;
+                          handleClearCache()
+                        "
+                      >
+                        Confirm Clear
+                      </button>
+                      <button
+                        type="button"
+                        class="rounded-xl border border-border bg-canvas-subtle px-2.5 py-1.5 text-xs text-ink-secondary hover:bg-canvas-elevated"
+                        @click="confirmClearCache = false"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                     <button
+                      v-else
                       type="button"
                       class="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-border bg-canvas-subtle px-3 py-1.5 text-xs text-ink-secondary hover:border-crimson-border hover:text-crimson-text"
-                      @click="handleClearCache"
+                      @click="confirmClearCache = true"
                     >
                       <Trash2 class="h-3.5 w-3.5" />
                       <span>{{ clearCacheDone ? 'Cleared!' : 'Clear Cache' }}</span>
@@ -640,9 +683,30 @@ async function handleResetDefaults() {
                         Restore all tour, diff, and general settings to defaults. Your GitHub PAT is kept.
                       </p>
                     </div>
+                    <div v-if="confirmResetDefaults" class="flex shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        class="rounded-xl bg-terra px-3 py-1.5 text-xs font-semibold text-white hover:bg-terra-hover"
+                        @click="
+                          confirmResetDefaults = false;
+                          handleResetDefaults()
+                        "
+                      >
+                        Confirm Reset
+                      </button>
+                      <button
+                        type="button"
+                        class="rounded-xl border border-border bg-canvas-subtle px-2.5 py-1.5 text-xs text-ink-secondary hover:bg-canvas-elevated"
+                        @click="confirmResetDefaults = false"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                     <button
+                      v-else
+                      type="button"
                       class="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-border bg-canvas-subtle px-3 py-1.5 text-xs text-ink-secondary hover:bg-canvas-elevated"
-                      @click="handleResetDefaults"
+                      @click="confirmResetDefaults = true"
                     >
                       <RotateCcw class="h-3.5 w-3.5" />
                       <span>{{ resetDone ? 'Reset!' : 'Reset' }}</span>
@@ -1090,9 +1154,27 @@ async function handleResetDefaults() {
                     <CheckCircle2 class="h-4 w-4" />
                     Signed in as <strong class="font-mono">@{{ auth.viewer.login }}</strong>
                   </span>
+                  <div v-if="confirmSignOut" class="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      class="rounded-lg bg-crimson px-2 py-0.5 text-[11px] font-semibold text-white hover:opacity-90"
+                      @click="handleSignOut"
+                    >
+                      Sign out
+                    </button>
+                    <button
+                      type="button"
+                      class="rounded-lg border border-border bg-canvas px-2 py-0.5 text-[11px] text-ink-secondary hover:bg-canvas-elevated"
+                      @click="confirmSignOut = false"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                   <button
+                    v-else
+                    type="button"
                     class="inline-flex items-center gap-1 text-ink-muted hover:text-crimson-text"
-                    @click="auth.clearPat()"
+                    @click="confirmSignOut = true"
                   >
                     <LogOut class="h-3.5 w-3.5" />
                     <span>Sign out</span>
@@ -1143,10 +1225,32 @@ async function handleResetDefaults() {
                       <div class="font-mono font-semibold text-ink">{{ ownerRepo }}</div>
                       <div class="truncate font-mono text-[10px] text-ink-muted">{{ localPath }}</div>
                     </div>
+                    <div v-if="confirmUnlinkRepo === ownerRepo" class="flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        class="rounded bg-crimson px-1.5 py-0.5 text-[10px] font-semibold text-white hover:opacity-90"
+                        @click="
+                          confirmUnlinkRepo = null;
+                          review.unlinkRepoPath(ownerRepo)
+                        "
+                      >
+                        Unlink
+                      </button>
+                      <button
+                        type="button"
+                        class="rounded border border-border bg-canvas-subtle px-1.5 py-0.5 text-[10px] text-ink-secondary hover:bg-canvas-elevated"
+                        @click="confirmUnlinkRepo = null"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                     <button
+                      v-else
+                      type="button"
                       class="shrink-0 rounded-lg p-1 text-ink-faint hover:bg-canvas-elevated hover:text-crimson-text"
                       title="Unlink repository"
-                      @click="review.unlinkRepoPath(ownerRepo)"
+                      aria-label="Unlink repository"
+                      @click="confirmUnlinkRepo = ownerRepo"
                     >
                       <Trash2 class="h-3.5 w-3.5" />
                     </button>
@@ -1232,33 +1336,6 @@ async function handleResetDefaults() {
                   </div>
                 </div>
 
-                <!-- Preferred Local Editor -->
-                <div class="rounded-xl border border-border bg-canvas/60 p-4">
-                  <p class="text-xs font-medium text-ink">Preferred Local Editor</p>
-                  <p class="mt-0.5 text-[11px] text-ink-muted">
-                    Used by "Open in editor" when a local repository is linked.
-                  </p>
-                  <div class="mt-3 grid grid-cols-3 gap-2">
-                    <button
-                      v-for="ed in [
-                        { id: 'vscode', label: 'VS Code' },
-                        { id: 'cursor', label: 'Cursor' },
-                        { id: 'zed', label: 'Zed' },
-                      ] as const"
-                      :key="ed.id"
-                      class="rounded-xl border px-3 py-2 text-center text-xs font-semibold transition-colors"
-                      :class="
-                        settings.localEditor === ed.id
-                          ? 'border-terra-border bg-terra-soft text-terra-text'
-                          : 'border-border bg-canvas-subtle text-ink hover:bg-canvas-elevated/60'
-                      "
-                      @click="settings.setLocalEditor(ed.id)"
-                    >
-                      {{ ed.label }}
-                    </button>
-                  </div>
-                </div>
-
                 <!-- External Editor -->
                 <div class="space-y-3 rounded-xl border border-border bg-canvas/60 p-4">
                   <div>
@@ -1279,7 +1356,10 @@ async function handleResetDefaults() {
                           ? 'border-terra-border bg-terra-soft'
                           : 'border-border bg-canvas-subtle hover:bg-canvas-elevated/60'
                       "
-                      @click="settings.setExternalEditor(ed.value)"
+                      @click="
+                        settings.setExternalEditor(ed.value);
+                        if (ed.value !== 'custom') settings.setLocalEditor(ed.value)
+                      "
                     >
                       <p class="text-xs font-semibold text-ink">{{ ed.label }}</p>
                       <p class="mt-1.5">

@@ -163,6 +163,7 @@ const items = computed<PaletteItem[]>(() => {
       })
     }
     for (const step of review.tourSteps) {
+      if (!lineJump.fileQuery && review.currentStep?.file.path === step.file.path) continue
       if (!lineJump.fileQuery || step.file.path.toLowerCase().includes(lineJump.fileQuery)) {
         results.push({
           id: `line:${step.file.path}:${lineJump.line}`,
@@ -204,6 +205,8 @@ const items = computed<PaletteItem[]>(() => {
       })
     }
 
+    const fileLimit = q ? 15 : 8
+    let fileCount = 0
     for (const step of review.tourSteps) {
       if (!q || step.file.path.toLowerCase().includes(q)) {
         results.push({
@@ -213,10 +216,13 @@ const items = computed<PaletteItem[]>(() => {
           subtitle: `Step ${step.stepIndex + 1} · ${step.file.path}`,
           path: step.file.path,
         })
+        fileCount += 1
+        if (fileCount >= fileLimit) break
       }
     }
 
     if (q.length >= 2) {
+      let symCount = 0
       for (const [name, decls] of symbolIndex.value.entries()) {
         if (!name.toLowerCase().includes(q)) continue
         for (const decl of decls.slice(0, 3)) {
@@ -228,18 +234,21 @@ const items = computed<PaletteItem[]>(() => {
             path: decl.path,
             line: decl.line,
           })
+          symCount += 1
+          if (symCount >= 8) break
         }
+        if (symCount >= 8) break
       }
 
       for (const thread of review.pr.threads) {
-        if (thread.isResolved) continue
         const body = thread.comments[0]?.body ?? ''
         if (thread.path.toLowerCase().includes(q) || body.toLowerCase().includes(q)) {
+          const statusPrefix = thread.isResolved ? '[Resolved] ' : ''
           results.push({
             id: `thread:${thread.id}`,
             kind: 'thread',
             title: thread.subjectType === 'FILE' ? `${thread.path} (file)` : `${thread.path}:${thread.line}`,
-            subtitle: body.slice(0, 90),
+            subtitle: `${statusPrefix}${body.slice(0, 90)}`,
             path: thread.path,
             line: thread.subjectType === 'FILE' ? undefined : thread.line,
           })
@@ -258,7 +267,7 @@ const items = computed<PaletteItem[]>(() => {
     }
   }
 
-  return results.slice(0, 20)
+  return results.slice(0, 30)
 })
 
 watch(
@@ -305,16 +314,26 @@ function selectItem(item: PaletteItem) {
   emit('close')
 }
 
+function scrollSelectedIntoView() {
+  void nextTick(() => {
+    document
+      .querySelector('[data-palette-selected="true"]')
+      ?.scrollIntoView({ block: 'nearest' })
+  })
+}
+
 function handleKeydown(e: KeyboardEvent) {
   if (e.key === 'ArrowDown') {
     e.preventDefault()
     if (items.value.length > 0) {
       selectedIdx.value = (selectedIdx.value + 1) % items.value.length
+      scrollSelectedIntoView()
     }
   } else if (e.key === 'ArrowUp') {
     e.preventDefault()
     if (items.value.length > 0) {
       selectedIdx.value = (selectedIdx.value - 1 + items.value.length) % items.value.length
+      scrollSelectedIntoView()
     }
   } else if (e.key === 'Enter') {
     e.preventDefault()
@@ -335,6 +354,9 @@ function handleKeydown(e: KeyboardEvent) {
       @click.self="emit('close')"
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
         class="animate-pop-in w-full max-w-xl overflow-hidden rounded-2xl border border-border bg-canvas-subtle shadow-2xl"
         @keydown="handleKeydown"
       >
@@ -361,6 +383,7 @@ function handleKeydown(e: KeyboardEvent) {
             v-for="(item, idx) in items"
             :key="item.id"
             type="button"
+            :data-palette-selected="idx === selectedIdx ? 'true' : undefined"
             class="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors"
             :class="idx === selectedIdx ? 'bg-terra-soft text-ink' : 'hover:bg-canvas-elevated/60'"
             @mouseenter="selectedIdx = idx"
@@ -388,6 +411,15 @@ function handleKeydown(e: KeyboardEvent) {
               <div class="truncate text-[11px] text-ink-muted">{{ item.subtitle }}</div>
             </div>
           </button>
+        </div>
+
+        <div class="flex items-center justify-between border-t border-border-muted bg-canvas px-4 py-1.5 text-[10.5px] text-ink-faint">
+          <span>Tip: type <code class="font-mono text-ink-muted">:42</code> or <code class="font-mono text-ink-muted">file:42</code> to jump to a line</span>
+          <div class="flex items-center gap-3">
+            <span><kbd class="font-mono text-ink-muted">↑↓</kbd> Navigate</span>
+            <span><kbd class="font-mono text-ink-muted">↵</kbd> Open</span>
+            <span><kbd class="font-mono text-ink-muted">Esc</kbd> Close</span>
+          </div>
         </div>
       </div>
     </div>
