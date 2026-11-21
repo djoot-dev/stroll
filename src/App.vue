@@ -10,6 +10,7 @@ import PRLoaderModal from '@/components/PRLoaderModal.vue'
 import PROverview from '@/components/PROverview.vue'
 import ReviewSubmittedView from '@/components/ReviewSubmittedView.vue'
 import SettingsModal from '@/components/SettingsModal.vue'
+import ShortcutsCheatsheetModal from '@/components/ShortcutsCheatsheetModal.vue'
 import SplashScreen from '@/components/SplashScreen.vue'
 import TopBar from '@/components/TopBar.vue'
 import TourSidebar from '@/components/TourSidebar.vue'
@@ -32,6 +33,7 @@ const SCROLL_SMOOTHING = 10
 const stepTransitionName = ref<'step-next' | 'step-prev'>('step-next')
 const previewScrollRef = ref<HTMLElement | null>(null)
 const showCommandPalette = ref(false)
+const showShortcutsModal = ref(false)
 
 let currentScrollTop: number | null = null
 let targetScrollTop: number | null = null
@@ -155,6 +157,11 @@ function handleKeydown(e: KeyboardEvent) {
   }
 
   if (e.key === 'Escape') {
+    if (showShortcutsModal.value) {
+      e.preventDefault()
+      showShortcutsModal.value = false
+      return
+    }
     if (showCommandPalette.value) {
       e.preventDefault()
       showCommandPalette.value = false
@@ -182,6 +189,14 @@ function handleKeydown(e: KeyboardEvent) {
   if (isEditableElement(e.target)) return
   if (e.metaKey || e.ctrlKey || e.altKey) return
 
+  if (e.key === '?') {
+    e.preventDefault()
+    showShortcutsModal.value = !showShortcutsModal.value
+    return
+  }
+
+  if (showShortcutsModal.value) return
+
   const scrollDir = getScrollDirection(e.key)
   if (scrollDir !== 0) {
     e.preventDefault()
@@ -205,6 +220,9 @@ function handleKeydown(e: KeyboardEvent) {
   } else if (e.key === 'h' || e.key === 'H' || e.key === 'ArrowLeft') {
     e.preventDefault()
     review.prevStep()
+  } else if (e.key === 'n' || e.key === 'N') {
+    e.preventDefault()
+    review.nextUnreviewedStep()
   } else if (e.key === 'm' || e.key === 'M') {
     if (review.activeView === 'step') {
       e.preventDefault()
@@ -335,7 +353,7 @@ onBeforeUnmount(() => {
 
     <!-- 3. Guided PR Review Screen -->
     <div v-else key="review" class="flex h-screen flex-col overflow-hidden bg-canvas text-ink">
-      <TopBar />
+      <TopBar @open-command-palette="showCommandPalette = true" />
 
       <!-- Live PR Update Banner -->
       <div
@@ -432,7 +450,10 @@ onBeforeUnmount(() => {
         </main>
       </div>
 
-      <KeyboardShortcutsBar v-if="settings.showShortcutsBar" />
+      <KeyboardShortcutsBar
+        v-if="settings.showShortcutsBar"
+        @open-cheatsheet="showShortcutsModal = true"
+      />
     </div>
   </Transition>
 
@@ -444,6 +465,7 @@ onBeforeUnmount(() => {
 
   <!-- Global Modals -->
   <CommandPaletteModal :open="showCommandPalette" @close="showCommandPalette = false" />
+  <ShortcutsCheatsheetModal :open="showShortcutsModal" @close="showShortcutsModal = false" />
   <SettingsModal />
   <PRLoaderModal />
   <FinishReviewModal />
