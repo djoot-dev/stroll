@@ -6,6 +6,7 @@ import type { PRHeadPulse } from '@/services/github'
 import type { PullRequestData } from '@/types/pr'
 import { useAuthStore } from '../auth'
 import { useReviewStore } from '../review'
+import { useSettingsStore } from '../settings'
 
 const fetchPullRequestMock = vi.fn<
   (
@@ -815,5 +816,36 @@ describe('useReviewStore tour start state', () => {
     store.backToInbox()
     await store.loadMockPR()
     expect(store.tourStarted).toBe(false)
+  })
+
+  it('sets focusedLine and switches to the target step via goToFileLine', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+    const targetPath = store.tourSteps[2].file.path
+
+    store.goToFileLine(targetPath, 42)
+    expect(store.activeView).toBe('step')
+    expect(store.currentStepIndex).toBe(2)
+    expect(store.focusedLine).toEqual({ path: targetPath, line: 42 })
+  })
+
+  it('initializes ignoreWhitespace from settings.ignoreWhitespaceDefault and clears cache', async () => {
+    const settings = useSettingsStore()
+    await settings.init()
+    await settings.setIgnoreWhitespaceDefault(true)
+
+    const store = useReviewStore()
+    await store.loadMockPR()
+    expect(store.ignoreWhitespace).toBe(true)
+
+    const path = store.tourSteps[0].file.path
+    await store.toggleReviewed(path)
+    await store.addDraftComment(path, 3, 'RIGHT', 'test draft')
+    expect(store.reviewedCount).toBe(1)
+    expect(store.draftComments.length).toBe(1)
+
+    await store.clearAllCachedReviewData()
+    expect(store.reviewedCount).toBe(0)
+    expect(store.draftComments).toEqual([])
   })
 })

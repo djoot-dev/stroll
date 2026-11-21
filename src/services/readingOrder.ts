@@ -76,6 +76,55 @@ export function isLockfile(path: string): boolean {
 }
 
 /**
+ * Converts a simple glob pattern (supporting `**`, `*`, `?`) into a RegExp.
+ * Patterns without a `/` match against the file's basename as well as full path.
+ */
+function compileGlobRegex(rawPattern: string): RegExp | null {
+  const pattern = rawPattern.trim().replace(/^\/+/, '').replace(/\/+$/, '')
+  if (!pattern) return null
+
+  const hasSlash = pattern.includes('/')
+  let regex = ''
+  for (let i = 0; i < pattern.length; i += 1) {
+    const ch = pattern[i]
+    if (ch === '*') {
+      if (pattern[i + 1] === '*') {
+        if (pattern[i + 2] === '/') {
+          regex += '(?:.*/)?'
+          i += 2
+        } else {
+          regex += '.*'
+          i += 1
+        }
+      } else {
+        regex += '[^/]*'
+      }
+    } else if (ch === '?') {
+      regex += '[^/]'
+    } else if (/[.+^${}()|[\]\\]/.test(ch)) {
+      regex += `\\${ch}`
+    } else {
+      regex += ch
+    }
+  }
+
+  return new RegExp(hasSlash ? `^${regex}$` : `(?:^|/)${regex}$`, 'i')
+}
+
+export function matchesIgnorePatterns(
+  filePath: string,
+  patterns?: readonly string[],
+): boolean {
+  if (!patterns || patterns.length === 0) return false
+  const normalized = filePath.replace(/^\/+/, '')
+  for (const raw of patterns) {
+    const re = compileGlobRegex(raw)
+    if (re && re.test(normalized)) return true
+  }
+  return false
+}
+
+/**
  * Returns true if the file path is a lockfile or auto-generated/bundled asset
  * that should be deprioritized and collapsed by default during PR review.
  */
@@ -420,11 +469,18 @@ function findPairedImplFile(
 /**
  * Produces a guided, dependency-aware `TourStep[]` ordering for a PR's changed files.
  */
+export interface BuildReadingOrderOptions {
+  ignorePatterns?: readonly string[]
+}
+
 export function buildReadingOrder(
   files: PRFile[],
   direction: TourDirection = 'bottom-up',
+  options?: BuildReadingOrderOptions,
 ): TourStep[] {
   if (files.length === 0) return []
+  const isDeprioritized = (f: PRFile): boolean =>
+    Boolean(f.isGenerated || isGeneratedOrLockfile(f.path) || matchesIgnorePatterns(f.path, options?.ignorePatterns))
 
   const fileMap = new Map<string, PRFile>()
   const allPaths = new Set<string>()
@@ -441,7 +497,7 @@ export function buildReadingOrder(
   const csharpFileTypes = new Map<string, string[]>()
   for (const f of files) {
     if (!f.path.toLowerCase().endsWith('.cs')) continue
-    if (f.isGenerated || isGeneratedOrLockfile(f.path)) continue
+    if (isDeprioritized(f)) continue
     const content = f.headContent ?? f.baseContent ?? ''
     if (!content) continue
     for (const ns of extractCSharpNamespaces(content)) {
@@ -463,7 +519,7 @@ export function buildReadingOrder(
   }
 
   for (const f of files) {
-    if (f.isGenerated || isGeneratedOrLockfile(f.path)) continue
+    if (isDeprioritized(f)) continue
     const content = f.headContent ?? f.baseContent ?? ''
     if (!content) continue
 
@@ -530,7 +586,7 @@ export function buildReadingOrder(
   const generatedFiles: PRFile[] = []
 
   for (const f of files) {
-    if (f.isGenerated || isGeneratedOrLockfile(f.path)) {
+    if (isDeprioritized(f)) {
       generatedFiles.push(f)
     } else if (classifyLayer(f.path) === 'tests') {
       testFiles.push(f)
@@ -644,7 +700,7 @@ export function buildReadingOrder(
 
   // Construct TourStep[] with explanations & referenced context cards
   return finalOrder.map((file, idx) => {
-    const generated = Boolean(file.isGenerated || isGeneratedOrLockfile(file.path))
+    const generated = isDeprioritized(file)
     const layer = classifyLayer(file.path)
     const deps = Array.from(dependencies.get(file.path) ?? [])
     const revs = Array.from(dependents.get(file.path) ?? [])

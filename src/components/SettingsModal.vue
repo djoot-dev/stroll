@@ -20,6 +20,7 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  Search,
   Settings,
   SlidersHorizontal,
   Sun,
@@ -40,7 +41,13 @@ import { RELEASES_PAGE_URL } from '@/services/releaseNotes'
 import { useAuthStore } from '@/stores/auth'
 import MarkdownContent from './MarkdownContent.vue'
 import { useReviewStore } from '@/stores/review'
-import { useSettingsStore, type SettingsSection, type ThemeMode } from '@/stores/settings'
+import {
+  useSettingsStore,
+  type ExternalEditorPreset,
+  type SettingsSection,
+  type TabSizeOption,
+  type ThemeMode,
+} from '@/stores/settings'
 import { useUpdatesStore } from '@/stores/updates'
 import type { TourDirection } from '@/types/pr'
 
@@ -52,6 +59,10 @@ const tokenInput = ref(auth.pat)
 const githubHostInput = ref(settings.githubHost)
 const showToken = ref(false)
 const resetDone = ref(false)
+const clearCacheDone = ref(false)
+const settingsSearchQuery = ref('')
+const ignorePatternInput = ref('')
+const customEditorInput = ref(settings.externalEditorCustomCommand)
 const notificationPermissionError = ref<string | null>(null)
 const repoInput = ref('')
 const pathInput = ref('')
@@ -99,8 +110,11 @@ watch(
     if (open) {
       tokenInput.value = auth.pat
       githubHostInput.value = settings.githubHost
+      customEditorInput.value = settings.externalEditorCustomCommand
       showToken.value = false
       resetDone.value = false
+      clearCacheDone.value = false
+      settingsSearchQuery.value = ''
       notificationPermissionError.value = null
       pathValidationError.value = null
       detectedOwnerRepo.value = null
@@ -121,31 +135,111 @@ const navItems: Array<{
   id: SettingsSection
   label: string
   icon: typeof Settings
+  keywords: string
   badge?: () => string | null
 }> = [
-  { id: 'general', label: 'General', icon: SlidersHorizontal },
-  { id: 'tour', label: 'Tour & Order', icon: ListOrdered },
-  { id: 'diff', label: 'Diff & Code', icon: Code2 },
+  {
+    id: 'general',
+    label: 'General',
+    icon: SlidersHorizontal,
+    keywords: 'theme appearance dark light system shortcuts bar inbox refresh notifications cache clear storage reset',
+  },
+  {
+    id: 'tour',
+    label: 'Tour & Order',
+    icon: ListOrdered,
+    keywords: 'reading order bottom-up top-down auto-advance sidebar ignore patterns glob snap generated dist',
+  },
+  {
+    id: 'diff',
+    label: 'Diff & Code',
+    icon: Code2,
+    keywords: 'font size hover popover wrap lines unified split diff view mode tab size spaces ignore whitespace',
+  },
   {
     id: 'github',
     label: 'GitHub',
     icon: KeyRound,
+    keywords: 'pat token cli host enterprise github',
     badge: () => (auth.isAuthenticated ? 'Connected' : null),
   },
   {
     id: 'repositories',
     label: 'Local & Git',
     icon: FolderGit2,
+    keywords: 'local git checkout repository path editor vscode cursor zed custom uri',
     badge: () => (linkedRepos.value.length > 0 ? `${linkedRepos.value.length}` : null),
   },
   {
     id: 'updates',
     label: 'Updates',
     icon: RefreshCw,
+    keywords: 'version release notes check update',
     badge: () => (updateState.value === 'available' ? 'Update available' : null),
   },
-  { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
+  {
+    id: 'shortcuts',
+    label: 'Shortcuts',
+    icon: Keyboard,
+    keywords: 'keyboard bindings hotkeys',
+  },
 ]
+
+const filteredNavItems = computed(() => {
+  const q = settingsSearchQuery.value.trim().toLowerCase()
+  if (!q) return navItems
+  return navItems.filter(
+    (item) => item.label.toLowerCase().includes(q) || item.keywords.includes(q),
+  )
+})
+
+watch(filteredNavItems, (items) => {
+  if (items.length > 0 && !items.some((i) => i.id === settings.activeSection)) {
+    settings.activeSection = items[0].id
+  }
+})
+
+const tabSizeOptions: Array<{ value: TabSizeOption; label: string }> = [
+  { value: 2, label: '2 spaces' },
+  { value: 4, label: '4 spaces' },
+  { value: 8, label: '8 spaces' },
+]
+
+const editorOptions: Array<{ value: ExternalEditorPreset; label: string; hint: string }> = [
+  { value: 'vscode', label: 'VS Code', hint: 'vscode://file/…' },
+  { value: 'cursor', label: 'Cursor', hint: 'cursor://file/…' },
+  { value: 'zed', label: 'Zed', hint: 'zed://file/…' },
+  { value: 'custom', label: 'Custom URI', hint: '{file} and {line}' },
+]
+
+const IGNORE_PATTERN_SUGGESTIONS = ['*.snap', '*.generated.ts', 'dist/**']
+
+async function handleClearCache() {
+  await review.clearAllCachedReviewData()
+  clearCacheDone.value = true
+  setTimeout(() => {
+    clearCacheDone.value = false
+  }, 2500)
+}
+
+async function addIgnorePattern(raw?: string) {
+  const value = (raw ?? ignorePatternInput.value).trim()
+  if (!value) return
+  if (!settings.tourIgnorePatterns.includes(value)) {
+    await settings.setTourIgnorePatterns([...settings.tourIgnorePatterns, value])
+  }
+  if (!raw) ignorePatternInput.value = ''
+}
+
+async function removeIgnorePattern(pattern: string) {
+  await settings.setTourIgnorePatterns(
+    settings.tourIgnorePatterns.filter((p) => p !== pattern),
+  )
+}
+
+async function saveCustomEditorCommand() {
+  await settings.setExternalEditorCustomCommand(customEditorInput.value)
+}
 
 const themeOptions: Array<{
   value: ThemeMode
@@ -340,9 +434,33 @@ async function handleResetDefaults() {
             </button>
           </div>
 
+          <div class="px-2 pt-2 pb-1">
+            <div class="relative">
+              <Search
+                class="pointer-events-none absolute top-1/2 left-2.5 h-3 w-3 -translate-y-1/2 text-ink-faint"
+              />
+              <input
+                v-model="settingsSearchQuery"
+                type="text"
+                placeholder="Filter settings…"
+                aria-label="Filter settings"
+                class="w-full rounded-lg border border-border bg-canvas-inset py-1 pr-6 pl-7 text-[11px] text-ink placeholder-ink-faint focus:border-terra focus:outline-none"
+              />
+              <button
+                v-if="settingsSearchQuery"
+                type="button"
+                aria-label="Clear settings filter"
+                class="absolute top-1/2 right-1.5 -translate-y-1/2 rounded p-0.5 text-ink-faint hover:text-ink"
+                @click="settingsSearchQuery = ''"
+              >
+                <X class="h-3 w-3" />
+              </button>
+            </div>
+          </div>
+
           <nav class="flex gap-1 overflow-x-auto px-2 pb-2 sm:flex-1 sm:flex-col sm:p-2">
             <button
-              v-for="item in navItems"
+              v-for="item in filteredNavItems"
               :key="item.id"
               class="flex shrink-0 items-center justify-between gap-2 rounded-xl px-3 py-2 text-left text-xs font-medium transition-colors"
               :class="
@@ -498,6 +616,25 @@ async function handleResetDefaults() {
                 <div class="rounded-xl border border-border-muted bg-canvas-inset/60 p-4">
                   <div class="flex items-center justify-between gap-3">
                     <div>
+                      <p class="text-xs font-medium text-ink-secondary">Clear Cached Review Progress &amp; Drafts</p>
+                      <p class="mt-0.5 text-[11px] text-ink-faint">
+                        Remove locally cached viewed-file states, pending inline drafts, and saved summary drafts.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      class="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-border bg-canvas-subtle px-3 py-1.5 text-xs text-ink-secondary hover:border-crimson-border hover:text-crimson-text"
+                      @click="handleClearCache"
+                    >
+                      <Trash2 class="h-3.5 w-3.5" />
+                      <span>{{ clearCacheDone ? 'Cleared!' : 'Clear Cache' }}</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="rounded-xl border border-border-muted bg-canvas-inset/60 p-4">
+                  <div class="flex items-center justify-between gap-3">
+                    <div>
                       <p class="text-xs font-medium text-ink-secondary">Reset Preferences</p>
                       <p class="mt-0.5 text-[11px] text-ink-faint">
                         Restore all tour, diff, and general settings to defaults. Your GitHub PAT is kept.
@@ -595,6 +732,66 @@ async function handleResetDefaults() {
                     "
                   />
                 </label>
+
+                <div class="rounded-xl border border-border bg-canvas/60 p-4 space-y-3">
+                  <div>
+                    <p class="text-xs font-medium text-ink">Ignore Patterns for Tour</p>
+                    <p class="mt-0.5 text-[11px] text-ink-muted">
+                      Files matching these glob patterns are pushed to the end of the tour and auto-collapsed.
+                    </p>
+                  </div>
+
+                  <div class="flex gap-2">
+                    <input
+                      v-model="ignorePatternInput"
+                      type="text"
+                      placeholder="e.g. *.snap, *.generated.ts, dist/**"
+                      class="flex-1 rounded-xl border border-border bg-canvas-inset px-3 py-1.5 font-mono text-xs text-ink placeholder-ink-faint focus:border-terra focus:outline-none"
+                      @keydown.enter.prevent="addIgnorePattern()"
+                    />
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-1 rounded-xl border border-border bg-canvas-subtle px-3 py-1.5 text-xs font-medium text-ink-secondary hover:bg-canvas-elevated disabled:opacity-40"
+                      :disabled="!ignorePatternInput.trim()"
+                      @click="addIgnorePattern()"
+                    >
+                      <Plus class="h-3.5 w-3.5" />
+                      <span>Add</span>
+                    </button>
+                  </div>
+
+                  <div v-if="settings.tourIgnorePatterns.length > 0" class="flex flex-wrap gap-1.5">
+                    <span
+                      v-for="pattern in settings.tourIgnorePatterns"
+                      :key="pattern"
+                      class="inline-flex items-center gap-1 rounded-full border border-border-muted bg-canvas-subtle px-2.5 py-0.5 font-mono text-[11px] text-ink"
+                    >
+                      <span>{{ pattern }}</span>
+                      <button
+                        type="button"
+                        class="text-ink-faint hover:text-crimson-text"
+                        aria-label="Remove ignore pattern"
+                        @click="removeIgnorePattern(pattern)"
+                      >
+                        <X class="h-3 w-3" />
+                      </button>
+                    </span>
+                  </div>
+
+                  <div class="flex flex-wrap items-center gap-1.5 text-[10.5px] text-ink-faint">
+                    <span>Quick add:</span>
+                    <button
+                      v-for="preset in IGNORE_PATTERN_SUGGESTIONS"
+                      :key="preset"
+                      type="button"
+                      class="rounded-md border border-border-muted bg-canvas px-1.5 py-0.5 font-mono text-ink-muted hover:border-terra-border hover:text-ink disabled:opacity-40"
+                      :disabled="settings.tourIgnorePatterns.includes(preset)"
+                      @click="addIgnorePattern(preset)"
+                    >
+                      + {{ preset }}
+                    </button>
+                  </div>
+                </div>
               </div>
             </template>
 
@@ -710,6 +907,95 @@ async function handleResetDefaults() {
                     </button>
                   </div>
                 </div>
+
+                <!-- Default Diff View Mode -->
+                <div class="rounded-xl border border-border bg-canvas/60 p-4">
+                  <p class="text-xs font-medium text-ink">Default Diff View Mode</p>
+                  <p class="mt-0.5 text-[11px] text-ink-muted">
+                    Choose whether diffs open in unified or side-by-side split layout.
+                  </p>
+                  <div class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      class="rounded-xl border p-3 text-left transition-colors"
+                      :class="
+                        settings.diffViewMode === 'unified'
+                          ? 'border-terra-border bg-terra-soft'
+                          : 'border-border bg-canvas-subtle hover:bg-canvas-elevated/60'
+                      "
+                      @click="settings.setDiffViewMode('unified')"
+                    >
+                      <p class="text-xs font-semibold text-ink">Unified</p>
+                      <p class="mt-1 text-[11px] text-ink-muted">
+                        Interleaved additions and deletions in a single column.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      class="rounded-xl border p-3 text-left transition-colors"
+                      :class="
+                        settings.diffViewMode === 'split'
+                          ? 'border-terra-border bg-terra-soft'
+                          : 'border-border bg-canvas-subtle hover:bg-canvas-elevated/60'
+                      "
+                      @click="settings.setDiffViewMode('split')"
+                    >
+                      <p class="text-xs font-semibold text-ink">Split (Side-by-Side)</p>
+                      <p class="mt-1 text-[11px] text-ink-muted">
+                        Base and head versions shown side-by-side in two columns.
+                      </p>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Tab Size -->
+                <div class="rounded-xl border border-border bg-canvas/60 p-4">
+                  <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p class="text-xs font-medium text-ink">Tab Size</p>
+                      <p class="mt-0.5 text-[11px] text-ink-muted">
+                        Width of tab characters in the diff viewer.
+                      </p>
+                    </div>
+                    <div class="inline-flex rounded-xl border border-border bg-canvas-inset p-0.5">
+                      <button
+                        v-for="opt in tabSizeOptions"
+                        :key="opt.value"
+                        type="button"
+                        class="rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors"
+                        :class="
+                          settings.tabSize === opt.value
+                            ? 'bg-terra text-white shadow-xs'
+                            : 'text-ink-muted hover:text-ink'
+                        "
+                        @click="settings.setTabSize(opt.value)"
+                      >
+                        {{ opt.label }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Ignore Whitespace by Default -->
+                <label
+                  class="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-border bg-canvas/60 p-4"
+                >
+                  <div>
+                    <p class="text-xs font-medium text-ink">Ignore Whitespace by Default</p>
+                    <p class="mt-0.5 text-[11px] text-ink-muted">
+                      Hide whitespace-only diff changes automatically when opening a Pull Request.
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    :checked="settings.ignoreWhitespaceDefault"
+                    class="h-4 w-4 rounded border-border bg-canvas-inset accent-terra"
+                    @change="
+                      settings.setIgnoreWhitespaceDefault(($event.target as HTMLInputElement).checked)
+                    "
+                  />
+                </label>
               </div>
             </template>
 
@@ -943,6 +1229,60 @@ async function handleResetDefaults() {
                       <Plus v-else class="h-3.5 w-3.5" />
                       <span>Link Checkout</span>
                     </button>
+                  </div>
+                </div>
+
+                <!-- External Editor -->
+                <div class="space-y-3 rounded-xl border border-border bg-canvas/60 p-4">
+                  <div>
+                    <p class="text-xs font-medium text-ink">External Editor</p>
+                    <p class="mt-0.5 text-[11px] text-ink-muted">
+                      Choose the editor used when opening files from the Diff Viewer for linked local checkouts.
+                    </p>
+                  </div>
+
+                  <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <button
+                      v-for="ed in editorOptions"
+                      :key="ed.value"
+                      type="button"
+                      class="rounded-xl border p-2.5 text-left transition-colors"
+                      :class="
+                        settings.externalEditor === ed.value
+                          ? 'border-terra-border bg-terra-soft'
+                          : 'border-border bg-canvas-subtle hover:bg-canvas-elevated/60'
+                      "
+                      @click="settings.setExternalEditor(ed.value)"
+                    >
+                      <p class="text-xs font-semibold text-ink">{{ ed.label }}</p>
+                      <p class="mt-0.5 truncate font-mono text-[10px] text-ink-muted">{{ ed.hint }}</p>
+                    </button>
+                  </div>
+
+                  <div v-if="settings.externalEditor === 'custom'" class="space-y-1.5">
+                    <label class="block text-[11px] font-medium text-ink-secondary">
+                      Custom Editor URI Template
+                    </label>
+                    <div class="flex gap-2">
+                      <input
+                        v-model="customEditorInput"
+                        type="text"
+                        placeholder="vscode://file/{file}:{line}"
+                        class="flex-1 rounded-xl border border-border bg-canvas-inset px-3 py-1.5 font-mono text-xs text-ink placeholder-ink-faint focus:border-terra focus:outline-none"
+                        @keydown.enter.prevent="saveCustomEditorCommand"
+                      />
+                      <button
+                        type="button"
+                        class="rounded-xl border border-border bg-canvas-subtle px-3 py-1.5 text-xs font-medium text-ink-secondary hover:bg-canvas-elevated"
+                        @click="saveCustomEditorCommand"
+                      >
+                        Save
+                      </button>
+                    </div>
+                    <p class="text-[10.5px] text-ink-faint">
+                      Use <code class="font-mono text-ink">{file}</code> for the absolute path and
+                      <code class="font-mono text-ink">{line}</code> for the line number.
+                    </p>
                   </div>
                 </div>
               </div>

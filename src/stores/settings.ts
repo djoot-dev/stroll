@@ -6,13 +6,16 @@ import {
   loadTourDirection,
   saveAppSettings,
   saveTourDirection,
+  type DiffViewMode,
+  type ExternalEditorPreset,
   type HistoryOrder,
   type PersistedAppSettings,
+  type TabSizeOption,
   type ThemeMode,
 } from '@/services/storage'
 import type { TourDirection } from '@/types/pr'
 
-export type { HistoryOrder, ThemeMode }
+export type { DiffViewMode, ExternalEditorPreset, HistoryOrder, TabSizeOption, ThemeMode }
 
 export type SettingsSection =
   | 'general'
@@ -45,6 +48,12 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   codeFontSize: 12.5,
   requireAltForHover: false,
   wrapLines: false,
+  diffViewMode: 'unified',
+  tabSize: 4,
+  ignoreWhitespaceDefault: false,
+  externalEditor: 'vscode',
+  externalEditorCustomCommand: '',
+  tourIgnorePatterns: [],
   showShortcutsBar: true,
   inboxAutoRefreshSeconds: 60,
   inboxNotificationsEnabled: false,
@@ -71,6 +80,14 @@ export const useSettingsStore = defineStore('settings', () => {
   const codeFontSize = ref<number>(DEFAULT_APP_SETTINGS.codeFontSize)
   const requireAltForHover = ref<boolean>(DEFAULT_APP_SETTINGS.requireAltForHover)
   const wrapLines = ref<boolean>(DEFAULT_APP_SETTINGS.wrapLines)
+  const diffViewMode = ref<DiffViewMode>(DEFAULT_APP_SETTINGS.diffViewMode)
+  const tabSize = ref<TabSizeOption>(DEFAULT_APP_SETTINGS.tabSize)
+  const ignoreWhitespaceDefault = ref<boolean>(DEFAULT_APP_SETTINGS.ignoreWhitespaceDefault)
+  const externalEditor = ref<ExternalEditorPreset>(DEFAULT_APP_SETTINGS.externalEditor)
+  const externalEditorCustomCommand = ref<string>(
+    DEFAULT_APP_SETTINGS.externalEditorCustomCommand,
+  )
+  const tourIgnorePatterns = ref<string[]>([...DEFAULT_APP_SETTINGS.tourIgnorePatterns])
   const showShortcutsBar = ref<boolean>(DEFAULT_APP_SETTINGS.showShortcutsBar)
   const inboxAutoRefreshSeconds = ref<number>(DEFAULT_APP_SETTINGS.inboxAutoRefreshSeconds)
   const inboxNotificationsEnabled = ref<boolean>(DEFAULT_APP_SETTINGS.inboxNotificationsEnabled)
@@ -134,6 +151,32 @@ export const useSettingsStore = defineStore('settings', () => {
     if (typeof savedSettings.wrapLines === 'boolean') {
       wrapLines.value = savedSettings.wrapLines
     }
+    if (savedSettings.diffViewMode === 'unified' || savedSettings.diffViewMode === 'split') {
+      diffViewMode.value = savedSettings.diffViewMode
+    }
+    if (savedSettings.tabSize === 2 || savedSettings.tabSize === 4 || savedSettings.tabSize === 8) {
+      tabSize.value = savedSettings.tabSize
+    }
+    if (typeof savedSettings.ignoreWhitespaceDefault === 'boolean') {
+      ignoreWhitespaceDefault.value = savedSettings.ignoreWhitespaceDefault
+    }
+    if (
+      savedSettings.externalEditor === 'vscode' ||
+      savedSettings.externalEditor === 'cursor' ||
+      savedSettings.externalEditor === 'zed' ||
+      savedSettings.externalEditor === 'custom'
+    ) {
+      externalEditor.value = savedSettings.externalEditor
+    }
+    if (typeof savedSettings.externalEditorCustomCommand === 'string') {
+      externalEditorCustomCommand.value = savedSettings.externalEditorCustomCommand
+    }
+    if (Array.isArray(savedSettings.tourIgnorePatterns)) {
+      tourIgnorePatterns.value = savedSettings.tourIgnorePatterns
+        .filter((p): p is string => typeof p === 'string')
+        .map((p) => p.trim())
+        .filter(Boolean)
+    }
     if (typeof savedSettings.showShortcutsBar === 'boolean') {
       showShortcutsBar.value = savedSettings.showShortcutsBar
     }
@@ -165,6 +208,12 @@ export const useSettingsStore = defineStore('settings', () => {
         codeFontSize: codeFontSize.value,
         requireAltForHover: requireAltForHover.value,
         wrapLines: wrapLines.value,
+        diffViewMode: diffViewMode.value,
+        tabSize: tabSize.value,
+        ignoreWhitespaceDefault: ignoreWhitespaceDefault.value,
+        externalEditor: externalEditor.value,
+        externalEditorCustomCommand: externalEditorCustomCommand.value,
+        tourIgnorePatterns: tourIgnorePatterns.value,
         showShortcutsBar: showShortcutsBar.value,
         inboxAutoRefreshSeconds: inboxAutoRefreshSeconds.value,
         inboxNotificationsEnabled: inboxNotificationsEnabled.value,
@@ -237,6 +286,36 @@ export const useSettingsStore = defineStore('settings', () => {
     await persist()
   }
 
+  async function setDiffViewMode(mode: DiffViewMode): Promise<void> {
+    diffViewMode.value = mode
+    await persist()
+  }
+
+  async function setTabSize(size: TabSizeOption): Promise<void> {
+    tabSize.value = size
+    await persist()
+  }
+
+  async function setIgnoreWhitespaceDefault(enabled: boolean): Promise<void> {
+    ignoreWhitespaceDefault.value = enabled
+    await persist()
+  }
+
+  async function setExternalEditor(editor: ExternalEditorPreset): Promise<void> {
+    externalEditor.value = editor
+    await persist()
+  }
+
+  async function setExternalEditorCustomCommand(command: string): Promise<void> {
+    externalEditorCustomCommand.value = command.trim()
+    await persist()
+  }
+
+  async function setTourIgnorePatterns(patterns: string[]): Promise<void> {
+    tourIgnorePatterns.value = patterns.map((p) => p.trim()).filter(Boolean)
+    await persist()
+  }
+
   async function setShowShortcutsBar(visible: boolean): Promise<void> {
     showShortcutsBar.value = visible
     await persist()
@@ -277,6 +356,12 @@ export const useSettingsStore = defineStore('settings', () => {
     codeFontSize.value = DEFAULT_APP_SETTINGS.codeFontSize
     requireAltForHover.value = DEFAULT_APP_SETTINGS.requireAltForHover
     wrapLines.value = DEFAULT_APP_SETTINGS.wrapLines
+    diffViewMode.value = DEFAULT_APP_SETTINGS.diffViewMode
+    tabSize.value = DEFAULT_APP_SETTINGS.tabSize
+    ignoreWhitespaceDefault.value = DEFAULT_APP_SETTINGS.ignoreWhitespaceDefault
+    externalEditor.value = DEFAULT_APP_SETTINGS.externalEditor
+    externalEditorCustomCommand.value = DEFAULT_APP_SETTINGS.externalEditorCustomCommand
+    tourIgnorePatterns.value = [...DEFAULT_APP_SETTINGS.tourIgnorePatterns]
     showShortcutsBar.value = DEFAULT_APP_SETTINGS.showShortcutsBar
     inboxAutoRefreshSeconds.value = DEFAULT_APP_SETTINGS.inboxAutoRefreshSeconds
     inboxNotificationsEnabled.value = DEFAULT_APP_SETTINGS.inboxNotificationsEnabled
@@ -300,6 +385,12 @@ export const useSettingsStore = defineStore('settings', () => {
     codeFontSize,
     requireAltForHover,
     wrapLines,
+    diffViewMode,
+    tabSize,
+    ignoreWhitespaceDefault,
+    externalEditor,
+    externalEditorCustomCommand,
+    tourIgnorePatterns,
     showShortcutsBar,
     inboxAutoRefreshSeconds,
     inboxNotificationsEnabled,
@@ -317,6 +408,12 @@ export const useSettingsStore = defineStore('settings', () => {
     setCodeFontSize,
     setRequireAltForHover,
     setWrapLines,
+    setDiffViewMode,
+    setTabSize,
+    setIgnoreWhitespaceDefault,
+    setExternalEditor,
+    setExternalEditorCustomCommand,
+    setTourIgnorePatterns,
     setShowShortcutsBar,
     setInboxAutoRefreshSeconds,
     setInboxNotificationsEnabled,
