@@ -817,3 +817,67 @@ describe('useReviewStore tour start state', () => {
     expect(store.tourStarted).toBe(false)
   })
 })
+
+describe('useReviewStore navigation and customization', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    localStorage.clear()
+  })
+
+  it('nextUnreviewedStep skips reviewed steps and wraps around', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+    store.goToStep(0)
+
+    const first = store.tourSteps[0].file.path
+    const second = store.tourSteps[1].file.path
+    const third = store.tourSteps[2].file.path
+
+    await store.toggleReviewed(second)
+    expect(store.hasUnreviewedSteps).toBe(true)
+
+    // From step 0, next unreviewed should skip step 1 (reviewed) and land on step 2.
+    store.nextUnreviewedStep()
+    expect(store.activeView).toBe('step')
+    expect(store.currentStep?.file.path).toBe(third)
+
+    // Mark remaining steps after third as reviewed, then wrap to step 0 (first).
+    for (let i = 2; i < store.tourSteps.length; i++) {
+      await store.toggleReviewed(store.tourSteps[i].file.path)
+    }
+    store.nextUnreviewedStep()
+    expect(store.currentStep?.file.path).toBe(first)
+
+    // Mark first reviewed too -> hasUnreviewedSteps becomes false.
+    await store.toggleReviewed(first)
+    expect(store.hasUnreviewedSteps).toBe(false)
+  })
+
+  it('reorderStep moves a step to the target position while preserving active file', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+    store.startTour()
+    const path0 = store.tourSteps[0].file.path
+    const path2 = store.tourSteps[2].file.path
+
+    store.goToStep(0)
+    store.reorderStep(path0, path2)
+
+    expect(store.tourSteps[2].file.path).toBe(path0)
+    expect(store.currentStep?.file.path).toBe(path0)
+  })
+
+  it('hideGeneratedSteps hides generated files from the tour', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+    if (store.pr) {
+      store.pr.files[0].isGenerated = true
+    }
+    const genPath = store.pr!.files[0].path
+    expect(store.tourSteps.some((s) => s.file.path === genPath)).toBe(true)
+
+    store.hideGeneratedSteps()
+    expect(store.hiddenPaths.has(genPath)).toBe(true)
+    expect(store.tourSteps.some((s) => s.file.path === genPath)).toBe(false)
+  })
+})
