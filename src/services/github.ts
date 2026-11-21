@@ -2323,12 +2323,16 @@ export async function removePullRequestReviewers(
   repo: string,
   number: number,
   reviewers: string[],
+  teamReviewers: string[] = [],
 ): Promise<void> {
+  const payload: { reviewers?: string[]; team_reviewers?: string[] } = {}
+  if (reviewers.length > 0) payload.reviewers = reviewers
+  if (teamReviewers.length > 0) payload.team_reviewers = teamReviewers
   await restJsonRequest(
     pat,
     'DELETE',
     `/repos/${owner}/${repo}/pulls/${number}/requested_reviewers`,
-    { reviewers },
+    payload,
   )
 }
 

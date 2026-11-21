@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  AlertTriangle,
   ArrowDownUp,
   ArrowLeft,
   CheckCircle2,
@@ -7,23 +8,68 @@ import {
   ChevronRight,
   ExternalLink,
   FolderGit2,
+  GitBranch,
+  GitMerge,
+  GitPullRequestClosed,
+  GitPullRequestDraft,
   KeyRound,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
   RefreshCw,
+  Search,
   Send,
   Settings,
+  SkipForward,
   Sun,
 } from '@lucide/vue'
+import { computed } from 'vue'
 import { openExternalUrl } from '@/services/native'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore } from '@/stores/settings'
 
+const emit = defineEmits<{
+  (e: 'openCommandPalette'): void
+}>()
+
 const auth = useAuthStore()
 const review = useReviewStore()
 const settings = useSettingsStore()
+
+const prStatePill = computed(() => {
+  const pr = review.pr
+  if (!pr) return null
+  if (pr.state === 'MERGED') {
+    return {
+      label: 'Merged',
+      class: 'border-plum-border bg-plum-soft text-plum-text',
+      icon: GitMerge,
+      title: 'Pull request is merged',
+    }
+  }
+  if (pr.state === 'CLOSED') {
+    return {
+      label: 'Closed',
+      class: 'border-crimson-border bg-crimson-soft text-crimson-text',
+      icon: GitPullRequestClosed,
+      title: 'Pull request is closed',
+    }
+  }
+  if (pr.isDraft) {
+    return {
+      label: 'Draft',
+      class: 'border-border bg-canvas-elevated text-ink-muted',
+      icon: GitPullRequestDraft,
+      title: 'Draft pull request',
+    }
+  }
+  return null
+})
+
+const hasMergeConflicts = computed(
+  () => review.pr?.state === 'OPEN' && review.pr.mergeable === 'CONFLICTING',
+)
 
 function toggleDirection() {
   const next = review.tourDirection === 'bottom-up' ? 'top-down' : 'bottom-up'
@@ -77,7 +123,7 @@ function handleRefreshPR() {
 
         <template v-if="review.pr">
           <span class="shrink-0 text-ink-faint">/</span>
-          <div class="flex min-w-0 items-center gap-2">
+          <div class="flex min-w-0 items-center gap-1.5">
             <span class="truncate text-xs font-medium text-ink-secondary">
               {{ review.pr.owner }}/{{ review.pr.repo }}
               <span class="text-ink-muted">#{{ review.pr.number }}</span>
@@ -87,6 +133,30 @@ function handleRefreshPR() {
               class="shrink-0 whitespace-nowrap rounded-md border border-ochre-border bg-ochre-soft px-1.5 py-0.5 text-[10px] font-medium text-ochre-text"
             >
               DEMO PR
+            </span>
+            <span
+              v-if="prStatePill"
+              class="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+              :class="prStatePill.class"
+              :title="prStatePill.title"
+            >
+              <component :is="prStatePill.icon" class="h-3 w-3" />
+              <span>{{ prStatePill.label }}</span>
+            </span>
+            <span
+              v-if="hasMergeConflicts"
+              class="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-crimson-border bg-crimson-soft px-2 py-0.5 text-[10px] font-semibold text-crimson-text"
+              title="This pull request has merge conflicts"
+            >
+              <AlertTriangle class="h-3 w-3" />
+              <span class="hidden sm:inline">Conflicts</span>
+            </span>
+            <span
+              class="hidden max-w-44 items-center gap-1 truncate rounded-md border border-border-muted bg-canvas px-1.5 py-0.5 font-mono text-[10px] text-ink-muted 2xl:inline-flex"
+              :title="`${review.pr.headRefName} → ${review.pr.baseRefName}`"
+            >
+              <GitBranch class="h-2.5 w-2.5 shrink-0 text-ink-faint" />
+              <span class="truncate">{{ review.pr.headRefName }}</span>
             </span>
           </div>
         </template>
@@ -126,6 +196,16 @@ function handleRefreshPR() {
         </button>
 
         <button
+          class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-1 text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated disabled:opacity-40"
+          :disabled="!review.hasUnreviewedSteps"
+          :title="review.hasUnreviewedSteps ? 'Next unreviewed step (N)' : 'All steps reviewed'"
+          @click="review.nextUnreviewedStep()"
+        >
+          <SkipForward class="h-3.5 w-3.5 text-terra" />
+          <span class="hidden xl:inline text-[11px]">Next unreviewed</span>
+        </button>
+
+        <button
           v-if="review.activeView === 'step' && review.currentStep"
           class="ml-1 inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors"
           :class="
@@ -143,8 +223,22 @@ function handleRefreshPR() {
         </button>
       </div>
 
-      <!-- Right: Refresh, Open on GitHub, Reading Order Toggle, Load PR, Theme, Settings, Finish Review -->
+      <!-- Right: Command Palette, Refresh, Open on GitHub, Reading Order Toggle, Load PR, Theme, Settings, Finish Review -->
       <div class="flex shrink-0 items-center gap-1.5">
+        <button
+          v-if="review.pr"
+          type="button"
+          class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border bg-canvas px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-terra-border hover:bg-canvas-elevated hover:text-ink"
+          title="Jump to file, symbol, or unresolved thread (⌘K / Ctrl+K)"
+          @click="emit('openCommandPalette')"
+        >
+          <Search class="h-3 w-3 shrink-0" />
+          <span class="hidden md:inline text-[11px]">Jump…</span>
+          <kbd class="rounded border border-border-muted bg-canvas-subtle px-1 font-mono text-[10px] text-ink-faint">
+            ⌘K
+          </kbd>
+        </button>
+
         <button
           v-if="review.pr"
           class="shrink-0 rounded-lg border border-border bg-canvas p-1.5 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink disabled:opacity-40"
@@ -221,14 +315,19 @@ function handleRefreshPR() {
         <button
           v-if="review.pr"
           class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-pine px-3 py-1 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-pine-hover"
-          title="Finish & Submit Review (R)"
+          :title="
+            review.draftComments.length > 0
+              ? `Finish & Submit Review (R) · ${review.draftComments.length} pending draft comment${review.draftComments.length === 1 ? '' : 's'}`
+              : 'Finish & Submit Review (R)'
+          "
           @click="review.showFinishModal = true"
         >
           <Send class="h-3.5 w-3.5" />
           <span>Finish Review</span>
           <span
             v-if="review.draftComments.length > 0"
-            class="ml-0.5 rounded-full bg-black/25 px-1.5 py-0.2 font-mono text-[10px]"
+            class="ml-0.5 rounded-full bg-white/25 px-1.5 py-0.5 font-mono text-[10px] font-bold leading-none text-white"
+            :aria-label="`${review.draftComments.length} pending draft comments`"
           >
             {{ review.draftComments.length }}
           </span>
