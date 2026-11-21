@@ -1,6 +1,17 @@
 <script setup lang="ts">
-import { CheckCircle2, CornerDownRight, Loader2, Pencil, RotateCcw, Trash2 } from '@lucide/vue'
+import {
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  CornerDownRight,
+  Loader2,
+  Pencil,
+  RotateCcw,
+  Trash2,
+} from '@lucide/vue'
 import { computed, ref } from 'vue'
+import { extractSuggestionBlocks } from '@/services/suggestions'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 import type { ReviewThread } from '@/types/pr'
@@ -36,7 +47,40 @@ const editBody = ref('')
 const isSavingEdit = ref(false)
 const deletingCommentId = ref<string | null>(null)
 const error = ref<string | null>(null)
-const collapsed = ref(props.thread.isResolved)
+const collapsed = ref(props.thread.isResolved || props.thread.isOutdated)
+const applyingSuggestionKey = ref<string | null>(null)
+const appliedSuggestionKeys = ref<Set<string>>(new Set())
+
+const canApplyThreadSuggestions = computed(
+  () =>
+    review.canApplySuggestions &&
+    props.thread.subjectType !== 'FILE' &&
+    props.thread.side === 'RIGHT' &&
+    !props.thread.isOutdated,
+)
+
+const collapsedPreview = computed(() => {
+  const first = props.thread.comments[0]
+  if (!first) return ''
+  const plain = first.body.replace(/```[\s\S]*?```/g, '[code]').replace(/\s+/g, ' ').trim()
+  const snippet = plain.length > 72 ? `${plain.slice(0, 72)}…` : plain
+  return `@${first.author.login}: ${snippet}`
+})
+
+async function handleApplySuggestion(commentId: string, idx: number, suggestionCode: string) {
+  const key = `${commentId}:${idx}`
+  if (applyingSuggestionKey.value) return
+  applyingSuggestionKey.value = key
+  error.value = null
+  try {
+    await review.applySuggestion(props.thread.id, suggestionCode)
+    appliedSuggestionKeys.value = new Set([...appliedSuggestionKeys.value, key])
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Failed to apply suggestion'
+  } finally {
+    applyingSuggestionKey.value = null
+  }
+}
 
 function canModifyComment(authorLogin: string): boolean {
   if (review.pr?.isMock) return true
@@ -114,37 +158,49 @@ async function handleToggleResolve() {
     @click.stop
   >
     <!-- Thread Header -->
-    <div class="flex items-center justify-between gap-2 border-b border-border-muted bg-canvas-elevated/50 px-3 py-1.5 text-[11px]">
-      <div class="flex items-center gap-2">
-        <span class="font-mono text-ink-muted">
-          {{
-            thread.subjectType === 'FILE'
-              ? 'File comment'
-              : thread.startLine && thread.startLine !== thread.line
-                ? `Lines ${thread.startLine}–${thread.line}`
-                : `Line ${thread.line}`
-          }}
-        </span>
+    <div
+      class="flex flex-wrap items-center justify-between gap-2 bg-canvas-elevated/50 px-3 py-1.5 text-[11px]"
+      :class="collapsed ? '' : 'border-b border-border-muted'"
+    >
+      <div class="flex min-w-0 flex-1 items-center gap-2">
+        <button
+          type="button"
+          class="inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-ink-muted transition-colors hover:bg-canvas hover:text-ink"
+          :title="collapsed ? 'Expand thread' : 'Collapse thread'"
+          :aria-expanded="!collapsed"
+          @click="collapsed = !collapsed"
+        >
+          <ChevronRight v-if="collapsed" class="h-3.5 w-3.5" />
+          <ChevronDown v-else class="h-3.5 w-3.5" />
+          <span class="font-mono">
+            {{
+              thread.subjectType === 'FILE'
+                ? 'File comment'
+                : thread.startLine && thread.startLine !== thread.line
+                  ? `Lines ${thread.startLine}–${thread.line}`
+                  : `Line ${thread.line}`
+            }}
+          </span>
+        </button>
         <span
           v-if="thread.isResolved"
-          class="inline-flex items-center gap-1 rounded-md border border-pine-border bg-pine-soft px-1.5 py-0.2 text-[10px] font-medium text-pine-text"
+          class="inline-flex shrink-0 items-center gap-1 rounded-md border border-pine-border bg-pine-soft px-1.5 py-0.2 text-[10px] font-medium text-pine-text"
         >
           <CheckCircle2 class="h-2.5 w-2.5" />
           Resolved
         </span>
         <span
           v-if="thread.isOutdated"
-          class="rounded-md border border-ochre-border bg-ochre-soft px-1.5 py-0.2 text-[10px] text-ochre-text"
+          class="shrink-0 rounded-md border border-ochre-border bg-ochre-soft px-1.5 py-0.2 text-[10px] text-ochre-text"
         >
           Outdated
         </span>
-        <button
-          v-if="thread.isResolved"
-          class="text-[10px] text-ink-muted hover:text-ink"
-          @click="collapsed = !collapsed"
+        <span
+          v-if="collapsed && collapsedPreview"
+          class="min-w-0 truncate text-[10.5px] text-ink-faint"
         >
-          {{ collapsed ? 'Show conversation' : 'Hide' }}
-        </button>
+          {{ collapsedPreview }}
+        </span>
       </div>
 
       <button
@@ -232,11 +288,50 @@ async function handleToggleResolve() {
             :original-lines="originalLinesForThread"
             class="text-xs leading-relaxed text-ink-secondary"
           />
+          <div
+            v-if="canApplyThreadSuggestions && extractSuggestionBlocks(comment.body).length > 0"
+            class="flex flex-wrap items-center gap-2 pt-1"
+          >
+            <button
+              v-for="(suggestionCode, sIdx) in extractSuggestionBlocks(comment.body)"
+              :key="sIdx"
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-50"
+              :class="
+                appliedSuggestionKeys.has(`${comment.id}:${sIdx}`)
+                  ? 'border-pine-border bg-pine-soft text-pine-text'
+                  : 'border-pine-border bg-canvas text-pine-text hover:bg-pine-soft'
+              "
+              :disabled="
+                Boolean(applyingSuggestionKey) ||
+                appliedSuggestionKeys.has(`${comment.id}:${sIdx}`)
+              "
+              @click="handleApplySuggestion(comment.id, sIdx, suggestionCode)"
+            >
+              <Loader2
+                v-if="applyingSuggestionKey === `${comment.id}:${sIdx}`"
+                class="h-3 w-3 animate-spin"
+              />
+              <Check v-else class="h-3 w-3" />
+              <span>
+                {{
+                  appliedSuggestionKeys.has(`${comment.id}:${sIdx}`)
+                    ? 'Suggestion applied'
+                    : extractSuggestionBlocks(comment.body).length > 1
+                      ? `Apply suggestion #${sIdx + 1}`
+                      : 'Apply suggestion'
+                }}
+              </span>
+            </button>
+          </div>
           <ReactionBar :subject-id="comment.id" :reactions="comment.reactions" />
         </template>
       </div>
 
       <!-- Inline Reply Area -->
+      <p v-if="error && !isReplying" class="bg-crimson-soft/40 px-3 py-1.5 text-[11px] text-crimson-text">
+        {{ error }}
+      </p>
       <div class="bg-canvas/40 px-3 py-2">
         <div v-if="!isReplying" class="flex items-center">
           <button
