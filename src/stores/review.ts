@@ -295,6 +295,8 @@ export const useReviewStore = defineStore('review', () => {
   }
 
   async function loadMockPR(): Promise<void> {
+    const settings = useSettingsStore()
+    void settings.completeOnboarding()
     await activatePR(structuredClone(MOCK_PR))
   }
 
