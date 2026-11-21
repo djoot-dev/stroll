@@ -3,8 +3,10 @@ import { computed, ref } from 'vue'
 import { normalizeGitHubHost, setGitHubHost as syncGitHubHost } from '@/services/github'
 import {
   loadAppSettings,
+  loadOnboardingCompleted,
   loadTourDirection,
   saveAppSettings,
+  saveOnboardingCompleted,
   saveTourDirection,
   type HistoryOrder,
   type PersistedAppSettings,
@@ -63,6 +65,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const isOpen = ref(false)
   const activeSection = ref<SettingsSection>('general')
   const initialized = ref(false)
+  const onboardingCompleted = ref(false)
 
   const theme = ref<ThemeMode>(DEFAULT_APP_SETTINGS.theme)
   const systemPrefersDark = ref<boolean>(getSystemPrefersDark())
@@ -108,10 +111,12 @@ export const useSettingsStore = defineStore('settings', () => {
   async function init(): Promise<void> {
     if (initialized.value) return
     bindSystemThemeListener()
-    const [savedDirection, savedSettings] = await Promise.all([
+    const [savedDirection, savedSettings, savedOnboarding] = await Promise.all([
       loadTourDirection(),
       loadAppSettings(),
+      loadOnboardingCompleted(),
     ])
+    onboardingCompleted.value = savedOnboarding
     defaultTourDirection.value = savedDirection
     if (
       savedSettings.theme === 'light' ||
@@ -197,6 +202,12 @@ export const useSettingsStore = defineStore('settings', () => {
     activeSection.value = section
     linkRepoPrefill.value = options.linkRepo ?? null
     isOpen.value = true
+  }
+
+  async function completeOnboarding(): Promise<void> {
+    if (onboardingCompleted.value) return
+    onboardingCompleted.value = true
+    await saveOnboardingCompleted(true)
   }
 
   function closeSettings(): void {
@@ -320,6 +331,9 @@ export const useSettingsStore = defineStore('settings', () => {
     linkRepoPrefill,
     activeSection,
     theme,
+    initialized,
+    onboardingCompleted,
+    completeOnboarding,
     resolvedTheme,
     defaultTourDirection,
     autoAdvanceOnReview,

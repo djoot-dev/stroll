@@ -1,7 +1,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MOCK_PR } from '@/data/mockPR'
-import { computeFileFingerprint, loadViewedFiles } from '@/services/storage'
+import { computeFileFingerprint, loadAllPRProgress, loadRecentPRs, loadViewedFiles } from '@/services/storage'
 import type { PRHeadPulse } from '@/services/github'
 import type { PullRequestData } from '@/types/pr'
 import { useAuthStore } from '../auth'
@@ -30,6 +30,20 @@ const fetchPRHeadPulseMock = vi.fn<() => Promise<PRHeadPulse | null>>()
 const updatePullRequestBodyMock = vi.fn<
   (pat: string, pullRequestId: string, body: string) => Promise<string>
 >(async (_pat, _id, body) => body)
+const requestPullRequestReviewersMock = vi.fn(
+  async (_pat: string, _owner: string, _repo: string, _number: number, reviewers: string[]) =>
+    reviewers.map((login) => ({ type: 'user' as const, login, avatarUrl: '' })),
+)
+const removePullRequestReviewersMock = vi.fn<
+  (
+    pat: string,
+    owner: string,
+    repo: string,
+    number: number,
+    reviewers: string[],
+    teamReviewers?: string[],
+  ) => Promise<void>
+>(async () => undefined)
 
 vi.mock('@/services/github', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/github')>()
@@ -57,6 +71,21 @@ vi.mock('@/services/github', async (importOriginal) => {
     fetchPRHeadPulse: () => fetchPRHeadPulseMock(),
     updatePullRequestBody: (pat: string, pullRequestId: string, body: string) =>
       updatePullRequestBodyMock(pat, pullRequestId, body),
+    requestPullRequestReviewers: (
+      pat: string,
+      owner: string,
+      repo: string,
+      number: number,
+      reviewers: string[],
+    ) => requestPullRequestReviewersMock(pat, owner, repo, number, reviewers),
+    removePullRequestReviewers: (
+      pat: string,
+      owner: string,
+      repo: string,
+      number: number,
+      reviewers: string[],
+      teamReviewers?: string[],
+    ) => removePullRequestReviewersMock(pat, owner, repo, number, reviewers, teamReviewers),
   }
 })
 
@@ -815,5 +844,179 @@ describe('useReviewStore tour start state', () => {
     store.backToInbox()
     await store.loadMockPR()
     expect(store.tourStarted).toBe(false)
+  })
+})
+
+describe('useReviewStore reviewers management', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.stubGlobal('localStorage', createMemoryStorage())
+    fetchPullRequestMock.mockReset()
+    requestPullRequestReviewersMock.mockClear()
+    removePullRequestReviewersMock.mockClear()
+  })
+
+  it('re-requests a review and removes user or team reviewers in mock mode', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+
+    await store.addReviewer('marcus-chen')
+    const reRequested = store.pr?.requestedReviewers.find((r) => r.login === 'marcus-chen')
+    expect(reRequested).toEqual({
+      type: 'user',
+      login: 'marcus-chen',
+      avatarUrl: 'https://avatars.githubusercontent.com/u/2?v=4',
+    })
+
+    await store.removeReviewer('platform-reliability', true)
+    expect(
+      store.pr?.requestedReviewers.some(
+        (r) => r.type === 'team' && r.login === 'platform-reliability',
+      ),
+    ).toBe(false)
+
+    await store.removeReviewer('priya-nair', false)
+    expect(store.pr?.requestedReviewers.some((r) => r.login === 'priya-nair')).toBe(false)
+  })
+
+  it('calls GitHub API with reviewers or team_reviewers when removing a reviewer', async () => {
+    fetchPullRequestMock.mockResolvedValueOnce(
+      makePR({
+        owner: 'acme',
+        repo: 'stroll',
+        number: 12,
+        requestedReviewers: [
+          { type: 'user', login: 'alice', avatarUrl: '' },
+          { type: 'team', login: 'core-team', name: 'Core Team', avatarUrl: '' },
+        ],
+      }),
+    )
+    const auth = useAuthStore()
+    auth.pat = 'ghp_test_token'
+    const store = useReviewStore()
+    await store.loadPRByRepo('acme', 'stroll', 12)
+
+    await store.removeReviewer('alice', false)
+    expect(removePullRequestReviewersMock).toHaveBeenCalledWith(
+      'ghp_test_token',
+      'acme',
+      'stroll',
+      12,
+      ['alice'],
+      [],
+    )
+
+    await store.removeReviewer('core-team', true)
+    expect(removePullRequestReviewersMock).toHaveBeenCalledWith(
+      'ghp_test_token',
+      'acme',
+      'stroll',
+      12,
+      [],
+      ['core-team'],
+    )
+    expect(store.pr?.requestedReviewers).toEqual([])
+  })
+})
+
+describe('useReviewStore recent PRs & inbox progress', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.stubGlobal('localStorage', createMemoryStorage())
+    fetchPullRequestMock.mockReset()
+  })
+
+  it('records non-mock PRs in recentPRs, supports pinning/removing, and reports local progress', async () => {
+    const auth = useAuthStore()
+    auth.pat = 'ghp_test'
+    const pr = makePR({ owner: 'acme', repo: 'stroll', number: 99, title: 'Recent PR' })
+    fetchPullRequestMock.mockResolvedValueOnce(pr)
+
+    const store = useReviewStore()
+    await store.init()
+    expect(store.recentPRs).toEqual([])
+
+    const loaded = await store.loadPRByRepo('acme', 'stroll', 99)
+    expect(loaded).toBe(true)
+    expect(store.recentPRs).toHaveLength(1)
+    expect(store.recentPRs[0].summary.number).toBe(99)
+    expect(store.recentPRs[0].pinned).toBe(false)
+
+    await store.togglePinRecentPR(store.recentPRs[0].summary)
+    expect(store.recentPRs[0].pinned).toBe(true)
+    expect((await loadRecentPRs())[0].pinned).toBe(true)
+
+    await store.addDraftComment(pr.files[0].path, 1, 'RIGHT', 'Nit: rename variable')
+    await store.toggleReviewed(pr.files[0].path)
+
+    const progress = await loadAllPRProgress()
+    expect(progress['acme/stroll#99']).toEqual({ draftCount: 1, reviewedCount: 1 })
+
+    await store.removeRecentPR(store.recentPRs[0].summary)
+    expect(store.recentPRs).toEqual([])
+  })
+})
+
+describe('useReviewStore navigation and customization', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    localStorage.clear()
+  })
+
+  it('nextUnreviewedStep skips reviewed steps and wraps around', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+    store.goToStep(0)
+
+    const first = store.tourSteps[0].file.path
+    const second = store.tourSteps[1].file.path
+    const third = store.tourSteps[2].file.path
+
+    await store.toggleReviewed(second)
+    expect(store.hasUnreviewedSteps).toBe(true)
+
+    // From step 0, next unreviewed should skip step 1 (reviewed) and land on step 2.
+    store.nextUnreviewedStep()
+    expect(store.activeView).toBe('step')
+    expect(store.currentStep?.file.path).toBe(third)
+
+    // Mark remaining steps after third as reviewed, then wrap to step 0 (first).
+    for (let i = 2; i < store.tourSteps.length; i++) {
+      await store.toggleReviewed(store.tourSteps[i].file.path)
+    }
+    store.nextUnreviewedStep()
+    expect(store.currentStep?.file.path).toBe(first)
+
+    // Mark first reviewed too -> hasUnreviewedSteps becomes false.
+    await store.toggleReviewed(first)
+    expect(store.hasUnreviewedSteps).toBe(false)
+  })
+
+  it('reorderStep moves a step to the target position while preserving active file', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+    store.startTour()
+    const path0 = store.tourSteps[0].file.path
+    const path2 = store.tourSteps[2].file.path
+
+    store.goToStep(0)
+    store.reorderStep(path0, path2)
+
+    expect(store.tourSteps[2].file.path).toBe(path0)
+    expect(store.currentStep?.file.path).toBe(path0)
+  })
+
+  it('hideGeneratedSteps hides generated files from the tour', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+    if (store.pr) {
+      store.pr.files[0].isGenerated = true
+    }
+    const genPath = store.pr!.files[0].path
+    expect(store.tourSteps.some((s) => s.file.path === genPath)).toBe(true)
+
+    store.hideGeneratedSteps()
+    expect(store.hiddenPaths.has(genPath)).toBe(true)
+    expect(store.tourSteps.some((s) => s.file.path === genPath)).toBe(false)
   })
 })

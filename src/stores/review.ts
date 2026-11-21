@@ -48,13 +48,22 @@ import {
   detectPulseChange,
   type PulseBaseline,
 } from '@/services/prPulse'
+import {
+  prRefKey,
+  recordRecentPR,
+  removeRecentPR as removeRecentPRItem,
+  summarizePullRequest,
+  togglePinRecentPR as togglePinRecentPRItem,
+} from '@/services/inbox'
 import { buildReadingOrder } from '@/services/readingOrder'
 import {
   computeFileFingerprint,
   loadDraftComments,
+  loadRecentPRs,
   loadRepoPaths,
   loadViewedFiles,
   saveDraftComments,
+  saveRecentPRs,
   saveRepoPaths,
   saveViewedFiles,
   type ViewedFilesMap,
@@ -66,9 +75,11 @@ import type {
   PRFileCommit,
   PRIssueComment,
   PRMergeMethod,
+  PRSummary,
   PullRequestData,
   ReactionContent,
   ReactionGroup,
+  RecentPRItem,
   ReviewEvent,
   TourDirection,
   TourStep,
@@ -110,6 +121,7 @@ export const useReviewStore = defineStore('review', () => {
   let fileFingerprints = new Map<string, string>()
   const draftComments = ref<DraftComment[]>([])
   const repoPaths = ref<Record<string, string>>({})
+  const recentPRs = ref<RecentPRItem[]>([])
   const lastSubmitted = ref<SubmittedReviewSummary | null>(null)
 
   const isLoadingPR = ref(false)
@@ -217,11 +229,32 @@ export const useReviewStore = defineStore('review', () => {
     return Math.round(((currentStepIndex.value + 1) / tourSteps.value.length) * 100)
   })
 
+  const hasUnreviewedSteps = computed(() =>
+    tourSteps.value.some((s) => !reviewedPaths.value.has(s.file.path)),
+  )
+
   async function init(): Promise<void> {
     const settings = useSettingsStore()
     await settings.init()
     tourDirection.value = settings.defaultTourDirection
-    repoPaths.value = await loadRepoPaths()
+    const [paths, recent] = await Promise.all([loadRepoPaths(), loadRecentPRs()])
+    repoPaths.value = paths
+    recentPRs.value = recent
+  }
+
+  async function togglePinRecentPR(item: Pick<PRSummary, 'owner' | 'repo' | 'number'>): Promise<void> {
+    recentPRs.value = togglePinRecentPRItem(recentPRs.value, prRefKey(item))
+    await saveRecentPRs(recentPRs.value)
+  }
+
+  async function removeRecentPR(item: Pick<PRSummary, 'owner' | 'repo' | 'number'>): Promise<void> {
+    recentPRs.value = removeRecentPRItem(recentPRs.value, prRefKey(item))
+    await saveRecentPRs(recentPRs.value)
+  }
+
+  async function clearRecentPRs(): Promise<void> {
+    recentPRs.value = recentPRs.value.filter((item) => item.pinned)
+    await saveRecentPRs(recentPRs.value)
   }
 
   async function linkRepoPath(ownerRepo: string, localPath: string): Promise<void> {
@@ -288,6 +321,11 @@ export const useReviewStore = defineStore('review', () => {
       await saveViewedFiles(key, validViewed)
     }
 
+    if (!data.isMock) {
+      recentPRs.value = recordRecentPR(recentPRs.value, summarizePullRequest(data))
+      await saveRecentPRs(recentPRs.value)
+    }
+
     screen.value = 'review'
   }
 
@@ -298,6 +336,8 @@ export const useReviewStore = defineStore('review', () => {
   }
 
   async function loadMockPR(): Promise<void> {
+    const settings = useSettingsStore()
+    void settings.completeOnboarding()
     await activatePR(structuredClone(MOCK_PR))
   }
 
@@ -531,6 +571,25 @@ export const useReviewStore = defineStore('review', () => {
     }
   }
 
+  function nextUnreviewedStep(): void {
+    const steps = tourSteps.value
+    if (steps.length === 0) return
+    const startAfter = activeView.value === 'overview' ? -1 : currentStepIndex.value
+    const afterIdx = steps.findIndex(
+      (s, idx) => idx > startAfter && !reviewedPaths.value.has(s.file.path),
+    )
+    if (afterIdx >= 0) {
+      currentStepIndex.value = afterIdx
+      activeView.value = 'step'
+      return
+    }
+    const wrapIdx = steps.findIndex((s) => !reviewedPaths.value.has(s.file.path))
+    if (wrapIdx >= 0) {
+      currentStepIndex.value = wrapIdx
+      activeView.value = 'step'
+    }
+  }
+
   async function toggleReviewed(path?: string): Promise<void> {
     const target = path ?? currentStep.value?.file.path
     if (!target) return
@@ -649,6 +708,42 @@ export const useReviewStore = defineStore('review', () => {
     ;[next[idx], next[targetIdx]] = [next[targetIdx], next[idx]]
     customOrderPaths.value = next
     restoreActiveStep(activePath)
+  }
+
+  function reorderStep(fromPath: string, toPath: string): void {
+    if (fromPath === toPath) return
+    const activePath = currentStep.value?.file.path
+    const currentOrder = tourSteps.value.map((s) => s.file.path)
+    const fromIdx = currentOrder.indexOf(fromPath)
+    const toIdx = currentOrder.indexOf(toPath)
+    if (fromIdx < 0 || toIdx < 0) return
+    const next = [...currentOrder]
+    const [moved] = next.splice(fromIdx, 1)
+    next.splice(toIdx, 0, moved)
+    customOrderPaths.value = next
+    restoreActiveStep(activePath)
+  }
+
+  function hideGeneratedSteps(): void {
+    const generated = tourSteps.value.filter((s) => s.isGenerated).map((s) => s.file.path)
+    if (generated.length === 0) return
+    const activePath = currentStep.value?.file.path
+    const next = new Set(hiddenPaths.value)
+    for (const p of generated) next.add(p)
+    hiddenPaths.value = next
+    if (tourSteps.value.length === 0) {
+      activeView.value = 'overview'
+      currentStepIndex.value = 0
+      return
+    }
+    if (!tourStarted.value) {
+      currentStepIndex.value = 0
+    } else if (activePath && next.has(activePath)) {
+      currentStepIndex.value = Math.min(currentStepIndex.value, tourSteps.value.length - 1)
+    } else if (activePath) {
+      const idx = tourSteps.value.findIndex((s) => s.file.path === activePath)
+      if (idx >= 0) currentStepIndex.value = idx
+    }
   }
 
   function resetTourCustomization(): void {
@@ -1347,12 +1442,14 @@ export const useReviewStore = defineStore('review', () => {
     const clean = login.trim().replace(/^@/, '')
     if (!pr.value || !clean) return
     if (pr.value.isMock) {
-      if (!pr.value.requestedReviewers.some((r) => r.login === clean)) {
+      if (!pr.value.requestedReviewers.some((r) => r.type === 'user' && r.login === clean)) {
+        const knownAvatar =
+          pr.value.reviews.find((r) => r.author.login === clean)?.author.avatarUrl ?? ''
         pr.value = {
           ...pr.value,
           requestedReviewers: [
             ...pr.value.requestedReviewers,
-            { type: 'user', login: clean, avatarUrl: '' },
+            { type: 'user', login: clean, avatarUrl: knownAvatar },
           ],
         }
       }
@@ -1366,17 +1463,26 @@ export const useReviewStore = defineStore('review', () => {
     pr.value = { ...pr.value, requestedReviewers: [...reviewers, ...teams] }
   }
 
-  async function removeReviewer(login: string): Promise<void> {
+  async function removeReviewer(login: string, isTeam = false): Promise<void> {
     if (!pr.value) return
     if (!pr.value.isMock) {
       const auth = useAuthStore()
       if (!auth.pat) throw new Error('GitHub PAT is required to remove reviewers.')
       const { owner, repo, number } = pr.value
-      await removePullRequestReviewers(auth.pat, owner, repo, number, [login])
+      await removePullRequestReviewers(
+        auth.pat,
+        owner,
+        repo,
+        number,
+        isTeam ? [] : [login],
+        isTeam ? [login] : [],
+      )
     }
     pr.value = {
       ...pr.value,
-      requestedReviewers: pr.value.requestedReviewers.filter((r) => r.login !== login),
+      requestedReviewers: pr.value.requestedReviewers.filter(
+        (r) => !(r.login === login && (r.type === 'team') === isTeam),
+      ),
     }
   }
 
@@ -1423,6 +1529,7 @@ export const useReviewStore = defineStore('review', () => {
     reviewedPaths,
     draftComments,
     repoPaths,
+    recentPRs,
     currentRepoPath,
     isLoadingPR,
     loadingPRKey,
@@ -1450,9 +1557,13 @@ export const useReviewStore = defineStore('review', () => {
     currentStep,
     reviewedCount,
     progressPercent,
+    hasUnreviewedSteps,
     init,
     linkRepoPath,
     unlinkRepoPath,
+    togglePinRecentPR,
+    removeRecentPR,
+    clearRecentPRs,
     loadMockPR,
     loadPRByUrl,
     loadPRByRepo,
@@ -1468,6 +1579,7 @@ export const useReviewStore = defineStore('review', () => {
     goToFile,
     nextStep,
     prevStep,
+    nextUnreviewedStep,
     toggleReviewed,
     isStepReviewed,
     toggleIgnoreWhitespace,
@@ -1480,6 +1592,8 @@ export const useReviewStore = defineStore('review', () => {
     togglePinStep,
     toggleHideStep,
     moveStep,
+    reorderStep,
+    hideGeneratedSteps,
     resetTourCustomization,
     addDraftComment,
     addFileDraftComment,
