@@ -30,6 +30,20 @@ const fetchPRHeadPulseMock = vi.fn<() => Promise<PRHeadPulse | null>>()
 const updatePullRequestBodyMock = vi.fn<
   (pat: string, pullRequestId: string, body: string) => Promise<string>
 >(async (_pat, _id, body) => body)
+const requestPullRequestReviewersMock = vi.fn(
+  async (_pat: string, _owner: string, _repo: string, _number: number, reviewers: string[]) =>
+    reviewers.map((login) => ({ type: 'user' as const, login, avatarUrl: '' })),
+)
+const removePullRequestReviewersMock = vi.fn<
+  (
+    pat: string,
+    owner: string,
+    repo: string,
+    number: number,
+    reviewers: string[],
+    teamReviewers?: string[],
+  ) => Promise<void>
+>(async () => undefined)
 
 vi.mock('@/services/github', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/github')>()
@@ -57,6 +71,21 @@ vi.mock('@/services/github', async (importOriginal) => {
     fetchPRHeadPulse: () => fetchPRHeadPulseMock(),
     updatePullRequestBody: (pat: string, pullRequestId: string, body: string) =>
       updatePullRequestBodyMock(pat, pullRequestId, body),
+    requestPullRequestReviewers: (
+      pat: string,
+      owner: string,
+      repo: string,
+      number: number,
+      reviewers: string[],
+    ) => requestPullRequestReviewersMock(pat, owner, repo, number, reviewers),
+    removePullRequestReviewers: (
+      pat: string,
+      owner: string,
+      repo: string,
+      number: number,
+      reviewers: string[],
+      teamReviewers?: string[],
+    ) => removePullRequestReviewersMock(pat, owner, repo, number, reviewers, teamReviewers),
   }
 })
 
@@ -815,5 +844,77 @@ describe('useReviewStore tour start state', () => {
     store.backToInbox()
     await store.loadMockPR()
     expect(store.tourStarted).toBe(false)
+  })
+})
+
+describe('useReviewStore reviewers management', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.stubGlobal('localStorage', createMemoryStorage())
+    fetchPullRequestMock.mockReset()
+    requestPullRequestReviewersMock.mockClear()
+    removePullRequestReviewersMock.mockClear()
+  })
+
+  it('re-requests a review and removes user or team reviewers in mock mode', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+
+    await store.addReviewer('marcus-chen')
+    const reRequested = store.pr?.requestedReviewers.find((r) => r.login === 'marcus-chen')
+    expect(reRequested).toEqual({
+      type: 'user',
+      login: 'marcus-chen',
+      avatarUrl: 'https://avatars.githubusercontent.com/u/2?v=4',
+    })
+
+    await store.removeReviewer('platform-reliability', true)
+    expect(
+      store.pr?.requestedReviewers.some(
+        (r) => r.type === 'team' && r.login === 'platform-reliability',
+      ),
+    ).toBe(false)
+
+    await store.removeReviewer('priya-nair', false)
+    expect(store.pr?.requestedReviewers.some((r) => r.login === 'priya-nair')).toBe(false)
+  })
+
+  it('calls GitHub API with reviewers or team_reviewers when removing a reviewer', async () => {
+    fetchPullRequestMock.mockResolvedValueOnce(
+      makePR({
+        owner: 'acme',
+        repo: 'stroll',
+        number: 12,
+        requestedReviewers: [
+          { type: 'user', login: 'alice', avatarUrl: '' },
+          { type: 'team', login: 'core-team', name: 'Core Team', avatarUrl: '' },
+        ],
+      }),
+    )
+    const auth = useAuthStore()
+    auth.pat = 'ghp_test_token'
+    const store = useReviewStore()
+    await store.loadPRByRepo('acme', 'stroll', 12)
+
+    await store.removeReviewer('alice', false)
+    expect(removePullRequestReviewersMock).toHaveBeenCalledWith(
+      'ghp_test_token',
+      'acme',
+      'stroll',
+      12,
+      ['alice'],
+      [],
+    )
+
+    await store.removeReviewer('core-team', true)
+    expect(removePullRequestReviewersMock).toHaveBeenCalledWith(
+      'ghp_test_token',
+      'acme',
+      'stroll',
+      12,
+      [],
+      ['core-team'],
+    )
+    expect(store.pr?.requestedReviewers).toEqual([])
   })
 })
