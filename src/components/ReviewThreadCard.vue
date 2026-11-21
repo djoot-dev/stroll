@@ -46,10 +46,12 @@ const editingCommentId = ref<string | null>(null)
 const editBody = ref('')
 const isSavingEdit = ref(false)
 const deletingCommentId = ref<string | null>(null)
+const confirmDeleteCommentId = ref<string | null>(null)
 const error = ref<string | null>(null)
 const collapsed = ref(props.thread.isResolved || props.thread.isOutdated)
 const applyingSuggestionKey = ref<string | null>(null)
 const appliedSuggestionKeys = ref<Set<string>>(new Set())
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 
 const canApplyThreadSuggestions = computed(
   () =>
@@ -196,6 +198,12 @@ async function handleToggleResolve() {
           Outdated
         </span>
         <span
+          v-if="collapsed && thread.comments.length > 1"
+          class="shrink-0 rounded bg-canvas px-1.5 py-0.2 font-mono text-[10px] text-ink-muted"
+        >
+          {{ thread.comments.length }} comments
+        </span>
+        <span
           v-if="collapsed && collapsedPreview"
           class="min-w-0 truncate text-[10.5px] text-ink-faint"
         >
@@ -215,6 +223,14 @@ async function handleToggleResolve() {
         <span>{{ thread.isResolved ? 'Unresolve' : 'Resolve' }}</span>
       </button>
     </div>
+
+    <p
+      v-if="error"
+      role="alert"
+      class="border-t border-crimson-border bg-crimson-soft/40 px-3 py-1.5 text-[11px] text-crimson-text"
+    >
+      {{ error }}
+    </p>
 
     <!-- Comments & Reply -->
     <div v-if="!collapsed" class="divide-y divide-border-muted">
@@ -238,13 +254,36 @@ async function handleToggleResolve() {
               >
                 <Pencil class="h-3 w-3" />
               </button>
+              <template v-if="confirmDeleteCommentId === comment.id">
+                <span class="text-[10.5px] text-crimson-text">Delete?</span>
+                <button
+                  type="button"
+                  class="rounded bg-crimson px-1.5 py-0.5 text-[10px] font-semibold text-white hover:opacity-90 disabled:opacity-40"
+                  :disabled="deletingCommentId === comment.id"
+                  @click="
+                    confirmDeleteCommentId = null;
+                    handleDeleteComment(comment.id)
+                  "
+                >
+                  Confirm
+                </button>
+                <button
+                  type="button"
+                  class="rounded border border-border bg-canvas px-1.5 py-0.5 text-[10px] text-ink-secondary hover:bg-canvas-elevated"
+                  @click="confirmDeleteCommentId = null"
+                >
+                  Cancel
+                </button>
+              </template>
               <button
+                v-else
                 type="button"
                 title="Delete comment"
+                aria-label="Delete comment"
                 class="rounded p-0.5 text-ink-faint transition-colors hover:bg-crimson-soft hover:text-crimson-text disabled:opacity-40"
                 :disabled="deletingCommentId === comment.id"
                 :aria-busy="deletingCommentId === comment.id"
-                @click="handleDeleteComment(comment.id)"
+                @click="confirmDeleteCommentId = comment.id"
               >
                 <Loader2 v-if="deletingCommentId === comment.id" class="h-3 w-3 animate-spin" />
                 <Trash2 v-else class="h-3 w-3" />
@@ -262,24 +301,27 @@ async function handleToggleResolve() {
             @keydown.ctrl.enter.prevent="handleSaveEdit(comment.id)"
             @keydown.esc.prevent="editingCommentId = null"
           />
-          <div class="flex items-center justify-end gap-2">
-            <button
-              type="button"
-              class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-canvas-elevated"
-              @click="editingCommentId = null"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              class="inline-flex items-center gap-1 rounded-lg bg-terra px-3 py-1 text-[11px] font-semibold text-white hover:bg-terra-hover disabled:opacity-40"
-              :disabled="isSavingEdit || !editBody.trim()"
-              :aria-busy="isSavingEdit"
-              @click="handleSaveEdit(comment.id)"
-            >
-              <Loader2 v-if="isSavingEdit" class="h-3 w-3 animate-spin" />
-              <span>Save</span>
-            </button>
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-[10.5px] text-ink-faint">{{ isMac ? '⌘↵' : 'Ctrl+↵' }} to save · Esc to cancel</span>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-canvas-elevated"
+                @click="editingCommentId = null"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 rounded-lg bg-terra px-3 py-1 text-[11px] font-semibold text-white hover:bg-terra-hover disabled:opacity-40"
+                :disabled="isSavingEdit || !editBody.trim()"
+                :aria-busy="isSavingEdit"
+                @click="handleSaveEdit(comment.id)"
+              >
+                <Loader2 v-if="isSavingEdit" class="h-3 w-3 animate-spin" />
+                <span>Save</span>
+              </button>
+            </div>
           </div>
         </div>
         <template v-else>
@@ -329,9 +371,6 @@ async function handleToggleResolve() {
       </div>
 
       <!-- Inline Reply Area -->
-      <p v-if="error && !isReplying" class="bg-crimson-soft/40 px-3 py-1.5 text-[11px] text-crimson-text">
-        {{ error }}
-      </p>
       <div class="bg-canvas/40 px-3 py-2">
         <div v-if="!isReplying" class="flex items-center">
           <button
@@ -354,24 +393,25 @@ async function handleToggleResolve() {
             @keydown.esc.prevent="isReplying = false"
           />
 
-          <p v-if="error" class="text-[11px] text-crimson-text">{{ error }}</p>
-
-          <div class="flex items-center justify-end gap-2">
-            <button
-              class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-canvas-elevated"
-              @click="isReplying = false"
-            >
-              Cancel
-            </button>
-            <button
-              class="inline-flex items-center gap-1 rounded-lg bg-terra px-3 py-1 text-[11px] font-semibold text-white hover:bg-terra-hover disabled:opacity-40"
-              :disabled="isSubmitting || !replyBody.trim()"
-              :aria-busy="isSubmitting"
-              @click="handleReply"
-            >
-              <Loader2 v-if="isSubmitting" class="h-3 w-3 animate-spin" />
-              <span>Reply</span>
-            </button>
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-[10.5px] text-ink-faint">{{ isMac ? '⌘↵' : 'Ctrl+↵' }} to reply · Esc to cancel</span>
+            <div class="flex items-center gap-2">
+              <button
+                class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-canvas-elevated"
+                @click="isReplying = false"
+              >
+                Cancel
+              </button>
+              <button
+                class="inline-flex items-center gap-1 rounded-lg bg-terra px-3 py-1 text-[11px] font-semibold text-white hover:bg-terra-hover disabled:opacity-40"
+                :disabled="isSubmitting || !replyBody.trim()"
+                :aria-busy="isSubmitting"
+                @click="handleReply"
+              >
+                <Loader2 v-if="isSubmitting" class="h-3 w-3 animate-spin" />
+                <span>Reply</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>

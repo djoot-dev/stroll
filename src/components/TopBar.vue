@@ -29,6 +29,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore } from '@/stores/settings'
 
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
+
 const emit = defineEmits<{
   (e: 'openCommandPalette'): void
 }>()
@@ -91,7 +93,7 @@ function handleRefreshPR() {
   <header class="shrink-0 border-b border-border bg-canvas-subtle">
     <div class="flex h-12 items-center justify-between gap-3 px-4">
       <!-- Left: Back to PRs + Sidebar toggle + Brand + PR badge -->
-      <div class="flex min-w-0 flex-1 items-center gap-2">
+      <div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
         <button
           class="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-border bg-canvas px-2 py-1 text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated"
           title="Back to PR Inbox"
@@ -103,6 +105,8 @@ function handleRefreshPR() {
 
         <button
           class="shrink-0 rounded-lg p-1.5 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+          :aria-expanded="review.sidebarOpen"
+          :aria-label="review.sidebarOpen ? 'Hide tour outline' : 'Show tour outline'"
           :title="review.sidebarOpen ? 'Hide tour outline ([)' : 'Show tour outline ([)'"
           @click="review.sidebarOpen = !review.sidebarOpen"
         >
@@ -123,7 +127,7 @@ function handleRefreshPR() {
 
         <template v-if="review.pr">
           <span class="shrink-0 text-ink-faint">/</span>
-          <div class="flex min-w-0 items-center gap-1.5">
+          <div class="flex min-w-0 items-center gap-1.5 overflow-hidden">
             <span class="truncate text-xs font-medium text-ink-secondary">
               {{ review.pr.owner }}/{{ review.pr.repo }}
               <span class="text-ink-muted">#{{ review.pr.number }}</span>
@@ -167,6 +171,7 @@ function handleRefreshPR() {
         <button
           class="shrink-0 rounded-lg border border-border bg-canvas px-2 py-1 text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated disabled:opacity-40"
           :disabled="review.activeView === 'overview' || review.currentStepIndex === 0"
+          aria-label="Previous step"
           title="Previous step (H or ←)"
           @click="review.prevStep()"
         >
@@ -189,6 +194,7 @@ function handleRefreshPR() {
         <button
           class="shrink-0 rounded-lg border border-border bg-canvas px-2 py-1 text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated disabled:opacity-40"
           :disabled="review.activeView === 'step' && review.currentStepIndex >= review.tourSteps.length - 1"
+          :aria-label="review.activeView === 'overview' ? 'Enter Guided Tour' : 'Next step'"
           :title="review.activeView === 'overview' ? 'Enter Guided Tour (L or →)' : 'Next step (L or →)'"
           @click="review.nextStep()"
         >
@@ -229,13 +235,13 @@ function handleRefreshPR() {
           v-if="review.pr"
           type="button"
           class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border bg-canvas px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-terra-border hover:bg-canvas-elevated hover:text-ink"
-          title="Jump to file, symbol, or unresolved thread (⌘K / Ctrl+K)"
+          :title="isMac ? 'Jump to file, symbol, or thread (⌘K)' : 'Jump to file, symbol, or thread (Ctrl+K)'"
           @click="emit('openCommandPalette')"
         >
           <Search class="h-3 w-3 shrink-0" />
           <span class="hidden md:inline text-[11px]">Jump…</span>
           <kbd class="rounded border border-border-muted bg-canvas-subtle px-1 font-mono text-[10px] text-ink-faint">
-            ⌘K
+            {{ isMac ? '⌘K' : 'Ctrl+K' }}
           </kbd>
         </button>
 
@@ -244,6 +250,7 @@ function handleRefreshPR() {
           class="shrink-0 rounded-lg border border-border bg-canvas p-1.5 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink disabled:opacity-40"
           :disabled="review.pr.isMock || review.isRefreshingPR"
           :aria-busy="review.isRefreshingPR"
+          aria-label="Refresh Pull Request"
           :title="
             review.pr.isMock
               ? 'Refresh is disabled in Demo PR mode'
@@ -259,6 +266,7 @@ function handleRefreshPR() {
         <button
           v-if="review.pr"
           class="shrink-0 rounded-lg border border-border bg-canvas p-1.5 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+          aria-label="Open PR on GitHub"
           title="Open PR on GitHub"
           @click="handleOpenOnGitHub"
         >
@@ -266,6 +274,7 @@ function handleRefreshPR() {
         </button>
         <button
           class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-border bg-canvas px-2.5 py-1 text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated"
+          :aria-label="`Switch reading order (currently ${review.tourDirection})`"
           :title="`Current reading order: ${review.tourDirection}. Click to switch.`"
           @click="toggleDirection"
         >
@@ -277,6 +286,8 @@ function handleRefreshPR() {
 
         <button
           class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-border bg-canvas px-2.5 py-1 text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated"
+          aria-label="Load Pull Request"
+          title="Load Pull Request"
           @click="review.showLoaderModal = true"
         >
           <FolderGit2 class="h-3.5 w-3.5 text-ink-muted" />
@@ -286,6 +297,7 @@ function handleRefreshPR() {
         <button
           class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-border bg-canvas px-2.5 py-1 text-xs transition-colors hover:bg-canvas-elevated"
           :class="auth.isAuthenticated ? 'text-pine-text' : 'text-ink-secondary'"
+          aria-label="GitHub Authentication Settings"
           title="GitHub Authentication Settings"
           @click="settings.openSettings('github')"
         >
@@ -297,6 +309,7 @@ function handleRefreshPR() {
 
         <button
           class="shrink-0 rounded-lg border border-border bg-canvas p-1.5 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+          :aria-label="settings.resolvedTheme === 'dark' ? 'Switch to Warm Light theme' : 'Switch to Deep Pine Dark theme'"
           :title="settings.resolvedTheme === 'dark' ? 'Switch to Warm Light theme' : 'Switch to Deep Pine Dark theme'"
           @click="settings.toggleTheme()"
         >
@@ -306,7 +319,8 @@ function handleRefreshPR() {
 
         <button
           class="shrink-0 rounded-lg border border-border bg-canvas p-1.5 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
-          title="Settings (⌘,)"
+          aria-label="Settings"
+          :title="isMac ? 'Settings (⌘,)' : 'Settings (Ctrl+,)'"
           @click="settings.openSettings('general')"
         >
           <Settings class="h-3.5 w-3.5" />
