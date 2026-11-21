@@ -6,6 +6,8 @@ import {
   ChevronsUpDown,
   ChevronRight,
   Code2,
+  Columns2,
+  ExternalLink,
   Eye,
   FileArchive,
   FileCode2,
@@ -47,7 +49,13 @@ import {
 } from '@/services/github'
 import { highlightLinesWithCodeMirror, type HighlightSpan } from '@/services/highlighter'
 import { buildLineTokenParts, type DiffTokenPart } from '@/services/inlineDiff'
-import { gitBlameLine, isTauriRuntime, type GitBlameInfo } from '@/services/native'
+import {
+  buildExternalEditorUrl,
+  gitBlameLine,
+  isTauriRuntime,
+  openInExternalEditor,
+  type GitBlameInfo,
+} from '@/services/native'
 import { isLockfile, LAYER_META } from '@/services/readingOrder'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
@@ -1028,8 +1036,104 @@ watch(
   { immediate: true, flush: 'post' },
 )
 
+const flashLineKey = ref<string | null>(null)
+let flashLineTimer: ReturnType<typeof setTimeout> | null = null
+
+async function revealFocusedLine() {
+  const target = review.focusedLine
+  if (!target || target.path !== props.step.file.path) return
+  if (allDiffLines.value.length === 0) return
+
+  const line =
+    allDiffLines.value.find((l) => l.newLineNumber === target.line) ??
+    allDiffLines.value.find((l) => l.commentLine === target.line) ??
+    allDiffLines.value.find((l) => l.oldLineNumber === target.line)
+  if (!line) {
+    review.focusedLine = null
+    return
+  }
+
+  ensureLineRendered(line.key)
+  await nextTick()
+  const row = findLineRow(line.key)
+  if (!row || review.focusedLine?.path !== target.path) return
+  review.focusedLine = null
+  row.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
+  flashLineKey.value = line.key
+  if (flashLineTimer) clearTimeout(flashLineTimer)
+  flashLineTimer = setTimeout(() => {
+    flashLineKey.value = null
+  }, 1800)
+}
+
+watch(
+  () => [review.focusedLine, allDiffLines.value] as const,
+  () => void revealFocusedLine(),
+  { immediate: true, flush: 'post' },
+)
+
+const linkedRepoPath = computed(() => {
+  if (!review.pr) return null
+  return review.repoPaths[`${review.pr.owner}/${review.pr.repo}`] ?? null
+})
+
+async function openStepInEditor(line = 1) {
+  if (!linkedRepoPath.value) return
+  const url = buildExternalEditorUrl(
+    settings.externalEditor,
+    settings.externalEditorCustomCommand,
+    linkedRepoPath.value,
+    props.step.file.path,
+    line,
+  )
+  if (url) {
+    await openInExternalEditor(url)
+  }
+}
+
+interface SplitDiffRow {
+  key: string
+  left: DiffLine | null
+  right: DiffLine | null
+}
+
+function buildSplitRows(lines: DiffLine[]): SplitDiffRow[] {
+  const rows: SplitDiffRow[] = []
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]
+    if (line.type === 'context') {
+      rows.push({ key: `ctx:${line.key}`, left: line, right: line })
+      i += 1
+      continue
+    }
+    const dels: DiffLine[] = []
+    while (i < lines.length && lines[i].type === 'del') {
+      dels.push(lines[i])
+      i += 1
+    }
+    const adds: DiffLine[] = []
+    while (i < lines.length && lines[i].type === 'add') {
+      adds.push(lines[i])
+      i += 1
+    }
+    const maxLen = Math.max(dels.length, adds.length)
+    for (let j = 0; j < maxLen; j += 1) {
+      const left = dels[j] ?? null
+      const right = adds[j] ?? null
+      rows.push({
+        key: `split:${left?.key ?? 'none'}:${right?.key ?? 'none'}`,
+        left,
+        right,
+      })
+    }
+  }
+  return rows
+}
+
 onBeforeUnmount(() => {
   if (flashTimer) clearTimeout(flashTimer)
+  if (flashLineTimer) clearTimeout(flashLineTimer)
 })
 
 function statusBadgeClass(status: string): string {
@@ -1114,6 +1218,36 @@ function statusBadgeClass(status: string): string {
             @click="searchOpen ? closeDiffSearch('dismiss') : openDiffSearch()"
           >
             <Search class="h-3 w-3" />
+          </button>
+
+          <button
+            v-if="linkedRepoPath"
+            type="button"
+            title="Open file in configured external editor"
+            class="inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-1 text-[11px] font-medium text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+            @click="openStepInEditor(1)"
+          >
+            <ExternalLink class="h-3 w-3" />
+            <span class="hidden sm:inline">Editor</span>
+          </button>
+
+          <button
+            type="button"
+            :title="
+              settings.diffViewMode === 'split'
+                ? 'Side-by-side split diff (click for unified)'
+                : 'Unified diff (click for side-by-side split)'
+            "
+            class="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors"
+            :class="
+              settings.diffViewMode === 'split'
+                ? 'border-terra-border bg-terra-soft text-terra-text'
+                : 'border-border bg-canvas text-ink-muted hover:bg-canvas-elevated hover:text-ink'
+            "
+            @click="settings.setDiffViewMode(settings.diffViewMode === 'split' ? 'unified' : 'split')"
+          >
+            <Columns2 class="h-3 w-3" />
+            <span class="hidden sm:inline">{{ settings.diffViewMode === 'split' ? 'Split' : 'Unified' }}</span>
           </button>
 
           <button
@@ -1599,7 +1733,7 @@ function statusBadgeClass(status: string): string {
             settings.wrapLines ? 'overflow-x-hidden' : 'overflow-x-auto',
             { 'select-none': isDraggingSelection },
           ]"
-          :style="{ fontSize: `${settings.codeFontSize}px` }"
+          :style="{ fontSize: `${settings.codeFontSize}px`, tabSize: settings.tabSize }"
         >
           <!--
             Rows share a track as wide as the longest line (never narrower than
@@ -1716,7 +1850,114 @@ function statusBadgeClass(status: string): string {
               {{ seg.header }}
             </div>
 
-            <template v-for="(line, lIdx) in seg.lines" :key="line.key">
+            <template v-if="settings.diffViewMode === 'split'">
+              <template v-for="row in buildSplitRows(seg.lines)" :key="row.key">
+                <div class="grid grid-cols-2 divide-x divide-border-muted">
+                  <!-- Left (Base) Pane -->
+                  <div
+                    v-if="row.left"
+                    :data-diff-line-key="row.left.key"
+                    class="group flex min-w-0 cursor-pointer items-stretch border-l-2"
+                    :class="[
+                      selectedRange.keys.has(row.left.key)
+                        ? ['border-l-transparent', selectionRowClass(row.left.key)]
+                        : row.left.type === 'del'
+                          ? 'border-l-crimson bg-diff-del hover:bg-diff-del-hover'
+                          : 'border-l-transparent hover:bg-diff-hover',
+                      flashLineKey === row.left.key ? 'ring-2 ring-inset ring-terra bg-terra-soft/40' : '',
+                    ]"
+                    @mousedown.left="startLineDrag(row.left)"
+                  >
+                    <span class="w-11 shrink-0 select-none border-r border-border-muted px-1.5 text-right text-[11px] text-code-gutter-text">
+                      {{ row.left.oldLineNumber ?? '' }}
+                    </span>
+                    <span class="w-5 shrink-0 select-none text-center font-bold" :class="row.left.type === 'del' ? 'text-crimson-text' : 'text-code-gutter-text'">
+                      {{ row.left.type === 'del' ? '-' : ' ' }}
+                    </span>
+                    <pre
+                      class="flex-1 pr-2 text-ink"
+                      :class="settings.wrapLines ? 'min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre overflow-x-auto'"
+                    ><template v-for="(pt, pIdx) in tokenizedByKey.get(row.left.key)" :key="pIdx"><span :class="[pt.className, inlineChangeClass(pt, row.left.type)]">{{ pt.text }}</span></template></pre>
+                  </div>
+                  <div v-else class="bg-canvas-inset/40" />
+
+                  <!-- Right (Head) Pane -->
+                  <div
+                    v-if="row.right"
+                    :data-diff-line-key="row.right.key"
+                    class="group flex min-w-0 cursor-pointer items-stretch border-l-2"
+                    :class="[
+                      selectedRange.keys.has(row.right.key)
+                        ? ['border-l-transparent', selectionRowClass(row.right.key)]
+                        : row.right.type === 'add'
+                          ? 'border-l-pine bg-diff-add hover:bg-diff-add-hover'
+                          : 'border-l-transparent hover:bg-diff-hover',
+                      flashLineKey === row.right.key ? 'ring-2 ring-inset ring-terra bg-terra-soft/40' : '',
+                    ]"
+                    @mousedown.left="startLineDrag(row.right)"
+                  >
+                    <span class="w-11 shrink-0 select-none border-r border-border-muted px-1.5 text-right text-[11px] text-code-gutter-text">
+                      {{ row.right.newLineNumber ?? '' }}
+                    </span>
+                    <span class="w-5 shrink-0 select-none text-center font-bold" :class="row.right.type === 'add' ? 'text-pine-text' : 'text-code-gutter-text'">
+                      {{ row.right.type === 'add' ? '+' : ' ' }}
+                    </span>
+                    <pre
+                      class="flex-1 pr-2 text-ink"
+                      :class="settings.wrapLines ? 'min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre overflow-x-auto'"
+                    ><template v-for="(pt, pIdx) in tokenizedByKey.get(row.right.key)" :key="pIdx"><span :class="[pt.className, inlineChangeClass(pt, row.right.type)]">{{ pt.text }}</span></template></pre>
+                  </div>
+                  <div v-else class="bg-canvas-inset/40" />
+                </div>
+
+                <!-- Threads & Drafts for Split Row -->
+                <template
+                  v-for="sideLine in (row.left && row.left === row.right ? [row.left] : [row.left, row.right].filter((l): l is DiffLine => Boolean(l)))"
+                  :key="`meta:${sideLine.key}`"
+                >
+                  <div
+                    v-for="thread in threadsForLine(sideLine)"
+                    :key="thread.id"
+                    class="sticky left-0 w-[100cqw]"
+                  >
+                    <ReviewThreadCard :thread="thread" />
+                  </div>
+
+                  <div
+                    v-for="draft in draftsForLine(sideLine)"
+                    :key="draft.id"
+                    class="sticky left-0 w-[100cqw] py-1.5"
+                    :data-draft-id="draft.id"
+                  >
+                    <div
+                      class="animate-pop-in mx-3 rounded-xl border border-ochre-border bg-ochre-soft p-3 font-sans transition-shadow"
+                      :class="flashDraftId === draft.id ? 'ring-2 ring-ochre-text' : ''"
+                    >
+                      <div class="flex items-center justify-between text-[11px]">
+                        <span class="font-semibold text-ochre-text">
+                          Pending Draft (Line {{ draft.line }})
+                        </span>
+                        <button
+                          class="inline-flex items-center gap-1 text-ink-muted hover:text-crimson-text"
+                          title="Delete draft"
+                          @click.stop="review.deleteDraftComment(draft.id)"
+                        >
+                          <Trash2 class="h-3 w-3" />
+                          <span>Discard</span>
+                        </button>
+                      </div>
+                      <MarkdownContent
+                        :content="draft.body"
+                        :original-lines="getOriginalLinesForRange(draft.line, draft.side, draft.startLine)"
+                        class="mt-1 text-xs leading-relaxed text-ink"
+                      />
+                    </div>
+                  </div>
+                </template>
+              </template>
+            </template>
+
+            <template v-else v-for="(line, lIdx) in seg.lines" :key="line.key">
               <div
                 :data-diff-line-key="line.key"
                 class="group flex cursor-pointer items-stretch border-l-2"
@@ -1728,11 +1969,13 @@ function statusBadgeClass(status: string): string {
                         'border-l-crimson bg-diff-del hover:bg-diff-del-hover': line.type === 'del',
                         'border-l-transparent hover:bg-diff-hover': line.type === 'context',
                       },
-                  activeMatchKey === line.key
-                    ? 'ring-1 ring-inset ring-terra bg-terra-soft/30'
-                    : searchMatchSet.has(line.key)
-                      ? 'bg-ochre-soft/20'
-                      : '',
+                  flashLineKey === line.key
+                    ? 'ring-2 ring-inset ring-terra bg-terra-soft/40'
+                    : activeMatchKey === line.key
+                      ? 'ring-1 ring-inset ring-terra bg-terra-soft/30'
+                      : searchMatchSet.has(line.key)
+                        ? 'bg-ochre-soft/20'
+                        : '',
                   isHoveredUsageLine(line)
                     ? 'inset-ring-1 inset-ring-plum-border shadow-[inset_0_0_0_9999px_var(--color-plum-soft)]'
                     : '',

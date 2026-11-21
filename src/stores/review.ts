@@ -48,6 +48,7 @@ import {
 } from '@/services/prPulse'
 import { buildReadingOrder } from '@/services/readingOrder'
 import {
+  clearReviewCache,
   computeFileFingerprint,
   loadDraftComments,
   loadRepoPaths,
@@ -173,10 +174,11 @@ export const useReviewStore = defineStore('review', () => {
 
   const tourSteps = computed<TourStep[]>(() => {
     if (!pr.value) return []
+    const settings = useSettingsStore()
     const files = filteredFiles.value ?? pr.value.files
-    let steps = buildReadingOrder(files, tourDirection.value).filter(
-      (s) => !hiddenPaths.value.has(s.file.path),
-    )
+    let steps = buildReadingOrder(files, tourDirection.value, {
+      ignorePatterns: settings.tourIgnorePatterns,
+    }).filter((s) => !hiddenPaths.value.has(s.file.path))
 
     if (customOrderPaths.value.length > 0) {
       const orderMap = new Map(customOrderPaths.value.map((p, i) => [p, i]))
@@ -218,6 +220,7 @@ export const useReviewStore = defineStore('review', () => {
     const settings = useSettingsStore()
     await settings.init()
     tourDirection.value = settings.defaultTourDirection
+    ignoreWhitespace.value = settings.ignoreWhitespaceDefault
     repoPaths.value = await loadRepoPaths()
   }
 
@@ -252,6 +255,7 @@ export const useReviewStore = defineStore('review', () => {
       data.files.map((file) => [file.path, computeFileFingerprint(file)]),
     )
     sidebarOpen.value = settings.sidebarDefaultOpen
+    ignoreWhitespace.value = settings.ignoreWhitespaceDefault
     prHasRemoteUpdates.value = false
     remoteUpdateSummary.value = null
     pulseBaseline = baselineFromPR(data)
@@ -501,12 +505,26 @@ export const useReviewStore = defineStore('review', () => {
     activeView.value = 'step'
   }
 
+  const focusedLine = ref<{ path: string; line: number } | null>(null)
+
   function goToFile(path: string): void {
     const idx = tourSteps.value.findIndex((s) => s.file.path === path)
     if (idx >= 0) {
       currentStepIndex.value = idx
       activeView.value = 'step'
     }
+  }
+
+  function goToFileLine(path: string, line: number): void {
+    const targetLine = Math.max(1, Math.floor(line))
+    focusedLine.value = { path, line: targetLine }
+    goToFile(path)
+  }
+
+  async function clearAllCachedReviewData(): Promise<void> {
+    await clearReviewCache()
+    draftComments.value = []
+    reviewedPaths.value = new Set()
   }
 
   function nextStep(): void {
@@ -1398,6 +1416,9 @@ export const useReviewStore = defineStore('review', () => {
     startTour,
     goToStep,
     goToFile,
+    goToFileLine,
+    focusedLine,
+    clearAllCachedReviewData,
     nextStep,
     prevStep,
     toggleReviewed,

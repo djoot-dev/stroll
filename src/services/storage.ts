@@ -4,7 +4,7 @@ import {
   loadGitHubTokenKeychain,
   saveGitHubTokenKeychain,
 } from './native'
-import type { DraftComment, PRFile, TourDirection } from '@/types/pr'
+import type { DraftComment, PRFile, ReviewEvent, TourDirection } from '@/types/pr'
 
 const STORE_FILE = 'stroll-settings.json'
 const FALLBACK_PREFIX = 'stroll_'
@@ -136,6 +136,21 @@ export type ThemeMode = 'light' | 'dark' | 'system'
 /** Display order for the overview's commit and conversation history. */
 export type HistoryOrder = 'newest' | 'oldest'
 
+export type DiffViewMode = 'unified' | 'split'
+export type TabSizeOption = 2 | 4 | 8
+export type ExternalEditorPreset = 'vscode' | 'cursor' | 'zed' | 'custom'
+
+export interface ReviewSummaryDraft {
+  body: string
+  event: ReviewEvent
+}
+
+export interface ReviewTemplate {
+  id: string
+  name: string
+  body: string
+}
+
 export interface PersistedAppSettings {
   theme: ThemeMode
   autoAdvanceOnReview: boolean
@@ -144,6 +159,12 @@ export interface PersistedAppSettings {
   codeFontSize: number
   requireAltForHover: boolean
   wrapLines: boolean
+  diffViewMode: DiffViewMode
+  tabSize: TabSizeOption
+  ignoreWhitespaceDefault: boolean
+  externalEditor: ExternalEditorPreset
+  externalEditorCustomCommand: string
+  tourIgnorePatterns: string[]
   showShortcutsBar: boolean
   inboxAutoRefreshSeconds: number
   inboxNotificationsEnabled: boolean
@@ -221,4 +242,45 @@ export async function saveViewedFiles(prKey: string, viewed: ViewedFilesMap): Pr
   })
   viewedFilesWriteQueue = writeTask.catch(() => {})
   return writeTask
+}
+
+export async function loadReviewSummaryDraft(prKey: string): Promise<ReviewSummaryDraft | null> {
+  if (!prKey) return null
+  const all = (await getItem<Record<string, ReviewSummaryDraft>>('review_summary_drafts')) ?? {}
+  return all[prKey] ?? null
+}
+
+export async function saveReviewSummaryDraft(
+  prKey: string,
+  draft: ReviewSummaryDraft | null,
+): Promise<void> {
+  if (!prKey) return
+  const all = (await getItem<Record<string, ReviewSummaryDraft>>('review_summary_drafts')) ?? {}
+  if (!draft || (!draft.body.trim() && draft.event === 'COMMENT')) {
+    delete all[prKey]
+  } else {
+    all[prKey] = draft
+  }
+  await setItem('review_summary_drafts', all)
+}
+
+export async function loadReviewTemplates(): Promise<ReviewTemplate[]> {
+  return (await getItem<ReviewTemplate[]>('review_templates')) ?? []
+}
+
+export async function saveReviewTemplates(templates: ReviewTemplate[]): Promise<void> {
+  await setItem('review_templates', templates)
+}
+
+/**
+ * Clears cached PR review progress (viewed files), pending inline draft comments,
+ * and saved review summary drafts while keeping PAT, settings, and linked repos intact.
+ */
+export async function clearReviewCache(): Promise<void> {
+  await viewedFilesWriteQueue
+  await Promise.all([
+    deleteItem('draft_comments'),
+    deleteItem('viewed_files'),
+    deleteItem('review_summary_drafts'),
+  ])
 }

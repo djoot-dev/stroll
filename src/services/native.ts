@@ -167,6 +167,80 @@ export async function openExternalUrl(url: string): Promise<void> {
   }
 }
 
+/**
+ * Builds a URI to open a local file (and optional 1-based line) in an external editor.
+ */
+export function buildExternalEditorUrl(
+  preset: 'vscode' | 'cursor' | 'zed' | 'custom',
+  customTemplate: string,
+  repoRoot: string,
+  relativePath: string,
+  line = 1,
+): string | null {
+  const cleanRoot = repoRoot.replace(/\/+$/, '')
+  const cleanRel = relativePath.replace(/^\/+/, '')
+  const fullPath = `${cleanRoot}/${cleanRel}`
+  const safeLine = Math.max(1, Math.floor(line))
+
+  if (preset === 'custom') {
+    const template = customTemplate.trim()
+    if (!template) return null
+    return template
+      .replace(/\{file\}/g, fullPath)
+      .replace(/\{line\}/g, String(safeLine))
+  }
+
+  const scheme = preset === 'zed' ? 'zed://file' : `${preset}://file`
+  const encodedPath = fullPath.split('/').map(encodeURIComponent).join('/')
+  return `${scheme}${encodedPath.startsWith('/') ? '' : '/'}${encodedPath}:${safeLine}`
+}
+
+const ALLOWED_EDITOR_PROTOCOLS = new Set([
+  'vscode:',
+  'vscode-insiders:',
+  'cursor:',
+  'zed:',
+  'idea:',
+  'phpstorm:',
+  'webstorm:',
+  'pycharm:',
+  'goland:',
+  'rider:',
+  'clion:',
+  'rubymine:',
+  'sublime:',
+  'subl:',
+  'atom:',
+  'nova:',
+])
+
+export async function openInExternalEditor(editorUrl: string): Promise<boolean> {
+  const trimmed = editorUrl.trim()
+  if (!trimmed) return false
+
+  let parsed: URL
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    return false
+  }
+
+  if (!ALLOWED_EDITOR_PROTOCOLS.has(parsed.protocol)) {
+    return false
+  }
+
+  if (isTauriRuntime()) {
+    await openUrl(parsed.toString())
+    return true
+  }
+
+  if (typeof window !== 'undefined') {
+    window.open(parsed.toString(), '_blank', 'noopener,noreferrer')
+    return true
+  }
+  return false
+}
+
 export interface LocalRepoInspection {
   isGitRepo: boolean
   ownerRepo: string | null
