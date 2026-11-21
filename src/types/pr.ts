@@ -266,3 +266,14 @@ export interface PRSummary {
   headRefName: string
   isCrossRepository: boolean
 }
+
+export interface RecentPRItem {
+  summary: PRSummary
+  viewedAt: string
+  pinned: boolean
+}
+
+export interface PRLocalProgress {
+  draftCount: number
+  reviewedCount: number
+}
