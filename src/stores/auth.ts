@@ -48,22 +48,28 @@ export const useAuthStore = defineStore('auth', () => {
    */
   const isReloadingList = ref(false)
   const error = ref<string | null>(null)
+  const initStatus = ref<string>('Preparing your review trail…')
   let knownReviewRequestedIds: Set<string> | null = null
   let persistedPat: string | null = null
 
   const isAuthenticated = computed(() => Boolean(pat.value && viewer.value))
 
   async function init(): Promise<void> {
+    error.value = null
+    initStatus.value = 'Loading preferences…'
     const settings = useSettingsStore()
     await settings.init()
+    initStatus.value = 'Checking saved credentials…'
     const savedPat = await loadGitHubPat()
     if (savedPat) {
       pat.value = savedPat
       persistedPat = savedPat
+      void settings.completeOnboarding()
       await verifyAndLoadProfile(savedPat, { persist: false })
       return
     }
     if (isTauriRuntime()) {
+      initStatus.value = 'Checking GitHub CLI session…'
       const { token } = await getGhAuthToken()
       if (token) {
         await verifyAndLoadProfile(token)
@@ -91,6 +97,7 @@ export const useAuthStore = defineStore('auth', () => {
     error.value = null
     try {
       const activeFilter = prFilter.value
+      initStatus.value = 'Validating GitHub session & loading PR inbox…'
       const {
         viewer: user,
         requestedPRs: prs,
@@ -102,6 +109,8 @@ export const useAuthStore = defineStore('auth', () => {
       requestedPRs.value = prs
       hasMorePRs.value = hasNextPage
       prEndCursor.value = endCursor
+      const settings = useSettingsStore()
+      void settings.completeOnboarding()
       const trimmedToken = token.trim()
       if (options?.persist !== false && trimmedToken !== persistedPat) {
         await saveGitHubPat(trimmedToken)
@@ -109,7 +118,6 @@ export const useAuthStore = defineStore('auth', () => {
       }
 
       if (activeFilter === 'review-requested') {
-        const settings = useSettingsStore()
         if (
           options?.notifyOnNew &&
           settings.inboxNotificationsEnabled &&
@@ -208,6 +216,7 @@ export const useAuthStore = defineStore('auth', () => {
     isLoading,
     isReloadingList,
     error,
+    initStatus,
     isAuthenticated,
     init,
     verifyAndLoadProfile,
