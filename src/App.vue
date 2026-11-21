@@ -14,6 +14,7 @@ import SplashScreen from '@/components/SplashScreen.vue'
 import TopBar from '@/components/TopBar.vue'
 import TourSidebar from '@/components/TourSidebar.vue'
 import UpdateIndicator from '@/components/UpdateIndicator.vue'
+import { runAppStartup } from '@/services/startup'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore } from '@/stores/settings'
@@ -232,6 +233,60 @@ function handleWindowBlur() {
 let pulseTimerId: ReturnType<typeof setInterval> | null = null
 let updateCheckTimerId: ReturnType<typeof setInterval> | null = null
 
+const isSlowStartup = ref(false)
+const startupError = ref<string | null>(null)
+const isRetryingStartup = ref(false)
+
+function continueToInbox(): void {
+  startupError.value = null
+  if (review.screen === 'splash') {
+    review.screen = 'inbox'
+  }
+}
+
+async function executeStartup(): Promise<void> {
+  isSlowStartup.value = false
+  startupError.value = null
+
+  const result = await runAppStartup({
+    initSettings: () => settings.init(),
+    isOnboardingCompleted: () => settings.onboardingCompleted,
+    initAuth: () => auth.init(),
+    initReview: () => review.init(),
+    getAuthError: () => auth.error,
+    onSlowStartup: () => {
+      isSlowStartup.value = true
+    },
+  })
+
+  if (result.ok) {
+    if (review.screen === 'splash') {
+      review.screen = 'inbox'
+    }
+  } else {
+    startupError.value = result.error
+  }
+}
+
+async function retryStartup(): Promise<void> {
+  if (isRetryingStartup.value) return
+  isRetryingStartup.value = true
+  try {
+    await executeStartup()
+  } finally {
+    isRetryingStartup.value = false
+  }
+}
+
+watch(
+  () => auth.isAuthenticated,
+  (authenticated) => {
+    if (authenticated && review.screen === 'splash' && startupError.value) {
+      continueToInbox()
+    }
+  },
+)
+
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('keyup', handleKeyup)
@@ -239,9 +294,7 @@ onMounted(async () => {
   pulseTimerId = setInterval(() => {
     void review.checkForRemotePRUpdates()
   }, 60_000)
-  const minSplashDelay = new Promise((resolve) => setTimeout(resolve, 750))
-  await Promise.all([auth.init(), review.init(), minSplashDelay])
-  review.screen = 'inbox'
+  await executeStartup()
   // Quietly look for a new desktop release so the version indicator can surface it.
   void updates.checkForUpdates({ silent: true })
   updateCheckTimerId = setInterval(() => {
@@ -262,7 +315,17 @@ onBeforeUnmount(() => {
 <template>
   <Transition name="screen-fade" mode="out-in">
     <!-- 1. Splash Screen -->
-    <SplashScreen v-if="review.screen === 'splash'" key="splash" />
+    <SplashScreen
+      v-if="review.screen === 'splash'"
+      key="splash"
+      :status-text="auth.initStatus"
+      :is-slow="isSlowStartup"
+      :error="startupError"
+      :is-retrying="isRetryingStartup"
+      @retry="retryStartup"
+      @open-settings="settings.openSettings('github')"
+      @continue="continueToInbox"
+    />
 
     <!-- 2. Centralized PRs Pending Your Review -->
     <PRInboxView v-else-if="review.screen === 'inbox'" key="inbox" />
