@@ -46,13 +46,22 @@ import {
   detectPulseChange,
   type PulseBaseline,
 } from '@/services/prPulse'
+import {
+  prRefKey,
+  recordRecentPR,
+  removeRecentPR as removeRecentPRItem,
+  summarizePullRequest,
+  togglePinRecentPR as togglePinRecentPRItem,
+} from '@/services/inbox'
 import { buildReadingOrder } from '@/services/readingOrder'
 import {
   computeFileFingerprint,
   loadDraftComments,
+  loadRecentPRs,
   loadRepoPaths,
   loadViewedFiles,
   saveDraftComments,
+  saveRecentPRs,
   saveRepoPaths,
   saveViewedFiles,
   type ViewedFilesMap,
@@ -64,9 +73,11 @@ import type {
   PRFileCommit,
   PRIssueComment,
   PRMergeMethod,
+  PRSummary,
   PullRequestData,
   ReactionContent,
   ReactionGroup,
+  RecentPRItem,
   ReviewEvent,
   TourDirection,
   TourStep,
@@ -108,6 +119,7 @@ export const useReviewStore = defineStore('review', () => {
   let fileFingerprints = new Map<string, string>()
   const draftComments = ref<DraftComment[]>([])
   const repoPaths = ref<Record<string, string>>({})
+  const recentPRs = ref<RecentPRItem[]>([])
   const lastSubmitted = ref<SubmittedReviewSummary | null>(null)
 
   const isLoadingPR = ref(false)
@@ -218,7 +230,24 @@ export const useReviewStore = defineStore('review', () => {
     const settings = useSettingsStore()
     await settings.init()
     tourDirection.value = settings.defaultTourDirection
-    repoPaths.value = await loadRepoPaths()
+    const [paths, recent] = await Promise.all([loadRepoPaths(), loadRecentPRs()])
+    repoPaths.value = paths
+    recentPRs.value = recent
+  }
+
+  async function togglePinRecentPR(item: Pick<PRSummary, 'owner' | 'repo' | 'number'>): Promise<void> {
+    recentPRs.value = togglePinRecentPRItem(recentPRs.value, prRefKey(item))
+    await saveRecentPRs(recentPRs.value)
+  }
+
+  async function removeRecentPR(item: Pick<PRSummary, 'owner' | 'repo' | 'number'>): Promise<void> {
+    recentPRs.value = removeRecentPRItem(recentPRs.value, prRefKey(item))
+    await saveRecentPRs(recentPRs.value)
+  }
+
+  async function clearRecentPRs(): Promise<void> {
+    recentPRs.value = recentPRs.value.filter((item) => item.pinned)
+    await saveRecentPRs(recentPRs.value)
   }
 
   async function linkRepoPath(ownerRepo: string, localPath: string): Promise<void> {
@@ -283,6 +312,11 @@ export const useReviewStore = defineStore('review', () => {
 
     if (Object.keys(validViewed).length !== Object.keys(savedViewed).length) {
       await saveViewedFiles(key, validViewed)
+    }
+
+    if (!data.isMock) {
+      recentPRs.value = recordRecentPR(recentPRs.value, summarizePullRequest(data))
+      await saveRecentPRs(recentPRs.value)
     }
 
     screen.value = 'review'
@@ -1356,6 +1390,7 @@ export const useReviewStore = defineStore('review', () => {
     reviewedPaths,
     draftComments,
     repoPaths,
+    recentPRs,
     currentRepoPath,
     isLoadingPR,
     loadingPRKey,
@@ -1385,6 +1420,9 @@ export const useReviewStore = defineStore('review', () => {
     init,
     linkRepoPath,
     unlinkRepoPath,
+    togglePinRecentPR,
+    removeRecentPR,
+    clearRecentPRs,
     loadMockPR,
     loadPRByUrl,
     loadPRByRepo,

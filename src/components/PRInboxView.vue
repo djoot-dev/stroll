@@ -2,16 +2,20 @@
 import {
   ArrowRight,
   ArrowUpDown,
+  CheckCheck,
   CheckCircle2,
   Clock,
   FileDiff,
   FolderGit2,
   GitBranch,
   GitPullRequest,
+  History,
   KeyRound,
   Loader2,
   MessageSquare,
   Moon,
+  PenLine,
+  Pin,
   RefreshCw,
   Search,
   Settings,
@@ -20,14 +24,26 @@ import {
   X,
   XCircle,
 } from '@lucide/vue'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { extractInboxRepos, filterAndSortInboxPRs } from '@/services/inbox'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  extractInboxRepos,
+  filterAndSortInboxPRs,
+  formatLocalProgressBadge,
+  prRefKey,
+} from '@/services/inbox'
 import { checkoutKey, localBranchForPR, type CheckoutTarget } from '@/services/localCheckout'
+import { loadAllPRProgress } from '@/services/storage'
 import { PR_FILTER_OPTIONS, useAuthStore } from '@/stores/auth'
 import { useCheckoutStore } from '@/stores/checkout'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore } from '@/stores/settings'
-import type { CheckRollupState, PRInboxSortOption, PRReviewDecision, PRSummary } from '@/types/pr'
+import type {
+  CheckRollupState,
+  PRInboxSortOption,
+  PRLocalProgress,
+  PRReviewDecision,
+  PRSummary,
+} from '@/types/pr'
 
 const auth = useAuthStore()
 const review = useReviewStore()
@@ -40,9 +56,13 @@ const activeFilterOption = computed(
 
 const urlInput = ref('')
 const searchQuery = ref('')
+const searchInputRef = ref<HTMLInputElement | null>(null)
 const selectedRepo = ref('all')
 const sortBy = ref<PRInboxSortOption>('updated-desc')
 const lastRefreshedAt = ref<Date | null>(auth.isAuthenticated ? new Date() : null)
+const selectedIndex = ref(-1)
+const prProgress = ref<Record<string, PRLocalProgress>>({})
+const cardRefs = new Map<number, HTMLElement>()
 let pollTimer: number | null = null
 
 const sortOptions: ReadonlyArray<{ value: PRInboxSortOption; label: string }> = [
@@ -80,6 +100,129 @@ watch(availableRepos, (repos) => {
 function clearInboxFilters() {
   searchQuery.value = ''
   selectedRepo.value = 'all'
+}
+
+const hasUnpinnedRecent = computed(() => review.recentPRs.some((item) => !item.pinned))
+
+async function refreshLocalProgress() {
+  prProgress.value = await loadAllPRProgress()
+}
+
+function localProgressFor(item: PRSummary) {
+  return formatLocalProgressBadge(prProgress.value[prRefKey(item)], item.changedFiles)
+}
+
+function setCardRef(index: number, el: unknown) {
+  if (el instanceof HTMLElement) {
+    cardRefs.set(index, el)
+  } else {
+    cardRefs.delete(index)
+  }
+}
+
+function isEditableElement(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName.toLowerCase()
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable
+}
+
+function focusSearchBar() {
+  const input = searchInputRef.value
+  if (!input) return
+  input.focus()
+  input.select()
+}
+
+function scrollSelectedIntoView() {
+  void nextTick(() => {
+    const el = cardRefs.get(selectedIndex.value)
+    el?.scrollIntoView({ block: 'nearest' })
+  })
+}
+
+function moveSelection(delta: 1 | -1) {
+  const len = filteredPRs.value.length
+  if (len === 0) {
+    selectedIndex.value = -1
+    return
+  }
+  if (selectedIndex.value < 0) {
+    selectedIndex.value = delta > 0 ? 0 : len - 1
+  } else {
+    selectedIndex.value = Math.max(0, Math.min(len - 1, selectedIndex.value + delta))
+  }
+  scrollSelectedIntoView()
+}
+
+function handleInboxKeydown(e: KeyboardEvent) {
+  if (review.screen !== 'inbox') return
+  if (settings.isOpen || review.isLoadingPR || review.showLoaderModal || review.showFinishModal) {
+    return
+  }
+
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault()
+    focusSearchBar()
+    return
+  }
+
+  const inSearchInput =
+    searchInputRef.value !== null && document.activeElement === searchInputRef.value
+
+  if (inSearchInput) {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      searchInputRef.value?.blur()
+      return
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      moveSelection(1)
+      return
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      moveSelection(-1)
+      return
+    }
+    if (e.key === 'Enter' && selectedIndex.value >= 0) {
+      const targetPR = filteredPRs.value[selectedIndex.value]
+      if (targetPR) {
+        e.preventDefault()
+        openInboxItem(targetPR)
+      }
+    }
+    return
+  }
+
+  if (isEditableElement(e.target) || e.metaKey || e.ctrlKey || e.altKey) return
+
+  if (e.key === '/') {
+    e.preventDefault()
+    focusSearchBar()
+    return
+  }
+
+  if (e.key === 'j' || e.key === 'J' || e.key === 'ArrowDown') {
+    e.preventDefault()
+    moveSelection(1)
+    return
+  }
+
+  if (e.key === 'k' || e.key === 'K' || e.key === 'ArrowUp') {
+    e.preventDefault()
+    moveSelection(-1)
+    return
+  }
+
+  if (e.key === 'Enter' && selectedIndex.value >= 0) {
+    if (e.target instanceof HTMLButtonElement || e.target instanceof HTMLAnchorElement) return
+    const targetPR = filteredPRs.value[selectedIndex.value]
+    if (targetPR) {
+      e.preventDefault()
+      openInboxItem(targetPR)
+    }
+  }
 }
 
 const autoRefreshLabel = computed(() => {
@@ -207,10 +350,35 @@ onMounted(() => {
     lastRefreshedAt.value = new Date()
   }
   resetPollTimer()
+  void refreshLocalProgress()
   window.addEventListener('focus', refreshCheckoutStatuses)
+  window.addEventListener('keydown', handleInboxKeydown)
 })
 
 watch([() => auth.requestedPRs, () => review.repoPaths], refreshCheckoutStatuses, { immediate: true })
+
+watch(
+  () => review.screen,
+  (nextScreen) => {
+    if (nextScreen === 'inbox') {
+      void refreshLocalProgress()
+    }
+  },
+)
+
+watch(filteredPRs, (list) => {
+  if (list.length === 0) {
+    selectedIndex.value = -1
+  } else if (selectedIndex.value >= list.length) {
+    selectedIndex.value = list.length - 1
+  }
+})
+
+watch(searchQuery, () => {
+  if (searchInputRef.value && document.activeElement === searchInputRef.value) {
+    selectedIndex.value = filteredPRs.value.length > 0 ? 0 : -1
+  }
+})
 
 watch(
   () => settings.inboxAutoRefreshSeconds,
@@ -221,6 +389,7 @@ watch(
 
 onBeforeUnmount(() => {
   window.removeEventListener('focus', refreshCheckoutStatuses)
+  window.removeEventListener('keydown', handleInboxKeydown)
   if (pollTimer !== null) {
     window.clearInterval(pollTimer)
     pollTimer = null
@@ -331,6 +500,103 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <p v-if="review.prError" class="mt-2 text-xs text-crimson-text">{{ review.prError }}</p>
+        </section>
+
+        <!-- Recently Viewed / Pinned PRs -->
+        <section v-if="review.recentPRs.length > 0" class="space-y-2.5">
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <History class="h-4 w-4 text-pine" />
+              <h2 class="text-sm font-semibold text-ink">Recently Viewed</h2>
+              <span
+                class="rounded-full bg-sage-soft px-2 py-0.5 font-mono text-[11px] font-medium text-sage-text"
+              >
+                {{ review.recentPRs.length }}
+              </span>
+            </div>
+            <button
+              v-if="hasUnpinnedRecent"
+              type="button"
+              class="text-[11px] text-ink-muted transition-colors hover:text-ink"
+              @click="review.clearRecentPRs()"
+            >
+              Clear unpinned
+            </button>
+          </div>
+
+          <div class="grid gap-2 sm:grid-cols-2">
+            <div
+              v-for="entry in review.recentPRs"
+              :key="prRefKey(entry.summary)"
+              role="button"
+              :tabindex="review.isLoadingPR ? -1 : 0"
+              class="stroll-card group flex items-center justify-between gap-3 rounded-xl border border-border bg-canvas-subtle px-3.5 py-2.5 text-left transition-all hover:border-terra-border hover:bg-canvas-elevated/50 focus:outline-none focus-visible:border-terra-border"
+              :class="{ 'cursor-not-allowed opacity-60': review.isLoadingPR, 'cursor-pointer': !review.isLoadingPR }"
+              :aria-disabled="review.isLoadingPR"
+              @click="openInboxItem(entry.summary)"
+              @keydown.enter.self.prevent="openInboxItem(entry.summary)"
+              @keydown.space.self.prevent="openInboxItem(entry.summary)"
+            >
+              <div class="min-w-0 flex-1 space-y-1">
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="font-mono text-[11px] font-medium text-terra-text">
+                    {{ entry.summary.owner }}/{{ entry.summary.repo }}#{{ entry.summary.number }}
+                  </span>
+                  <span class="text-[11px] text-ink-faint">·</span>
+                  <span class="text-[11px] text-ink-muted">@{{ entry.summary.author.login }}</span>
+                  <span class="text-[11px] text-ink-faint">·</span>
+                  <span class="text-[11px] text-ink-faint">{{ formatRelativeTime(entry.viewedAt) }}</span>
+
+                  <span
+                    v-if="localProgressFor(entry.summary).draftLabel"
+                    class="inline-flex items-center gap-1 rounded-full border border-ochre-border bg-ochre-soft px-1.5 py-0.5 text-[10px] font-medium text-ochre-text"
+                  >
+                    <PenLine class="h-2.5 w-2.5" />
+                    <span>{{ localProgressFor(entry.summary).draftLabel }}</span>
+                  </span>
+
+                  <span
+                    v-if="localProgressFor(entry.summary).reviewLabel"
+                    class="inline-flex items-center gap-1 rounded-full border border-pine-border bg-pine-soft px-1.5 py-0.5 text-[10px] font-medium text-pine-text"
+                  >
+                    <CheckCheck class="h-2.5 w-2.5" />
+                    <span>{{ localProgressFor(entry.summary).reviewLabel }}</span>
+                  </span>
+                </div>
+                <div class="truncate text-xs font-medium text-ink">
+                  {{ entry.summary.title }}
+                </div>
+              </div>
+
+              <div class="flex shrink-0 items-center gap-1" @click.stop>
+                <button
+                  type="button"
+                  class="rounded-lg p-1 transition-colors"
+                  :class="
+                    entry.pinned
+                      ? 'bg-terra-soft text-terra-text hover:bg-terra-soft/80'
+                      : 'text-ink-faint opacity-0 hover:bg-canvas-elevated hover:text-ink group-hover:opacity-100 group-focus-within:opacity-100'
+                  "
+                  :title="entry.pinned ? 'Unpin PR' : 'Pin PR'"
+                  :aria-label="entry.pinned ? 'Unpin PR' : 'Pin PR'"
+                  @click="review.togglePinRecentPR(entry.summary)"
+                  @keydown.stop
+                >
+                  <Pin class="h-3.5 w-3.5" :class="{ 'fill-current': entry.pinned }" />
+                </button>
+                <button
+                  type="button"
+                  class="rounded-lg p-1 text-ink-faint opacity-0 transition-colors hover:bg-canvas-elevated hover:text-ink group-hover:opacity-100 group-focus-within:opacity-100"
+                  title="Remove from recently viewed"
+                  aria-label="Remove from recently viewed"
+                  @click="review.removeRecentPR(entry.summary)"
+                  @keydown.stop
+                >
+                  <X class="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
         </section>
 
         <!-- Pull Request List -->
@@ -491,11 +757,19 @@ onBeforeUnmount(() => {
                   class="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint"
                 />
                 <input
+                  ref="searchInputRef"
                   v-model="searchQuery"
                   type="text"
                   placeholder="Search title, #number, owner/repo, or @author…"
-                  class="w-full rounded-xl border border-border bg-canvas-subtle py-1.5 pr-8 pl-8 text-xs text-ink placeholder-ink-faint transition-colors focus:border-terra focus:outline-none"
+                  class="w-full rounded-xl border border-border bg-canvas-subtle py-1.5 pr-16 pl-8 text-xs text-ink placeholder-ink-faint transition-colors focus:border-terra focus:outline-none"
                 />
+                <div
+                  v-if="!searchQuery"
+                  class="pointer-events-none absolute top-1/2 right-2.5 flex -translate-y-1/2 items-center gap-1 text-[10px] text-ink-faint"
+                >
+                  <kbd class="rounded border border-border bg-canvas-inset px-1 font-mono">/</kbd>
+                  <kbd class="rounded border border-border bg-canvas-inset px-1 font-mono">⌘K</kbd>
+                </div>
                 <button
                   v-if="searchQuery"
                   type="button"
@@ -556,8 +830,9 @@ onBeforeUnmount(() => {
 
             <div v-else class="space-y-2.5">
               <div
-                v-for="item in filteredPRs"
+                v-for="(item, idx) in filteredPRs"
                 :key="item.id"
+                :ref="(el) => setCardRef(idx, el)"
                 role="button"
                 :tabindex="review.isLoadingPR ? -1 : 0"
                 class="stroll-card group flex w-full items-center justify-between gap-4 rounded-2xl border px-4 py-3.5 text-left transition-all focus:outline-none focus-visible:border-terra-border"
@@ -566,10 +841,13 @@ onBeforeUnmount(() => {
                     ? 'cursor-wait border-terra-border bg-terra-soft/20'
                     : review.isLoadingPR
                       ? 'cursor-not-allowed border-border bg-canvas-subtle opacity-60'
-                      : 'cursor-pointer border-border bg-canvas-subtle hover:border-terra-border hover:bg-canvas-elevated/50'
+                      : selectedIndex === idx
+                        ? 'cursor-pointer border-terra-border bg-terra-soft/15 ring-1 ring-terra-border/60'
+                        : 'cursor-pointer border-border bg-canvas-subtle hover:border-terra-border hover:bg-canvas-elevated/50'
                 "
                 :aria-disabled="review.isLoadingPR"
                 :aria-busy="isItemLoading(item.owner, item.repo, item.number)"
+                :aria-selected="selectedIndex === idx"
                 @click="openInboxItem(item)"
                 @keydown.enter.self.prevent="openInboxItem(item)"
                 @keydown.space.self.prevent="openInboxItem(item)"
@@ -627,6 +905,26 @@ onBeforeUnmount(() => {
                     >
                       <MessageSquare class="h-3 w-3 text-ink-faint" />
                       <span>{{ item.totalCommentsCount }}</span>
+                    </span>
+
+                    <!-- Local unsent drafts badge -->
+                    <span
+                      v-if="localProgressFor(item).draftLabel"
+                      class="inline-flex items-center gap-1 rounded-full border border-ochre-border bg-ochre-soft px-1.5 py-0.5 text-[10px] font-medium text-ochre-text"
+                      title="Unsent local draft comments"
+                    >
+                      <PenLine class="h-2.5 w-2.5" />
+                      <span>{{ localProgressFor(item).draftLabel }}</span>
+                    </span>
+
+                    <!-- Local review progress badge -->
+                    <span
+                      v-if="localProgressFor(item).reviewLabel"
+                      class="inline-flex items-center gap-1 rounded-full border border-pine-border bg-pine-soft px-1.5 py-0.5 text-[10px] font-medium text-pine-text"
+                      title="Local review progress"
+                    >
+                      <CheckCheck class="h-2.5 w-2.5" />
+                      <span>{{ localProgressFor(item).reviewLabel }}</span>
                     </span>
                   </div>
                   <div class="truncate text-sm font-medium text-ink">
@@ -722,13 +1020,25 @@ onBeforeUnmount(() => {
                   <span>{{ auth.isLoadingMore ? 'Loading more…' : 'Load more PRs' }}</span>
                 </button>
               </div>
-              <button
-                class="inline-flex items-center gap-1.5 text-xs text-ink-muted transition-colors hover:text-terra-text"
-                @click="review.loadMockPR()"
-              >
-                <Sparkles class="h-3.5 w-3.5" />
-                <span>Open Interactive Demo PR</span>
-              </button>
+              <div class="flex flex-wrap items-center gap-4">
+                <span
+                  v-if="filteredPRs.length > 0"
+                  class="hidden items-center gap-2 text-[11px] text-ink-faint sm:inline-flex"
+                >
+                  <span><kbd class="rounded border border-border bg-canvas-subtle px-1 font-mono text-ink-secondary">J</kbd>/<kbd class="rounded border border-border bg-canvas-subtle px-1 font-mono text-ink-secondary">K</kbd> or <kbd class="rounded border border-border bg-canvas-subtle px-1 font-mono text-ink-secondary">↑</kbd>/<kbd class="rounded border border-border bg-canvas-subtle px-1 font-mono text-ink-secondary">↓</kbd> Navigate</span>
+                  <span>·</span>
+                  <span><kbd class="rounded border border-border bg-canvas-subtle px-1 font-mono text-ink-secondary">Enter</kbd> Open</span>
+                  <span>·</span>
+                  <span><kbd class="rounded border border-border bg-canvas-subtle px-1 font-mono text-ink-secondary">/</kbd> or <kbd class="rounded border border-border bg-canvas-subtle px-1 font-mono text-ink-secondary">⌘K</kbd> Search</span>
+                </span>
+                <button
+                  class="inline-flex items-center gap-1.5 text-xs text-ink-muted transition-colors hover:text-terra-text"
+                  @click="review.loadMockPR()"
+                >
+                  <Sparkles class="h-3.5 w-3.5" />
+                  <span>Open Interactive Demo PR</span>
+                </button>
+              </div>
             </div>
           </div>
         </section>
