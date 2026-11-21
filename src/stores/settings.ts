@@ -10,7 +10,7 @@ import {
   type PersistedAppSettings,
   type ThemeMode,
 } from '@/services/storage'
-import type { TourDirection } from '@/types/pr'
+import type { DiffViewMode, LocalEditor, TourDirection } from '@/types/pr'
 
 export type { HistoryOrder, ThemeMode }
 
@@ -45,6 +45,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   codeFontSize: 12.5,
   requireAltForHover: false,
   wrapLines: false,
+  diffViewMode: 'unified',
+  localEditor: 'vscode',
   showShortcutsBar: true,
   inboxAutoRefreshSeconds: 60,
   inboxNotificationsEnabled: false,
@@ -71,6 +73,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const codeFontSize = ref<number>(DEFAULT_APP_SETTINGS.codeFontSize)
   const requireAltForHover = ref<boolean>(DEFAULT_APP_SETTINGS.requireAltForHover)
   const wrapLines = ref<boolean>(DEFAULT_APP_SETTINGS.wrapLines)
+  const diffViewMode = ref<DiffViewMode>(DEFAULT_APP_SETTINGS.diffViewMode)
+  const localEditor = ref<LocalEditor>(DEFAULT_APP_SETTINGS.localEditor)
   const showShortcutsBar = ref<boolean>(DEFAULT_APP_SETTINGS.showShortcutsBar)
   const inboxAutoRefreshSeconds = ref<number>(DEFAULT_APP_SETTINGS.inboxAutoRefreshSeconds)
   const inboxNotificationsEnabled = ref<boolean>(DEFAULT_APP_SETTINGS.inboxNotificationsEnabled)
@@ -134,6 +138,16 @@ export const useSettingsStore = defineStore('settings', () => {
     if (typeof savedSettings.wrapLines === 'boolean') {
       wrapLines.value = savedSettings.wrapLines
     }
+    if (savedSettings.diffViewMode === 'unified' || savedSettings.diffViewMode === 'split') {
+      diffViewMode.value = savedSettings.diffViewMode
+    }
+    if (
+      savedSettings.localEditor === 'vscode' ||
+      savedSettings.localEditor === 'cursor' ||
+      savedSettings.localEditor === 'zed'
+    ) {
+      localEditor.value = savedSettings.localEditor
+    }
     if (typeof savedSettings.showShortcutsBar === 'boolean') {
       showShortcutsBar.value = savedSettings.showShortcutsBar
     }
@@ -165,6 +179,8 @@ export const useSettingsStore = defineStore('settings', () => {
         codeFontSize: codeFontSize.value,
         requireAltForHover: requireAltForHover.value,
         wrapLines: wrapLines.value,
+        diffViewMode: diffViewMode.value,
+        localEditor: localEditor.value,
         showShortcutsBar: showShortcutsBar.value,
         inboxAutoRefreshSeconds: inboxAutoRefreshSeconds.value,
         inboxNotificationsEnabled: inboxNotificationsEnabled.value,
@@ -237,6 +253,16 @@ export const useSettingsStore = defineStore('settings', () => {
     await persist()
   }
 
+  async function setDiffViewMode(mode: DiffViewMode): Promise<void> {
+    diffViewMode.value = mode
+    await persist()
+  }
+
+  async function setLocalEditor(editor: LocalEditor): Promise<void> {
+    localEditor.value = editor
+    await persist()
+  }
+
   async function setShowShortcutsBar(visible: boolean): Promise<void> {
     showShortcutsBar.value = visible
     await persist()
@@ -277,6 +303,8 @@ export const useSettingsStore = defineStore('settings', () => {
     codeFontSize.value = DEFAULT_APP_SETTINGS.codeFontSize
     requireAltForHover.value = DEFAULT_APP_SETTINGS.requireAltForHover
     wrapLines.value = DEFAULT_APP_SETTINGS.wrapLines
+    diffViewMode.value = DEFAULT_APP_SETTINGS.diffViewMode
+    localEditor.value = DEFAULT_APP_SETTINGS.localEditor
     showShortcutsBar.value = DEFAULT_APP_SETTINGS.showShortcutsBar
     inboxAutoRefreshSeconds.value = DEFAULT_APP_SETTINGS.inboxAutoRefreshSeconds
     inboxNotificationsEnabled.value = DEFAULT_APP_SETTINGS.inboxNotificationsEnabled
@@ -300,6 +328,8 @@ export const useSettingsStore = defineStore('settings', () => {
     codeFontSize,
     requireAltForHover,
     wrapLines,
+    diffViewMode,
+    localEditor,
     showShortcutsBar,
     inboxAutoRefreshSeconds,
     inboxNotificationsEnabled,
@@ -317,6 +347,8 @@ export const useSettingsStore = defineStore('settings', () => {
     setCodeFontSize,
     setRequireAltForHover,
     setWrapLines,
+    setDiffViewMode,
+    setLocalEditor,
     setShowShortcutsBar,
     setInboxAutoRefreshSeconds,
     setInboxNotificationsEnabled,

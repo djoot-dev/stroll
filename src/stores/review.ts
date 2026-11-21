@@ -12,6 +12,7 @@ import {
   addFileReviewThread,
   addReviewThread,
   closePullRequest,
+  commitFileContentToBranch,
   createPendingReview,
   deleteIssueComment as apiDeleteIssueComment,
   deleteReviewComment as apiDeleteReviewComment,
@@ -39,6 +40,7 @@ import {
   updateReviewComment as apiUpdateReviewComment,
 } from '@/services/github'
 import type { PRHeadPulse, ReviewerCandidate } from '@/services/github'
+import { applySuggestionToContent, hasRepoWriteAccess } from '@/services/suggestions'
 import {
   baselineFromPR,
   baselineFromPulse,
@@ -125,6 +127,7 @@ export const useReviewStore = defineStore('review', () => {
 
   const sidebarOpen = ref(true)
   const ignoreWhitespace = ref(false)
+  const showUnresolvedOnly = ref(false)
   const commitFilter = ref<string>('all')
   const filteredFiles = ref<PRFile[] | null>(null)
   const isLoadingCommitFilter = ref(false)
@@ -602,6 +605,10 @@ export const useReviewStore = defineStore('review', () => {
     ignoreWhitespace.value = !ignoreWhitespace.value
   }
 
+  function toggleShowUnresolvedOnly(): void {
+    showUnresolvedOnly.value = !showUnresolvedOnly.value
+  }
+
   function togglePinStep(path: string): void {
     const activePath = currentStep.value?.file.path
     const next = new Set(pinnedPaths.value)
@@ -1002,6 +1009,66 @@ export const useReviewStore = defineStore('review', () => {
     target.comments.push(comment)
   }
 
+  const canApplySuggestions = computed(() =>
+    Boolean(
+      pr.value &&
+        pr.value.state === 'OPEN' &&
+        (pr.value.isMock || hasRepoWriteAccess(pr.value.viewerPermission)),
+    ),
+  )
+
+  async function applySuggestion(threadId: string, suggestionCode: string): Promise<void> {
+    if (!pr.value) return
+    const auth = useAuthStore()
+    const target = pr.value.threads.find((t) => t.id === threadId)
+    if (!target) throw new Error('Review thread not found.')
+    if (target.subjectType === 'FILE' || target.side !== 'RIGHT') {
+      throw new Error('Only line-anchored suggestions on the head side can be applied.')
+    }
+    const file = pr.value.files.find((f) => f.path === target.path)
+    if (!file || file.headContent === null) {
+      throw new Error('Full file content is required to apply this suggestion.')
+    }
+
+    const startLine = target.startLine ?? target.line
+    const endLine = target.line
+    const updatedContent = applySuggestionToContent(
+      file.headContent,
+      startLine,
+      endLine,
+      suggestionCode,
+    )
+
+    if (pr.value.isMock) {
+      file.headContent = updatedContent
+      target.isResolved = true
+      return
+    }
+
+    if (!auth.pat) {
+      throw new Error('GitHub PAT is required to apply a suggestion.')
+    }
+    if (!hasRepoWriteAccess(pr.value.viewerPermission)) {
+      throw new Error('Write access to the repository is required to apply suggestions.')
+    }
+
+    const author = target.comments[0]?.author.login
+    const message = author
+      ? `Apply suggestion from @${author}`
+      : `Apply suggested change to ${file.path}`
+
+    await commitFileContentToBranch(
+      auth.pat,
+      pr.value.owner,
+      pr.value.repo,
+      file.path,
+      pr.value.headRefName,
+      message,
+      updatedContent,
+    )
+    file.headContent = updatedContent
+  }
+
   async function toggleThreadResolved(threadId: string): Promise<void> {
     if (!pr.value) return
     const auth = useAuthStore()
@@ -1369,6 +1436,7 @@ export const useReviewStore = defineStore('review', () => {
     submitSuccessMessage,
     sidebarOpen,
     ignoreWhitespace,
+    showUnresolvedOnly,
     commitFilter,
     isLoadingCommitFilter,
     lastReviewedCommitOid,
@@ -1403,6 +1471,7 @@ export const useReviewStore = defineStore('review', () => {
     toggleReviewed,
     isStepReviewed,
     toggleIgnoreWhitespace,
+    toggleShowUnresolvedOnly,
     setCommitFilter,
     fileCommits,
     fileCommitsLoading,
@@ -1419,6 +1488,8 @@ export const useReviewStore = defineStore('review', () => {
     focusedDraftId,
     focusDraftComment,
     replyToThread,
+    canApplySuggestions,
+    applySuggestion,
     toggleThreadResolved,
     postPRComment,
     editReviewComment,
