@@ -1133,32 +1133,6 @@ async function handleResetDefaults() {
                   </span>
                 </div>
 
-                <div class="rounded-xl border border-border bg-canvas/60 p-4">
-                  <p class="text-xs font-medium text-ink">Preferred Local Editor</p>
-                  <p class="mt-0.5 text-[11px] text-ink-muted">
-                    Used by "Open in editor" when a local repository is linked.
-                  </p>
-                  <div class="mt-3 grid grid-cols-3 gap-2">
-                    <button
-                      v-for="ed in [
-                        { id: 'vscode', label: 'VS Code' },
-                        { id: 'cursor', label: 'Cursor' },
-                        { id: 'zed', label: 'Zed' },
-                      ] as const"
-                      :key="ed.id"
-                      class="rounded-xl border px-3 py-2 text-center text-xs font-semibold transition-colors"
-                      :class="
-                        settings.localEditor === ed.id
-                          ? 'border-terra-border bg-terra-soft text-terra-text'
-                          : 'border-border bg-canvas-subtle text-ink hover:bg-canvas-elevated/60'
-                      "
-                      @click="settings.setLocalEditor(ed.id)"
-                    >
-                      {{ ed.label }}
-                    </button>
-                  </div>
-                </div>
-
                 <div v-if="linkedRepos.length > 0" class="max-h-40 space-y-1.5 overflow-y-auto">
                   <div
                     v-for="[ownerRepo, localPath] in linkedRepos"
@@ -1258,6 +1232,33 @@ async function handleResetDefaults() {
                   </div>
                 </div>
 
+                <!-- Preferred Local Editor -->
+                <div class="rounded-xl border border-border bg-canvas/60 p-4">
+                  <p class="text-xs font-medium text-ink">Preferred Local Editor</p>
+                  <p class="mt-0.5 text-[11px] text-ink-muted">
+                    Used by "Open in editor" when a local repository is linked.
+                  </p>
+                  <div class="mt-3 grid grid-cols-3 gap-2">
+                    <button
+                      v-for="ed in [
+                        { id: 'vscode', label: 'VS Code' },
+                        { id: 'cursor', label: 'Cursor' },
+                        { id: 'zed', label: 'Zed' },
+                      ] as const"
+                      :key="ed.id"
+                      class="rounded-xl border px-3 py-2 text-center text-xs font-semibold transition-colors"
+                      :class="
+                        settings.localEditor === ed.id
+                          ? 'border-terra-border bg-terra-soft text-terra-text'
+                          : 'border-border bg-canvas-subtle text-ink hover:bg-canvas-elevated/60'
+                      "
+                      @click="settings.setLocalEditor(ed.id)"
+                    >
+                      {{ ed.label }}
+                    </button>
+                  </div>
+                </div>
+
                 <!-- External Editor -->
                 <div class="space-y-3 rounded-xl border border-border bg-canvas/60 p-4">
                   <div>
@@ -1267,12 +1268,12 @@ async function handleResetDefaults() {
                     </p>
                   </div>
 
-                  <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <button
                       v-for="ed in editorOptions"
                       :key="ed.value"
                       type="button"
-                      class="rounded-xl border p-2.5 text-left transition-colors"
+                      class="rounded-xl border p-3 text-left transition-colors"
                       :class="
                         settings.externalEditor === ed.value
                           ? 'border-terra-border bg-terra-soft'
@@ -1281,7 +1282,13 @@ async function handleResetDefaults() {
                       @click="settings.setExternalEditor(ed.value)"
                     >
                       <p class="text-xs font-semibold text-ink">{{ ed.label }}</p>
-                      <p class="mt-0.5 truncate font-mono text-[10px] text-ink-muted">{{ ed.hint }}</p>
+                      <p class="mt-1.5">
+                        <code
+                          class="inline-block rounded-md border border-border-muted bg-canvas-inset px-1.5 py-0.5 font-mono text-[11px] text-ink-secondary"
+                        >
+                          {{ ed.hint }}
+                        </code>
+                      </p>
                     </button>
                   </div>
 
