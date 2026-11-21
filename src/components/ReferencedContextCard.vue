@@ -15,7 +15,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'jumpToFile', path: string): void
+  (e: 'jumpToFile', path: string, line?: number): void
 }>()
 
 const expanded = ref(false)
@@ -47,12 +47,16 @@ function mountCodeMirror() {
   })
 }
 
+function destroyEditor() {
+  if (editorView) {
+    editorView.destroy()
+    editorView = null
+  }
+}
+
 watch(expanded, (isOpen) => {
   if (isOpen) {
     requestAnimationFrame(() => mountCodeMirror())
-  } else if (editorView) {
-    editorView.destroy()
-    editorView = null
   }
 })
 
@@ -78,32 +82,41 @@ onBeforeUnmount(() => {
   <div class="stroll-card overflow-hidden rounded-xl border border-sage-border bg-canvas-subtle">
     <div class="flex items-center justify-between gap-2 bg-sage-soft/50 px-3 py-2">
       <button
+        type="button"
+        :aria-expanded="expanded"
         class="flex min-w-0 flex-1 items-center gap-2 text-left text-xs text-ink hover:text-pine-text"
         @click="expanded = !expanded"
       >
         <ChevronDown v-if="expanded" class="h-3.5 w-3.5 shrink-0 text-pine" />
         <ChevronRight v-else class="h-3.5 w-3.5 shrink-0 text-pine" />
         <BookOpen class="h-3.5 w-3.5 shrink-0 text-pine" />
-        <span class="font-medium text-pine-text">Referenced PR Context:</span>
-        <span class="truncate font-mono text-ink-secondary">{{ context.sourcePath }}</span>
+        <span class="shrink-0 font-medium text-pine-text">Referenced PR Context:</span>
+        <span class="truncate font-mono text-ink-secondary" :title="context.sourcePath">
+          {{ context.sourcePath }}
+        </span>
+        <span class="shrink-0 font-mono text-[10.5px] text-ink-muted">
+          L{{ context.startLine }}
+        </span>
         <span
           v-if="context.symbolNames.length > 0"
           class="hidden truncate font-mono text-[11px] text-ink-muted sm:inline"
+          :title="context.symbolNames.join(', ')"
         >
           ({{ context.symbolNames.join(', ') }})
         </span>
       </button>
 
       <button
+        type="button"
         class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border bg-canvas-subtle px-2 py-0.5 text-[11px] text-ink-secondary transition-colors hover:bg-canvas-elevated hover:text-ink"
-        @click="emit('jumpToFile', context.sourcePath)"
+        @click="emit('jumpToFile', context.sourcePath, context.startLine)"
       >
-        <span>Jump to file</span>
+        <span>Jump to line {{ context.startLine }}</span>
         <ArrowUpRight class="h-3 w-3" />
       </button>
     </div>
 
-    <Transition name="reveal-down">
+    <Transition name="reveal-down" @after-leave="destroyEditor">
       <div v-if="expanded" class="border-t border-border-muted">
         <div ref="editorHost" class="max-h-64 overflow-auto" />
       </div>

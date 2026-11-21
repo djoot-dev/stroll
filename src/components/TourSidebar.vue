@@ -328,7 +328,10 @@ function dirOnly(path: string): string {
               <span>Next</span>
             </button>
           </div>
-          <span class="truncate font-mono text-[10.5px] text-ink-faint">
+          <span
+            class="truncate font-mono text-[10.5px] text-ink-faint"
+            :title="`${review.pr.headRefName} → ${review.pr.baseRefName}`"
+          >
             {{ review.pr.headRefName }} → {{ review.pr.baseRefName }}
           </span>
         </div>
@@ -347,6 +350,7 @@ function dirOnly(path: string): string {
         <div v-if="review.pr.commits.length > 0" class="mt-2.5 flex items-center gap-1.5">
           <GitCommitHorizontal class="h-3.5 w-3.5 shrink-0 text-ink-faint" />
           <select
+            aria-label="Filter tour by commit"
             :value="review.commitFilter"
             :disabled="review.isLoadingCommitFilter"
             :aria-busy="review.isLoadingCommitFilter"
@@ -426,18 +430,23 @@ function dirOnly(path: string): string {
         <div class="flex flex-wrap items-center gap-1">
           <button
             type="button"
+            :aria-pressed="statusFilter === 'all' && !hideReviewed"
             class="rounded-md px-1.5 py-0.5 text-[10.5px] font-medium transition-colors"
             :class="
-              statusFilter === 'all'
+              statusFilter === 'all' && !hideReviewed
                 ? 'bg-terra-soft text-terra-text'
                 : 'text-ink-muted hover:bg-canvas-elevated hover:text-ink'
             "
-            @click="statusFilter = 'all'"
+            @click="
+              statusFilter = 'all';
+              hideReviewed = false
+            "
           >
             All
           </button>
           <button
             type="button"
+            :aria-pressed="statusFilter === 'unreviewed'"
             class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium transition-colors"
             :class="
               statusFilter === 'unreviewed'
@@ -453,6 +462,7 @@ function dirOnly(path: string): string {
           </button>
           <button
             type="button"
+            :aria-pressed="statusFilter === 'commented'"
             class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium transition-colors"
             :class="
               statusFilter === 'commented'
@@ -468,6 +478,7 @@ function dirOnly(path: string): string {
           </button>
           <button
             type="button"
+            :aria-pressed="statusFilter === 'unresolved'"
             class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium transition-colors"
             :class="
               statusFilter === 'unresolved'
@@ -486,6 +497,7 @@ function dirOnly(path: string): string {
         <div class="flex items-center justify-between gap-1.5">
           <button
             type="button"
+            :aria-pressed="hideReviewed"
             class="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium transition-colors"
             :class="
               hideReviewed
@@ -513,6 +525,7 @@ function dirOnly(path: string): string {
 
             <button
               type="button"
+              :aria-pressed="groupByLayer"
               class="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium transition-colors"
               :class="
                 groupByLayer
@@ -652,12 +665,14 @@ function dirOnly(path: string): string {
             class="pointer-events-none absolute top-5 bottom-5 left-[17px] w-px bg-border"
           />
 
-          <button
+          <div
             v-for="step in filteredSteps"
             :key="step.file.path"
             :data-step-index="step.stepIndex"
+            role="button"
+            tabindex="0"
             draggable="true"
-            class="group relative flex w-full items-start gap-2.5 rounded-xl border px-2 py-2 text-left transition-all"
+            class="group relative flex w-full cursor-pointer items-start gap-2.5 rounded-xl border px-2 py-2 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terra"
             :class="[
               review.activeView === 'step' && step.stepIndex === review.currentStepIndex
                 ? 'stroll-card border-terra-border bg-terra-soft'
@@ -666,6 +681,8 @@ function dirOnly(path: string): string {
               draggedPath === step.file.path ? 'opacity-50' : '',
             ]"
             @click="review.goToStep(step.stepIndex)"
+            @keydown.enter.self.prevent="review.goToStep(step.stepIndex)"
+            @keydown.space.self.prevent="review.goToStep(step.stepIndex)"
             @dragstart="onStepDragStart($event, step.file.path)"
             @dragover="onStepDragOver($event, step.file.path)"
             @drop="onStepDrop($event, step.file.path)"
@@ -719,7 +736,15 @@ function dirOnly(path: string): string {
                 </div>
 
                 <span
-                  v-if="draftCountForFile(step.file.path) > 0"
+                  v-if="unresolvedCountForFile(step.file.path) > 0"
+                  class="inline-flex shrink-0 items-center gap-0.5 rounded-md border border-ochre-border bg-ochre-soft px-1.5 py-0.2 font-mono text-[10px] font-semibold text-ochre-text"
+                  :title="`${unresolvedCountForFile(step.file.path)} unresolved thread(s)`"
+                >
+                  <MessageSquare class="h-2.5 w-2.5" />
+                  {{ unresolvedCountForFile(step.file.path) }}
+                </span>
+                <span
+                  v-else-if="draftCountForFile(step.file.path) > 0"
                   class="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-terra-soft px-1.5 py-0.2 font-mono text-[10px] font-medium text-terra-text"
                 >
                   <MessageSquare class="h-2.5 w-2.5" />
@@ -731,7 +756,7 @@ function dirOnly(path: string): string {
                 <span class="truncate">{{ dirOnly(step.file.path) || '.' }}</span>
                 <div class="flex shrink-0 items-center gap-1">
                   <div
-                    class="hidden items-center gap-0.5 group-hover:flex"
+                    class="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
                     @click.stop
                   >
                     <GripVertical
@@ -786,7 +811,7 @@ function dirOnly(path: string): string {
                 </div>
               </div>
             </div>
-          </button>
+          </div>
         </div>
       </div>
 

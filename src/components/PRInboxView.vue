@@ -172,7 +172,13 @@ function handleInboxKeydown(e: KeyboardEvent) {
   if (inSearchInput) {
     if (e.key === 'Escape') {
       e.preventDefault()
-      searchInputRef.value?.blur()
+      if (searchQuery.value) {
+        searchQuery.value = ''
+        selectedIndex.value = -1
+      } else {
+        selectedIndex.value = -1
+        searchInputRef.value?.blur()
+      }
       return
     }
     if (e.key === 'ArrowDown') {
@@ -477,17 +483,28 @@ onBeforeUnmount(() => {
         <!-- Quick Load by URL -->
         <section class="stroll-card rounded-2xl border border-border bg-canvas-subtle p-5">
           <label class="block text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
-            Open any Pull Request by URL
+            Open any Pull Request by URL or <span class="font-mono normal-case">owner/repo#123</span>
           </label>
           <div class="mt-2.5 flex gap-2.5">
-            <input
-              v-model="urlInput"
-              type="url"
-              :disabled="review.isLoadingPR"
-              :placeholder="`https://${settings.githubHost}/owner/repo/pull/123`"
-              class="flex-1 rounded-xl border border-border bg-canvas-inset px-3.5 py-2 font-mono text-xs text-ink placeholder-ink-faint transition-colors focus:border-terra focus:outline-none disabled:opacity-60"
-              @keydown.enter="handleLoadUrl"
-            />
+            <div class="relative flex flex-1">
+              <input
+                v-model="urlInput"
+                type="text"
+                :disabled="review.isLoadingPR"
+                :placeholder="`https://${settings.githubHost}/owner/repo/pull/123 or owner/repo#123`"
+                class="w-full rounded-xl border border-border bg-canvas-inset py-2 pr-8 pl-3.5 font-mono text-xs text-ink placeholder-ink-faint transition-colors focus:border-terra focus:outline-none disabled:opacity-60"
+                @keydown.enter="handleLoadUrl"
+              />
+              <button
+                v-if="urlInput && !review.isLoadingPR"
+                type="button"
+                aria-label="Clear URL input"
+                class="absolute top-1/2 right-2.5 -translate-y-1/2 rounded p-0.5 text-ink-faint hover:text-ink"
+                @click="urlInput = ''"
+              >
+                <X class="h-3.5 w-3.5" />
+              </button>
+            </div>
             <button
               class="inline-flex items-center gap-1.5 rounded-xl bg-terra px-4 py-2 text-xs font-semibold text-white shadow-xs transition-all hover:bg-terra-hover active:scale-[0.98] disabled:opacity-40"
               :disabled="review.isLoadingPR || !urlInput.trim()"
@@ -701,42 +718,25 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- Reload Skeleton (filter switch / manual refresh) -->
+          <!-- Inbox Fetch Error Banner -->
           <div
-            v-else-if="auth.isReloadingList"
-            class="space-y-2.5"
-            role="status"
-            aria-live="polite"
-            :aria-label="`Loading ${activeFilterOption.label} pull requests`"
+            v-if="auth.isAuthenticated && auth.error"
+            role="alert"
+            class="flex items-center justify-between gap-3 rounded-2xl border border-crimson-border bg-crimson-soft px-4 py-3 text-xs text-crimson-text"
           >
-            <div
-              v-for="n in skeletonRowCount"
-              :key="n"
-              class="stroll-card relative flex items-center justify-between gap-4 overflow-hidden rounded-2xl border border-border bg-canvas-subtle px-4 py-3.5"
-              :style="{ opacity: 1 - (n - 1) * 0.18 }"
-              aria-hidden="true"
+            <span class="min-w-0 flex-1 break-words">{{ auth.error }}</span>
+            <button
+              type="button"
+              class="shrink-0 rounded-lg border border-crimson-border bg-canvas px-2.5 py-1 text-[11px] font-semibold text-crimson-text transition-colors hover:bg-canvas-elevated"
+              @click="auth.refreshRequestedPRs()"
             >
-              <div class="min-w-0 flex-1 space-y-2">
-                <div class="flex items-center gap-2">
-                  <div class="h-3 w-32 rounded bg-canvas-inset" />
-                  <div class="h-3 w-16 rounded bg-canvas-inset" />
-                </div>
-                <div class="h-3.5 rounded bg-canvas-inset" :class="n % 2 ? 'w-3/4' : 'w-1/2'" />
-                <div class="flex items-center gap-2">
-                  <div class="h-2.5 w-20 rounded bg-canvas-inset" />
-                  <div class="h-2.5 w-12 rounded bg-canvas-inset" />
-                </div>
-              </div>
-              <div class="h-6 w-16 shrink-0 rounded-lg bg-canvas-inset" />
-              <div
-                class="animate-shimmer pointer-events-none absolute inset-y-0 left-0 w-2/5 bg-gradient-to-r from-transparent via-canvas-elevated/60 to-transparent"
-              />
-            </div>
+              Retry
+            </button>
           </div>
 
           <!-- Empty Inbox -->
           <div
-            v-else-if="auth.requestedPRs.length === 0"
+            v-if="auth.isAuthenticated && !auth.isReloadingList && auth.requestedPRs.length === 0"
             class="stroll-card animate-pop-in rounded-2xl border border-border bg-canvas-subtle/80 p-8 text-center"
           >
             <p class="text-sm font-medium text-ink-secondary">{{ activeFilterOption.emptyMessage }}</p>
@@ -752,8 +752,8 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <!-- PR List -->
-          <div v-else class="animate-pop-in space-y-3">
+          <!-- PR List (keeps toolbar mounted during reload) -->
+          <div v-else-if="auth.isAuthenticated" class="animate-pop-in space-y-3">
             <!-- Lightweight Search, Repo Filter & Sort Bar -->
             <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
               <div class="relative flex-1">
@@ -814,9 +814,42 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
+            <!-- Reload Skeleton (filter switch / manual refresh) -->
+            <div
+              v-if="auth.isReloadingList"
+              class="space-y-2.5"
+              role="status"
+              aria-live="polite"
+              :aria-label="`Loading ${activeFilterOption.label} pull requests`"
+            >
+              <div
+                v-for="n in skeletonRowCount"
+                :key="n"
+                class="stroll-card relative flex items-center justify-between gap-4 overflow-hidden rounded-2xl border border-border bg-canvas-subtle px-4 py-3.5"
+                :style="{ opacity: 1 - (n - 1) * 0.18 }"
+                aria-hidden="true"
+              >
+                <div class="min-w-0 flex-1 space-y-2">
+                  <div class="flex items-center gap-2">
+                    <div class="h-3 w-32 rounded bg-canvas-inset" />
+                    <div class="h-3 w-16 rounded bg-canvas-inset" />
+                  </div>
+                  <div class="h-3.5 rounded bg-canvas-inset" :class="n % 2 ? 'w-3/4' : 'w-1/2'" />
+                  <div class="flex items-center gap-2">
+                    <div class="h-2.5 w-20 rounded bg-canvas-inset" />
+                    <div class="h-2.5 w-12 rounded bg-canvas-inset" />
+                  </div>
+                </div>
+                <div class="h-6 w-16 shrink-0 rounded-lg bg-canvas-inset" />
+                <div
+                  class="animate-shimmer pointer-events-none absolute inset-y-0 left-0 w-2/5 bg-gradient-to-r from-transparent via-canvas-elevated/60 to-transparent"
+                />
+              </div>
+            </div>
+
             <!-- Filtered Empty State -->
             <div
-              v-if="filteredPRs.length === 0"
+              v-else-if="filteredPRs.length === 0"
               class="stroll-card rounded-2xl border border-border bg-canvas-subtle/80 p-6 text-center"
             >
               <p class="text-xs font-medium text-ink-secondary">
@@ -976,7 +1009,13 @@ onBeforeUnmount(() => {
                     >
                       <Loader2 v-if="checkout.busyKey === checkoutKey(item)" class="h-3 w-3 animate-spin" />
                       <GitBranch v-else class="h-3 w-3" />
-                      <span>{{ checkout.busyKey === checkoutKey(item) ? 'Checking out…' : 'Check out' }}</span>
+                      <span>{{
+                        checkout.busyKey === checkoutKey(item)
+                          ? 'Checking out…'
+                          : checkout.stateFor(checkoutTargetFor(item))?.kind === 'on-pr-stale'
+                            ? 'Update branch'
+                            : 'Check out'
+                      }}</span>
                     </button>
                   </template>
                   <div class="hidden items-center gap-1.5 text-xs text-ink-muted sm:flex">
@@ -1070,6 +1109,16 @@ onBeforeUnmount(() => {
           <p class="mt-1.5 text-xs text-ink-muted">
             Fetching files, diffs, and building tour order…
           </p>
+          <button
+            type="button"
+            class="mt-4 rounded-lg border border-border bg-canvas px-3 py-1 text-xs font-medium text-ink-secondary transition-colors hover:bg-canvas-elevated hover:text-ink"
+            @click="
+              review.isLoadingPR = false;
+              review.loadingPRKey = null
+            "
+          >
+            Dismiss
+          </button>
         </div>
       </div>
     </Transition>
