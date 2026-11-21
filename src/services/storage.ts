@@ -4,7 +4,7 @@ import {
   loadGitHubTokenKeychain,
   saveGitHubTokenKeychain,
 } from './native'
-import type { DraftComment, PRFile, TourDirection } from '@/types/pr'
+import type { DraftComment, PRFile, PRLocalProgress, RecentPRItem, TourDirection } from '@/types/pr'
 
 const STORE_FILE = 'stroll-settings.json'
 const FALLBACK_PREFIX = 'stroll_'
@@ -229,4 +229,37 @@ export async function saveViewedFiles(prKey: string, viewed: ViewedFilesMap): Pr
   })
   viewedFilesWriteQueue = writeTask.catch(() => {})
   return writeTask
+}
+
+export async function loadAllPRProgress(): Promise<Record<string, PRLocalProgress>> {
+  await viewedFilesWriteQueue
+  const [allDrafts, allViewed] = await Promise.all([
+    getItem<Record<string, DraftComment[]>>('draft_comments'),
+    getItem<Record<string, ViewedFilesMap>>('viewed_files'),
+  ])
+
+  const progress: Record<string, PRLocalProgress> = {}
+  const keys = new Set([
+    ...Object.keys(allDrafts ?? {}),
+    ...Object.keys(allViewed ?? {}),
+  ])
+
+  for (const key of keys) {
+    const draftCount = allDrafts?.[key]?.length ?? 0
+    const reviewedCount = Object.keys(allViewed?.[key] ?? {}).length
+    if (draftCount > 0 || reviewedCount > 0) {
+      progress[key] = { draftCount, reviewedCount }
+    }
+  }
+
+  return progress
+}
+
+export async function loadRecentPRs(): Promise<RecentPRItem[]> {
+  const items = await getItem<RecentPRItem[]>('recent_prs')
+  return Array.isArray(items) ? items : []
+}
+
+export async function saveRecentPRs(items: RecentPRItem[]): Promise<void> {
+  await setItem('recent_prs', items)
 }
