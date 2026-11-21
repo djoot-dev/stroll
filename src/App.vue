@@ -10,10 +10,12 @@ import PRLoaderModal from '@/components/PRLoaderModal.vue'
 import PROverview from '@/components/PROverview.vue'
 import ReviewSubmittedView from '@/components/ReviewSubmittedView.vue'
 import SettingsModal from '@/components/SettingsModal.vue'
+import ShortcutsCheatsheetModal from '@/components/ShortcutsCheatsheetModal.vue'
 import SplashScreen from '@/components/SplashScreen.vue'
 import TopBar from '@/components/TopBar.vue'
 import TourSidebar from '@/components/TourSidebar.vue'
 import UpdateIndicator from '@/components/UpdateIndicator.vue'
+import { runAppStartup } from '@/services/startup'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore } from '@/stores/settings'
@@ -31,6 +33,7 @@ const SCROLL_SMOOTHING = 10
 const stepTransitionName = ref<'step-next' | 'step-prev'>('step-next')
 const previewScrollRef = ref<HTMLElement | null>(null)
 const showCommandPalette = ref(false)
+const showShortcutsModal = ref(false)
 
 let currentScrollTop: number | null = null
 let targetScrollTop: number | null = null
@@ -154,6 +157,11 @@ function handleKeydown(e: KeyboardEvent) {
   }
 
   if (e.key === 'Escape') {
+    if (showShortcutsModal.value) {
+      e.preventDefault()
+      showShortcutsModal.value = false
+      return
+    }
     if (showCommandPalette.value) {
       e.preventDefault()
       showCommandPalette.value = false
@@ -181,6 +189,14 @@ function handleKeydown(e: KeyboardEvent) {
   if (isEditableElement(e.target)) return
   if (e.metaKey || e.ctrlKey || e.altKey) return
 
+  if (e.key === '?') {
+    e.preventDefault()
+    showShortcutsModal.value = !showShortcutsModal.value
+    return
+  }
+
+  if (showShortcutsModal.value) return
+
   const scrollDir = getScrollDirection(e.key)
   if (scrollDir !== 0) {
     e.preventDefault()
@@ -204,6 +220,9 @@ function handleKeydown(e: KeyboardEvent) {
   } else if (e.key === 'h' || e.key === 'H' || e.key === 'ArrowLeft') {
     e.preventDefault()
     review.prevStep()
+  } else if (e.key === 'n' || e.key === 'N') {
+    e.preventDefault()
+    review.nextUnreviewedStep()
   } else if (e.key === 'm' || e.key === 'M') {
     if (review.activeView === 'step') {
       e.preventDefault()
@@ -232,6 +251,60 @@ function handleWindowBlur() {
 let pulseTimerId: ReturnType<typeof setInterval> | null = null
 let updateCheckTimerId: ReturnType<typeof setInterval> | null = null
 
+const isSlowStartup = ref(false)
+const startupError = ref<string | null>(null)
+const isRetryingStartup = ref(false)
+
+function continueToInbox(): void {
+  startupError.value = null
+  if (review.screen === 'splash') {
+    review.screen = 'inbox'
+  }
+}
+
+async function executeStartup(): Promise<void> {
+  isSlowStartup.value = false
+  startupError.value = null
+
+  const result = await runAppStartup({
+    initSettings: () => settings.init(),
+    isOnboardingCompleted: () => settings.onboardingCompleted,
+    initAuth: () => auth.init(),
+    initReview: () => review.init(),
+    getAuthError: () => auth.error,
+    onSlowStartup: () => {
+      isSlowStartup.value = true
+    },
+  })
+
+  if (result.ok) {
+    if (review.screen === 'splash') {
+      review.screen = 'inbox'
+    }
+  } else {
+    startupError.value = result.error
+  }
+}
+
+async function retryStartup(): Promise<void> {
+  if (isRetryingStartup.value) return
+  isRetryingStartup.value = true
+  try {
+    await executeStartup()
+  } finally {
+    isRetryingStartup.value = false
+  }
+}
+
+watch(
+  () => auth.isAuthenticated,
+  (authenticated) => {
+    if (authenticated && review.screen === 'splash' && startupError.value) {
+      continueToInbox()
+    }
+  },
+)
+
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('keyup', handleKeyup)
@@ -239,9 +312,7 @@ onMounted(async () => {
   pulseTimerId = setInterval(() => {
     void review.checkForRemotePRUpdates()
   }, 60_000)
-  const minSplashDelay = new Promise((resolve) => setTimeout(resolve, 750))
-  await Promise.all([auth.init(), review.init(), minSplashDelay])
-  review.screen = 'inbox'
+  await executeStartup()
   // Quietly look for a new desktop release so the version indicator can surface it.
   void updates.checkForUpdates({ silent: true })
   updateCheckTimerId = setInterval(() => {
@@ -262,7 +333,17 @@ onBeforeUnmount(() => {
 <template>
   <Transition name="screen-fade" mode="out-in">
     <!-- 1. Splash Screen -->
-    <SplashScreen v-if="review.screen === 'splash'" key="splash" />
+    <SplashScreen
+      v-if="review.screen === 'splash'"
+      key="splash"
+      :status-text="auth.initStatus"
+      :is-slow="isSlowStartup"
+      :error="startupError"
+      :is-retrying="isRetryingStartup"
+      @retry="retryStartup"
+      @open-settings="settings.openSettings('github')"
+      @continue="continueToInbox"
+    />
 
     <!-- 2. Centralized PRs Pending Your Review -->
     <PRInboxView v-else-if="review.screen === 'inbox'" key="inbox" />
@@ -272,7 +353,7 @@ onBeforeUnmount(() => {
 
     <!-- 3. Guided PR Review Screen -->
     <div v-else key="review" class="flex h-screen flex-col overflow-hidden bg-canvas text-ink">
-      <TopBar />
+      <TopBar @open-command-palette="showCommandPalette = true" />
 
       <!-- Live PR Update Banner -->
       <div
@@ -369,7 +450,10 @@ onBeforeUnmount(() => {
         </main>
       </div>
 
-      <KeyboardShortcutsBar v-if="settings.showShortcutsBar" />
+      <KeyboardShortcutsBar
+        v-if="settings.showShortcutsBar"
+        @open-cheatsheet="showShortcutsModal = true"
+      />
     </div>
   </Transition>
 
@@ -381,6 +465,7 @@ onBeforeUnmount(() => {
 
   <!-- Global Modals -->
   <CommandPaletteModal :open="showCommandPalette" @close="showCommandPalette = false" />
+  <ShortcutsCheatsheetModal :open="showShortcutsModal" @close="showShortcutsModal = false" />
   <SettingsModal />
   <PRLoaderModal />
   <FinishReviewModal />

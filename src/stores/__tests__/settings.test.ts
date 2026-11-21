@@ -148,4 +148,21 @@ describe('useSettingsStore', () => {
     await store.init()
     expect(store.sidebarWidth).toBe(SIDEBAR_MAX_WIDTH)
   })
+
+  it('persists onboardingCompleted across store reloads and preference resets', async () => {
+    const store = useSettingsStore()
+    await store.init()
+    expect(store.onboardingCompleted).toBe(false)
+
+    await store.completeOnboarding()
+    expect(store.onboardingCompleted).toBe(true)
+
+    await store.resetToDefaults()
+    expect(store.onboardingCompleted).toBe(true)
+
+    setActivePinia(createPinia())
+    const reloaded = useSettingsStore()
+    await reloaded.init()
+    expect(reloaded.onboardingCompleted).toBe(true)
+  })
 })
