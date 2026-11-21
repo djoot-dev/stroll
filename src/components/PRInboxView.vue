@@ -526,12 +526,16 @@ onBeforeUnmount(() => {
 
           <div class="grid gap-2 sm:grid-cols-2">
             <div
-              v-for="entry in review.recentPRs"
+              v-for="(entry, index) in review.recentPRs"
               :key="prRefKey(entry.summary)"
               role="button"
               :tabindex="review.isLoadingPR ? -1 : 0"
               class="stroll-card group flex items-center justify-between gap-3 rounded-xl border border-border bg-canvas-subtle px-3.5 py-2.5 text-left transition-all hover:border-terra-border hover:bg-canvas-elevated/50 focus:outline-none focus-visible:border-terra-border"
-              :class="{ 'cursor-not-allowed opacity-60': review.isLoadingPR, 'cursor-pointer': !review.isLoadingPR }"
+              :class="{
+                'cursor-not-allowed opacity-60': review.isLoadingPR,
+                'cursor-pointer': !review.isLoadingPR,
+                'sm:col-span-2': review.recentPRs.length % 2 === 1 && index === review.recentPRs.length - 1,
+              }"
               :aria-disabled="review.isLoadingPR"
               @click="openInboxItem(entry.summary)"
               @keydown.enter.self.prevent="openInboxItem(entry.summary)"
