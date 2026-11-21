@@ -1,7 +1,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MOCK_PR } from '@/data/mockPR'
-import { computeFileFingerprint, loadViewedFiles } from '@/services/storage'
+import { computeFileFingerprint, loadAllPRProgress, loadRecentPRs, loadViewedFiles } from '@/services/storage'
 import type { PRHeadPulse } from '@/services/github'
 import type { PullRequestData } from '@/types/pr'
 import { useAuthStore } from '../auth'
@@ -815,6 +815,44 @@ describe('useReviewStore tour start state', () => {
     store.backToInbox()
     await store.loadMockPR()
     expect(store.tourStarted).toBe(false)
+  })
+})
+
+describe('useReviewStore recent PRs & inbox progress', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.stubGlobal('localStorage', createMemoryStorage())
+    fetchPullRequestMock.mockReset()
+  })
+
+  it('records non-mock PRs in recentPRs, supports pinning/removing, and reports local progress', async () => {
+    const auth = useAuthStore()
+    auth.pat = 'ghp_test'
+    const pr = makePR({ owner: 'acme', repo: 'stroll', number: 99, title: 'Recent PR' })
+    fetchPullRequestMock.mockResolvedValueOnce(pr)
+
+    const store = useReviewStore()
+    await store.init()
+    expect(store.recentPRs).toEqual([])
+
+    const loaded = await store.loadPRByRepo('acme', 'stroll', 99)
+    expect(loaded).toBe(true)
+    expect(store.recentPRs).toHaveLength(1)
+    expect(store.recentPRs[0].summary.number).toBe(99)
+    expect(store.recentPRs[0].pinned).toBe(false)
+
+    await store.togglePinRecentPR(store.recentPRs[0].summary)
+    expect(store.recentPRs[0].pinned).toBe(true)
+    expect((await loadRecentPRs())[0].pinned).toBe(true)
+
+    await store.addDraftComment(pr.files[0].path, 1, 'RIGHT', 'Nit: rename variable')
+    await store.toggleReviewed(pr.files[0].path)
+
+    const progress = await loadAllPRProgress()
+    expect(progress['acme/stroll#99']).toEqual({ draftCount: 1, reviewedCount: 1 })
+
+    await store.removeRecentPR(store.recentPRs[0].summary)
+    expect(store.recentPRs).toEqual([])
   })
 })
 
