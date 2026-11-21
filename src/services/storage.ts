@@ -4,7 +4,15 @@ import {
   loadGitHubTokenKeychain,
   saveGitHubTokenKeychain,
 } from './native'
-import type { DraftComment, PRFile, PRLocalProgress, RecentPRItem, TourDirection } from '@/types/pr'
+import type {
+  DiffViewMode,
+  DraftComment,
+  LocalEditor,
+  PRFile,
+  PRLocalProgress,
+  RecentPRItem,
+  TourDirection,
+} from '@/types/pr'
 
 const STORE_FILE = 'stroll-settings.json'
 const FALLBACK_PREFIX = 'stroll_'
@@ -152,6 +160,8 @@ export interface PersistedAppSettings {
   codeFontSize: number
   requireAltForHover: boolean
   wrapLines: boolean
+  diffViewMode: DiffViewMode
+  localEditor: LocalEditor
   showShortcutsBar: boolean
   inboxAutoRefreshSeconds: number
   inboxNotificationsEnabled: boolean
