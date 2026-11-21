@@ -1375,12 +1375,14 @@ export const useReviewStore = defineStore('review', () => {
     const clean = login.trim().replace(/^@/, '')
     if (!pr.value || !clean) return
     if (pr.value.isMock) {
-      if (!pr.value.requestedReviewers.some((r) => r.login === clean)) {
+      if (!pr.value.requestedReviewers.some((r) => r.type === 'user' && r.login === clean)) {
+        const knownAvatar =
+          pr.value.reviews.find((r) => r.author.login === clean)?.author.avatarUrl ?? ''
         pr.value = {
           ...pr.value,
           requestedReviewers: [
             ...pr.value.requestedReviewers,
-            { type: 'user', login: clean, avatarUrl: '' },
+            { type: 'user', login: clean, avatarUrl: knownAvatar },
           ],
         }
       }
@@ -1394,17 +1396,26 @@ export const useReviewStore = defineStore('review', () => {
     pr.value = { ...pr.value, requestedReviewers: [...reviewers, ...teams] }
   }
 
-  async function removeReviewer(login: string): Promise<void> {
+  async function removeReviewer(login: string, isTeam = false): Promise<void> {
     if (!pr.value) return
     if (!pr.value.isMock) {
       const auth = useAuthStore()
       if (!auth.pat) throw new Error('GitHub PAT is required to remove reviewers.')
       const { owner, repo, number } = pr.value
-      await removePullRequestReviewers(auth.pat, owner, repo, number, [login])
+      await removePullRequestReviewers(
+        auth.pat,
+        owner,
+        repo,
+        number,
+        isTeam ? [] : [login],
+        isTeam ? [login] : [],
+      )
     }
     pr.value = {
       ...pr.value,
-      requestedReviewers: pr.value.requestedReviewers.filter((r) => r.login !== login),
+      requestedReviewers: pr.value.requestedReviewers.filter(
+        (r) => !(r.login === login && (r.type === 'team') === isTeam),
+      ),
     }
   }
 
