@@ -1,24 +1,116 @@
 <script setup lang="ts">
 import {
+  AlertCircle,
   AlertTriangle,
+  BookmarkPlus,
   Check,
   CornerDownRight,
   Loader2,
   MessageSquare,
+  Pencil,
   Send,
   Trash2,
   X,
 } from '@lucide/vue'
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  loadReviewSummaryDraft,
+  loadReviewTemplates,
+  saveReviewSummaryDraft,
+  saveReviewTemplates,
+  type ReviewTemplate,
+} from '@/services/storage'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore } from '@/stores/settings'
 import type { ReviewEvent } from '@/types/pr'
+import MarkdownContent from './MarkdownContent.vue'
+
+const DEFAULT_TEMPLATES: ReviewTemplate[] = [
+  {
+    id: 'builtin-lgtm',
+    name: 'LGTM',
+    body: 'Looks good to me! Approved.',
+  },
+  {
+    id: 'builtin-nits',
+    name: 'LGTM with minor nits',
+    body: 'LGTM with a few minor nits — feel free to address or follow up.',
+  },
+  {
+    id: 'builtin-changes',
+    name: 'See inline comments',
+    body: 'Left a few inline comments — please take a look and let me know what you think.',
+  },
+  {
+    id: 'builtin-tests',
+    name: 'Needs tests',
+    body: 'Changes look solid overall, though I would love to see unit tests covering the new edge cases.',
+  },
+]
 
 const review = useReviewStore()
 const settings = useSettingsStore()
 
 const summary = ref('')
 const selectedEvent = ref<ReviewEvent>('COMMENT')
+const summaryPreviewMode = ref(false)
+const customTemplates = ref<ReviewTemplate[]>([])
+const templateSavedNotice = ref(false)
+
+// Inline draft editing state
+const editingDraftId = ref<string | null>(null)
+const editingDraftBody = ref('')
+const editingDraftError = ref<string | null>(null)
+const isSavingDraftEdit = ref(false)
+
+const allTemplates = computed(() => [...DEFAULT_TEMPLATES, ...customTemplates.value])
+
+const unreviewedCount = computed(() =>
+  Math.max(0, review.tourSteps.length - review.reviewedCount),
+)
+
+const unresolvedThreadCount = computed(() =>
+  review.pr ? review.pr.threads.filter((t) => !t.isResolved).length : 0,
+)
+
+const approveCompletenessWarning = computed(() => {
+  if (selectedEvent.value !== 'APPROVE') return null
+  const parts: string[] = []
+  if (unreviewedCount.value > 0) {
+    parts.push(
+      `${unreviewedCount.value} file${unreviewedCount.value === 1 ? '' : 's'} not yet marked reviewed`,
+    )
+  }
+  if (unresolvedThreadCount.value > 0) {
+    parts.push(
+      `${unresolvedThreadCount.value} unresolved thread${unresolvedThreadCount.value === 1 ? '' : 's'} remaining`,
+    )
+  }
+  return parts.length > 0 ? parts.join(' · ') : null
+})
+
+async function hydrateDraftAndTemplates() {
+  const [draft, templates] = await Promise.all([
+    review.prKey ? loadReviewSummaryDraft(review.prKey) : Promise.resolve(null),
+    loadReviewTemplates(),
+  ])
+  customTemplates.value = templates
+  if (draft) {
+    summary.value = draft.body
+    selectedEvent.value = draft.event
+  } else {
+    summary.value = ''
+    selectedEvent.value = 'COMMENT'
+  }
+}
+
+watch(
+  () => review.prKey,
+  () => {
+    void hydrateDraftAndTemplates()
+  },
+  { immediate: true },
+)
 
 watch(
   () => review.showFinishModal,
@@ -26,20 +118,101 @@ watch(
     if (open) {
       review.submitError = null
       review.submitSuccessMessage = null
+      editingDraftId.value = null
+      editingDraftError.value = null
+      summaryPreviewMode.value = false
+      void hydrateDraftAndTemplates()
+    } else if (review.prKey) {
+      void saveReviewSummaryDraft(review.prKey, {
+        body: summary.value,
+        event: selectedEvent.value,
+      })
     }
   },
 )
+
+function startEditingDraft(id: string, body: string) {
+  editingDraftId.value = id
+  editingDraftBody.value = body
+  editingDraftError.value = null
+}
+
+function cancelEditingDraft() {
+  editingDraftId.value = null
+  editingDraftBody.value = ''
+  editingDraftError.value = null
+}
+
+async function saveEditingDraft(id: string) {
+  if (!editingDraftBody.value.trim() || isSavingDraftEdit.value) return
+  isSavingDraftEdit.value = true
+  editingDraftError.value = null
+  try {
+    await review.updateDraftComment(id, editingDraftBody.value)
+    editingDraftId.value = null
+    editingDraftBody.value = ''
+  } catch (err) {
+    editingDraftError.value = err instanceof Error ? err.message : 'Failed to update comment'
+  } finally {
+    isSavingDraftEdit.value = false
+  }
+}
+
+function applyTemplate(tpl: ReviewTemplate) {
+  summary.value = summary.value.trim()
+    ? `${summary.value.trimEnd()}\n\n${tpl.body}`
+    : tpl.body
+  summaryPreviewMode.value = false
+}
+
+async function saveCurrentAsTemplate() {
+  const text = summary.value.trim()
+  if (!text) return
+  const firstLine = text.split('\n')[0].replace(/[#*`]/g, '').trim()
+  const name = firstLine.length > 28 ? `${firstLine.slice(0, 25)}…` : firstLine || 'Custom template'
+  const next: ReviewTemplate[] = [
+    ...customTemplates.value,
+    { id: `tpl-${Date.now()}`, name, body: text },
+  ]
+  customTemplates.value = next
+  await saveReviewTemplates(next)
+  templateSavedNotice.value = true
+  setTimeout(() => {
+    templateSavedNotice.value = false
+  }, 1500)
+}
+
+async function deleteCustomTemplate(id: string) {
+  const next = customTemplates.value.filter((t) => t.id !== id)
+  customTemplates.value = next
+  await saveReviewTemplates(next)
+}
+
+async function handleSaveDraftAndClose() {
+  if (review.prKey) {
+    await saveReviewSummaryDraft(review.prKey, {
+      body: summary.value,
+      event: selectedEvent.value,
+    })
+  }
+  review.showFinishModal = false
+}
 
 async function handleSubmit() {
   if (review.isSubmittingReview) return
   const ok = await review.submitCompleteReview(selectedEvent.value, summary.value)
   if (ok) {
     summary.value = ''
+    selectedEvent.value = 'COMMENT'
+    if (review.prKey) {
+      await saveReviewSummaryDraft(review.prKey, null)
+    }
   }
 }
 
 function handleKeydown(e: KeyboardEvent) {
   if (!review.showFinishModal || !review.pr || settings.isOpen) return
+  if (editingDraftId.value) return
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !e.altKey) {
     e.preventDefault()
     void handleSubmit()
@@ -97,42 +270,84 @@ onBeforeUnmount(() => {
               No pending inline comments. You can still submit an overall review summary below.
             </div>
 
-            <div v-else class="max-h-40 space-y-1.5 overflow-x-hidden overflow-y-auto pr-1">
+            <div v-else class="max-h-48 space-y-1.5 overflow-x-hidden overflow-y-auto pr-1">
               <div
                 v-for="draft in review.draftComments"
                 :key="draft.id"
-                class="flex items-start justify-between gap-3 rounded-xl border border-ochre-border bg-ochre-soft p-2.5 text-xs"
+                class="rounded-xl border border-ochre-border bg-ochre-soft p-2.5 text-xs"
               >
-                <div class="min-w-0 flex-1">
-                  <div class="font-mono text-[11px] font-medium break-all text-ochre-text">
-                    {{ draft.path
-                    }}<template v-if="draft.subjectType === 'FILE'">
-                      <span class="ml-1 font-sans text-[10px] text-ink-muted">(file)</span>
-                    </template><template v-else>:{{
-                      draft.startLine && draft.startLine !== draft.line
-                        ? `${draft.startLine}-${draft.line}`
-                        : draft.line
-                    }}</template>
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0 flex-1">
+                    <div class="font-mono text-[11px] font-medium break-all text-ochre-text">
+                      {{ draft.path
+                      }}<template v-if="draft.subjectType === 'FILE'">
+                        <span class="ml-1 font-sans text-[10px] text-ink-muted">(file)</span>
+                      </template><template v-else>:{{
+                        draft.startLine && draft.startLine !== draft.line
+                          ? `${draft.startLine}-${draft.line}`
+                          : draft.line
+                      }}</template>
+                    </div>
+
+                    <div v-if="editingDraftId === draft.id" class="mt-2 space-y-1.5">
+                      <textarea
+                        v-model="editingDraftBody"
+                        rows="3"
+                        class="w-full rounded-lg border border-border bg-canvas-inset px-2.5 py-1.5 text-xs text-ink placeholder-ink-faint focus:border-terra focus:outline-none"
+                        @keydown.meta.enter.prevent="saveEditingDraft(draft.id)"
+                        @keydown.ctrl.enter.prevent="saveEditingDraft(draft.id)"
+                        @keydown.esc.prevent="cancelEditingDraft"
+                      />
+                      <p v-if="editingDraftError" class="text-[11px] text-crimson-text">
+                        {{ editingDraftError }}
+                      </p>
+                      <div class="flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-canvas-elevated"
+                          @click="cancelEditingDraft"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          class="inline-flex items-center gap-1 rounded-lg bg-terra px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-terra-hover disabled:opacity-40"
+                          :disabled="!editingDraftBody.trim() || isSavingDraftEdit"
+                          @click="saveEditingDraft(draft.id)"
+                        >
+                          <Loader2 v-if="isSavingDraftEdit" class="h-3 w-3 animate-spin" />
+                          <span>Save</span>
+                        </button>
+                      </div>
+                    </div>
+                    <p v-else class="mt-0.5 line-clamp-2 break-words text-ink">{{ draft.body }}</p>
                   </div>
-                  <p class="mt-0.5 line-clamp-2 break-words text-ink">{{ draft.body }}</p>
-                </div>
-                <div class="flex shrink-0 items-center gap-2">
-                  <button
-                    class="text-ink-muted hover:text-ink"
-                    title="Go to comment in file"
-                    aria-label="Go to comment in file"
-                    @click="review.focusDraftComment(draft.id)"
-                  >
-                    <CornerDownRight class="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    class="text-ink-muted hover:text-crimson-text"
-                    title="Delete pending comment"
-                    aria-label="Delete pending comment"
-                    @click="review.deleteDraftComment(draft.id)"
-                  >
-                    <Trash2 class="h-3.5 w-3.5" />
-                  </button>
+                  <div v-if="editingDraftId !== draft.id" class="flex shrink-0 items-center gap-2">
+                    <button
+                      class="text-ink-muted hover:text-ink"
+                      title="Edit comment inline"
+                      aria-label="Edit comment inline"
+                      @click="startEditingDraft(draft.id, draft.body)"
+                    >
+                      <Pencil class="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      class="text-ink-muted hover:text-ink"
+                      title="Go to comment in file"
+                      aria-label="Go to comment in file"
+                      @click="review.focusDraftComment(draft.id)"
+                    >
+                      <CornerDownRight class="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      class="text-ink-muted hover:text-crimson-text"
+                      title="Delete pending comment"
+                      aria-label="Delete pending comment"
+                      @click="review.deleteDraftComment(draft.id)"
+                    >
+                      <Trash2 class="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -140,8 +355,77 @@ onBeforeUnmount(() => {
 
           <!-- Review Summary -->
           <div class="space-y-1.5">
-            <label class="block text-xs font-medium text-ink-secondary">Review Summary</label>
+            <div class="flex items-center justify-between">
+              <label class="block text-xs font-medium text-ink-secondary">Review Summary</label>
+              <div class="flex items-center gap-2">
+                <button
+                  v-if="summary.trim()"
+                  type="button"
+                  class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+                  title="Save current summary as a reusable template"
+                  @click="saveCurrentAsTemplate"
+                >
+                  <BookmarkPlus class="h-3 w-3" />
+                  <span>{{ templateSavedNotice ? 'Saved!' : 'Save template' }}</span>
+                </button>
+                <div class="inline-flex rounded-md border border-border bg-canvas p-0.5 text-[10px]">
+                  <button
+                    type="button"
+                    class="rounded px-1.5 py-0.5 transition-colors"
+                    :class="!summaryPreviewMode ? 'bg-canvas-elevated font-semibold text-ink' : 'text-ink-muted hover:text-ink'"
+                    @click="summaryPreviewMode = false"
+                  >
+                    Write
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded px-1.5 py-0.5 transition-colors"
+                    :class="summaryPreviewMode ? 'bg-canvas-elevated font-semibold text-ink' : 'text-ink-muted hover:text-ink'"
+                    @click="summaryPreviewMode = true"
+                  >
+                    Preview
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Quick-insert templates -->
+            <div class="flex flex-wrap items-center gap-1.5">
+              <div
+                v-for="tpl in allTemplates"
+                :key="tpl.id"
+                class="inline-flex items-center rounded-full border border-border-muted bg-canvas text-[10.5px] text-ink-secondary"
+              >
+                <button
+                  type="button"
+                  class="rounded-full px-2 py-0.5 transition-colors hover:text-ink"
+                  :title="tpl.body"
+                  @click="applyTemplate(tpl)"
+                >
+                  {{ tpl.name }}
+                </button>
+                <button
+                  v-if="tpl.id.startsWith('tpl-')"
+                  type="button"
+                  class="pr-1.5 text-ink-faint hover:text-crimson-text"
+                  title="Remove saved template"
+                  aria-label="Remove saved template"
+                  @click="deleteCustomTemplate(tpl.id)"
+                >
+                  <X class="h-2.5 w-2.5" />
+                </button>
+              </div>
+            </div>
+
+            <div
+              v-if="summaryPreviewMode"
+              class="min-h-[92px] max-h-44 overflow-y-auto rounded-xl border border-border bg-canvas-inset px-3 py-2 text-xs text-ink-secondary"
+            >
+              <MarkdownContent v-if="summary.trim()" :content="summary" />
+              <span v-else class="text-ink-faint">Nothing to preview.</span>
+            </div>
             <textarea
+              v-else
               v-model="summary"
               rows="4"
               placeholder="Leave an overall summary of your review..."
@@ -192,6 +476,15 @@ onBeforeUnmount(() => {
           </div>
 
           <div
+            v-if="approveCompletenessWarning"
+            role="status"
+            class="flex items-center gap-2 rounded-xl border border-ochre-border bg-ochre-soft px-3 py-2 text-xs text-ochre-text"
+          >
+            <AlertCircle class="h-3.5 w-3.5 shrink-0" />
+            <span>{{ approveCompletenessWarning }}</span>
+          </div>
+
+          <div
             v-if="review.submitError"
             class="rounded-xl border border-crimson-border bg-crimson-soft px-3 py-2 text-xs text-crimson-text"
           >
@@ -210,10 +503,12 @@ onBeforeUnmount(() => {
           <span class="text-[11px] text-ink-faint">Ctrl+↵ / ⌘↵ to submit</span>
           <div class="flex items-center gap-2">
             <button
+              type="button"
               class="rounded-xl border border-border bg-canvas px-3.5 py-1.5 text-xs text-ink-secondary hover:bg-canvas-elevated"
-              @click="review.showFinishModal = false"
+              title="Keep summary & verdict saved for this PR and close"
+              @click="handleSaveDraftAndClose"
             >
-              Cancel
+              Save Draft
             </button>
             <button
               class="inline-flex items-center gap-1.5 rounded-xl bg-pine px-4 py-1.5 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-pine-hover disabled:opacity-40"

@@ -112,6 +112,15 @@ export function parsePRUrl(
   const trimmed = rawUrl.trim()
   if (!trimmed) return null
 
+  const shorthand = trimmed.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#(\d+)$/)
+  if (shorthand) {
+    return {
+      owner: shorthand[1],
+      repo: shorthand[2],
+      number: Number(shorthand[3]),
+    }
+  }
+
   let parsed: URL
   try {
     parsed = new URL(trimmed)

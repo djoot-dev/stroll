@@ -238,9 +238,22 @@ describe('github host & URL parsing', () => {
       number: 12,
     })
 
+    // Accepts owner/repo#123 shorthand
+    expect(parsePRUrl('acme/stroll#123')).toEqual({
+      owner: 'acme',
+      repo: 'stroll',
+      number: 123,
+    })
+    expect(parsePRUrl('  my-org/my.repo_v2#9  ')).toEqual({
+      owner: 'my-org',
+      repo: 'my.repo_v2',
+      number: 9,
+    })
+
     // Rejects unrelated hosts or non-PR URLs
     expect(parsePRUrl('https://gitlab.com/acme/stroll/pull/42')).toBeNull()
     expect(parsePRUrl('https://github.com/acme/stroll/issues/42')).toBeNull()
+    expect(parsePRUrl('acme/stroll#abc')).toBeNull()
     expect(parsePRUrl('not-a-url')).toBeNull()
   })
 
