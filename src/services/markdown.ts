@@ -175,11 +175,17 @@ function isTableStart(lines: string[], index: number): boolean {
   return header.includes('|') && TABLE_SEPARATOR_RE.test(sep)
 }
 
+interface TaskCounter {
+  index: number
+}
+
 function parseList(
   lines: string[],
   startIndex: number,
   baseIndent: number,
   ordered: boolean,
+  interactiveChecklist: boolean,
+  taskCounter: TaskCounter,
 ): { html: string; nextIndex: number } {
   const items: string[] = []
   let isTaskList = false
@@ -197,7 +203,7 @@ function parseList(
 
     if (indent > baseIndent) {
       // Malformed leading deeper indent without a parent item: treat at current level
-      const nested = parseList(lines, i, indent, isItemOrdered)
+      const nested = parseList(lines, i, indent, isItemOrdered, interactiveChecklist, taskCounter)
       if (items.length > 0) {
         const last = items[items.length - 1]
         items[items.length - 1] = last.replace(/<\/li>$/, `${nested.html}</li>`)
@@ -213,10 +219,15 @@ function parseList(
     const taskMatch = !ordered ? content.match(/^\[([ xX])\]\s+(.*)$/) : null
     if (taskMatch) {
       isTaskList = true
+      const taskIndex = taskCounter.index++
       const checked = taskMatch[1].toLowerCase() === 'x'
-      const box = checked
-        ? '<span class="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border border-pine-border bg-pine text-[10px] font-bold text-white" aria-label="Checked">✓</span>'
-        : '<span class="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border border-border bg-canvas" aria-label="Unchecked"></span>'
+      const box = interactiveChecklist
+        ? checked
+          ? `<button type="button" data-task-index="${taskIndex}" aria-label="Checked" aria-pressed="true" title="Mark as incomplete" class="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 cursor-pointer items-center justify-center rounded border border-pine-border bg-pine text-[10px] font-bold text-white transition-colors hover:bg-pine-hover">✓</button>`
+          : `<button type="button" data-task-index="${taskIndex}" aria-label="Unchecked" aria-pressed="false" title="Mark as complete" class="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 cursor-pointer items-center justify-center rounded border border-border bg-canvas transition-colors hover:border-terra-border"></button>`
+        : checked
+          ? '<span class="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border border-pine-border bg-pine text-[10px] font-bold text-white" aria-label="Checked">✓</span>'
+          : '<span class="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border border-border bg-canvas" aria-label="Unchecked"></span>'
       itemBody = `<div class="flex items-start gap-2">${box}<span class="${checked ? 'text-ink-muted line-through' : ''}">${renderInline(taskMatch[2])}</span></div>`
     } else {
       itemBody = renderInline(content)
@@ -229,7 +240,14 @@ function parseList(
       const nextMatch = lines[i].match(LIST_ITEM_RE)
       if (nextMatch && nextMatch[1].length > baseIndent) {
         const nestedOrdered = /^\d+\.$/.test(nextMatch[2])
-        const nested = parseList(lines, i, nextMatch[1].length, nestedOrdered)
+        const nested = parseList(
+          lines,
+          i,
+          nextMatch[1].length,
+          nestedOrdered,
+          interactiveChecklist,
+          taskCounter,
+        )
         itemBody += nested.html
         i = nested.nextIndex
       }
@@ -256,6 +274,140 @@ function parseList(
 
 export interface MarkdownRenderOptions {
   originalLines?: string[]
+  interactiveChecklist?: boolean
+}
+
+export interface ChecklistProgress {
+  total: number
+  completed: number
+}
+
+interface TaskCheckboxMatch {
+  checked: boolean
+  charOffset: number
+}
+
+const TASK_LINE_RE = /^(\s*[-*+]\s+\[)([ xX])(\]\s+.*)$/
+
+/**
+ * Locate all Markdown task list checkboxes outside fenced code blocks and HTML comments,
+ * returning their checked state and exact character offset in `markdown`.
+ */
+function findTaskCheckboxes(markdown: string): TaskCheckboxMatch[] {
+  const results: TaskCheckboxMatch[] = []
+  const len = markdown.length
+  let i = 0
+  let inFence: { char: string; len: number } | null = null
+  let inHtmlComment = false
+
+  while (i < len) {
+    const lineEnd = (() => {
+      const nl = markdown.indexOf('\n', i)
+      return nl === -1 ? len : nl
+    })()
+    const rawLine = markdown.slice(i, lineEnd)
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
+
+    if (inFence) {
+      const closeRe = new RegExp(`^${inFence.char}{${inFence.len},}\\s*$`)
+      if (closeRe.test(line)) {
+        inFence = null
+      }
+      i = lineEnd + 1
+      continue
+    }
+
+    if (!inHtmlComment) {
+      const fenceMatch = line.match(/^(`{3,}|~{3,})([\w+-]*)\s*$/)
+      if (fenceMatch) {
+        inFence = { char: fenceMatch[1][0], len: fenceMatch[1].length }
+        i = lineEnd + 1
+        continue
+      }
+    }
+
+    // Check if this line starts (outside an active HTML comment) with a task checkbox
+    if (!inHtmlComment) {
+      const taskMatch = line.match(TASK_LINE_RE)
+      if (taskMatch) {
+        results.push({
+          checked: taskMatch[2].toLowerCase() === 'x',
+          charOffset: i + taskMatch[1].length,
+        })
+      }
+    }
+
+    // Advance HTML comment state across the line (skipping inline code spans)
+    let j = 0
+    while (j < line.length) {
+      if (inHtmlComment) {
+        const closeIdx = line.indexOf('-->', j)
+        if (closeIdx === -1) {
+          j = line.length
+        } else {
+          inHtmlComment = false
+          j = closeIdx + 3
+        }
+        continue
+      }
+
+      if (line[j] === '`') {
+        let tickCount = 0
+        while (j + tickCount < line.length && line[j + tickCount] === '`') {
+          tickCount += 1
+        }
+        const closeTicks = '`'.repeat(tickCount)
+        let searchFrom = j + tickCount
+        let foundClose = -1
+        while (searchFrom < line.length) {
+          const idx = line.indexOf(closeTicks, searchFrom)
+          if (idx === -1) break
+          const beforeOk = idx === 0 || line[idx - 1] !== '`'
+          const afterOk = idx + tickCount >= line.length || line[idx + tickCount] !== '`'
+          if (beforeOk && afterOk) {
+            foundClose = idx + tickCount
+            break
+          }
+          searchFrom = idx + 1
+        }
+        j = foundClose !== -1 ? foundClose : j + tickCount
+        continue
+      }
+
+      if (line.startsWith('<!--', j)) {
+        inHtmlComment = true
+        j += 4
+        continue
+      }
+
+      j += 1
+    }
+
+    i = lineEnd + 1
+  }
+
+  return results
+}
+
+export function parseChecklistProgress(markdown: string): ChecklistProgress {
+  const boxes = findTaskCheckboxes(markdown)
+  let completed = 0
+  for (const box of boxes) {
+    if (box.checked) completed += 1
+  }
+  return { total: boxes.length, completed }
+}
+
+export function toggleChecklistItem(markdown: string, targetIndex: number): string {
+  const boxes = findTaskCheckboxes(markdown)
+  const target = boxes[targetIndex]
+  if (!target) return markdown
+  const nextChar = target.checked ? ' ' : 'x'
+  return (
+    markdown.slice(0, target.charOffset) +
+    nextChar +
+    markdown.slice(target.charOffset + 1)
+  )
 }
 
 function stripHtmlComments(markdown: string): string {
@@ -362,6 +514,8 @@ export function renderSafeMarkdown(
 
   const lines = normalized.split('\n')
   const out: string[] = []
+  const interactiveChecklist = Boolean(options?.interactiveChecklist)
+  const taskCounter: TaskCounter = { index: 0 }
 
   let i = 0
   while (i < lines.length) {
@@ -498,7 +652,14 @@ export function renderSafeMarkdown(
     const listMatch = line.match(LIST_ITEM_RE)
     if (listMatch) {
       const ordered = /^\d+\.$/.test(listMatch[2])
-      const parsed = parseList(lines, i, listMatch[1].length, ordered)
+      const parsed = parseList(
+        lines,
+        i,
+        listMatch[1].length,
+        ordered,
+        interactiveChecklist,
+        taskCounter,
+      )
       out.push(parsed.html)
       i = parsed.nextIndex
       continue

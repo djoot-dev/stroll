@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { renderSafeMarkdown } from '../markdown'
+import {
+  parseChecklistProgress,
+  renderSafeMarkdown,
+  toggleChecklistItem,
+} from '../markdown'
 
 describe('renderSafeMarkdown', () => {
   it('returns empty string for blank input', () => {
@@ -161,5 +165,52 @@ describe('renderSafeMarkdown', () => {
 
   it('returns empty string when markdown only contains HTML comments', () => {
     expect(renderSafeMarkdown('<!-- Describe your changes -->\n\n<!-- Checklist -->')).toBe('')
+  })
+})
+
+describe('checklist helpers', () => {
+  it('counts task items while ignoring fenced code blocks and HTML comments', () => {
+    const md = [
+      '<!--',
+      '- [ ] Ignored in comment',
+      '-->',
+      '```md',
+      '- [x] Ignored in code block',
+      '```',
+      '- [x] First done',
+      '- [X] Second uppercase done',
+      '  - [ ] Nested pending',
+      '* [ ] Asterisk pending',
+      '1. [ ] Ordered list is not a task list',
+    ].join('\n')
+
+    expect(parseChecklistProgress(md)).toEqual({ total: 4, completed: 2 })
+  })
+
+  it('toggles a specific checklist item by index while preserving formatting and comments', () => {
+    const md = [
+      '<!-- keep me -->',
+      '- [x] First',
+      '- [ ] Second',
+      '  - [X] Third',
+    ].join('\r\n')
+
+    const afterCheck = toggleChecklistItem(md, 1)
+    expect(afterCheck).toBe(
+      ['<!-- keep me -->', '- [x] First', '- [x] Second', '  - [X] Third'].join('\r\n'),
+    )
+
+    const afterUncheck = toggleChecklistItem(afterCheck, 2)
+    expect(afterUncheck).toBe(
+      ['<!-- keep me -->', '- [x] First', '- [x] Second', '  - [ ] Third'].join('\r\n'),
+    )
+
+    expect(toggleChecklistItem(md, 99)).toBe(md)
+  })
+
+  it('renders interactive task buttons with data-task-index when interactiveChecklist is true', () => {
+    const html = renderSafeMarkdown('- [x] Done\n- [ ] Todo', { interactiveChecklist: true })
+    expect(html).toContain('<button type="button" data-task-index="0" aria-label="Checked"')
+    expect(html).toContain('<button type="button" data-task-index="1" aria-label="Unchecked"')
   })
 })
