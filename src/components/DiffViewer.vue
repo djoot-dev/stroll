@@ -56,7 +56,14 @@ import {
 } from '@/services/github'
 import { highlightLinesWithCodeMirror, type HighlightSpan } from '@/services/highlighter'
 import { buildLineTokenParts, type DiffTokenPart } from '@/services/inlineDiff'
-import { gitBlameLine, isTauriRuntime, openFileInEditor, type GitBlameInfo } from '@/services/native'
+import {
+  buildExternalEditorUrl,
+  gitBlameLine,
+  isTauriRuntime,
+  openFileInEditor,
+  openInExternalEditor,
+  type GitBlameInfo,
+} from '@/services/native'
 import { isLockfile, LAYER_META } from '@/services/readingOrder'
 import { buildSplitDiffRows, type SplitDiffRow } from '@/services/splitDiff'
 import { buildGitHubPermalink } from '@/services/suggestions'
@@ -1186,8 +1193,64 @@ watch(
   { immediate: true, flush: 'post' },
 )
 
+const flashLineKey = ref<string | null>(null)
+let flashLineTimer: ReturnType<typeof setTimeout> | null = null
+
+async function revealFocusedLine() {
+  const target = review.focusedLine
+  if (!target || target.path !== props.step.file.path) return
+  if (allDiffLines.value.length === 0) return
+
+  const line =
+    allDiffLines.value.find((l) => l.newLineNumber === target.line) ??
+    allDiffLines.value.find((l) => l.commentLine === target.line) ??
+    allDiffLines.value.find((l) => l.oldLineNumber === target.line)
+  if (!line) {
+    review.focusedLine = null
+    return
+  }
+
+  ensureLineRendered(line.key)
+  await nextTick()
+  const row = findLineRow(line.key)
+  if (!row || review.focusedLine?.path !== target.path) return
+  review.focusedLine = null
+  row.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
+  flashLineKey.value = line.key
+  if (flashLineTimer) clearTimeout(flashLineTimer)
+  flashLineTimer = setTimeout(() => {
+    flashLineKey.value = null
+  }, 1800)
+}
+
+watch(
+  () => [review.focusedLine, allDiffLines.value] as const,
+  () => void revealFocusedLine(),
+  { immediate: true, flush: 'post' },
+)
+
+const linkedRepoPath = computed(() => {
+  if (!review.pr) return null
+  return review.repoPaths[`${review.pr.owner}/${review.pr.repo}`] ?? null
+})
+
+async function openStepInEditor(line = 1) {
+  if (!linkedRepoPath.value) return
+  const url = buildExternalEditorUrl(
+    settings.externalEditor,
+    settings.externalEditorCustomCommand,
+    linkedRepoPath.value,
+    props.step.file.path,
+    line,
+  )
+  if (url) {
+    await openInExternalEditor(url)
+  }
+}
+
 onBeforeUnmount(() => {
   if (flashTimer) clearTimeout(flashTimer)
+  if (flashLineTimer) clearTimeout(flashLineTimer)
   if (copiedTimer) clearTimeout(copiedTimer)
 })
 
@@ -1344,6 +1407,36 @@ function statusBadgeClass(status: string): string {
             @click="searchOpen ? closeDiffSearch('dismiss') : openDiffSearch()"
           >
             <Search class="h-3 w-3" />
+          </button>
+
+          <button
+            v-if="linkedRepoPath"
+            type="button"
+            title="Open file in configured external editor"
+            class="inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-1 text-[11px] font-medium text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+            @click="openStepInEditor(1)"
+          >
+            <ExternalLink class="h-3 w-3" />
+            <span class="hidden sm:inline">Editor</span>
+          </button>
+
+          <button
+            type="button"
+            :title="
+              settings.diffViewMode === 'split'
+                ? 'Side-by-side split diff (click for unified)'
+                : 'Unified diff (click for side-by-side split)'
+            "
+            class="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors"
+            :class="
+              settings.diffViewMode === 'split'
+                ? 'border-terra-border bg-terra-soft text-terra-text'
+                : 'border-border bg-canvas text-ink-muted hover:bg-canvas-elevated hover:text-ink'
+            "
+            @click="settings.setDiffViewMode(settings.diffViewMode === 'split' ? 'unified' : 'split')"
+          >
+            <Columns2 class="h-3 w-3" />
+            <span class="hidden sm:inline">{{ settings.diffViewMode === 'split' ? 'Split' : 'Unified' }}</span>
           </button>
 
           <button
@@ -1777,7 +1870,7 @@ function statusBadgeClass(status: string): string {
             settings.wrapLines ? 'overflow-x-hidden' : 'overflow-x-auto',
             { 'select-none': isDraggingSelection },
           ]"
-          :style="{ fontSize: `${settings.codeFontSize}px` }"
+          :style="{ fontSize: `${settings.codeFontSize}px`, tabSize: settings.tabSize }"
         >
           <!--
             Rows share a track as wide as the longest line (never narrower than
@@ -2177,11 +2270,13 @@ function statusBadgeClass(status: string): string {
                         'border-l-crimson bg-diff-del hover:bg-diff-del-hover': line.type === 'del',
                         'border-l-transparent hover:bg-diff-hover': line.type === 'context',
                       },
-                  activeMatchKey === line.key
-                    ? 'ring-1 ring-inset ring-terra bg-terra-soft/30'
-                    : searchMatchSet.has(line.key)
-                      ? 'bg-ochre-soft/20'
-                      : '',
+                  flashLineKey === line.key
+                    ? 'ring-2 ring-inset ring-terra bg-terra-soft/40'
+                    : activeMatchKey === line.key
+                      ? 'ring-1 ring-inset ring-terra bg-terra-soft/30'
+                      : searchMatchSet.has(line.key)
+                        ? 'bg-ochre-soft/20'
+                        : '',
                   isHoveredUsageLine(line)
                     ? 'inset-ring-1 inset-ring-plum-border shadow-[inset_0_0_0_9999px_var(--color-plum-soft)]'
                     : '',

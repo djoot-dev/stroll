@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { FolderGit2, Loader2, RefreshCw, Sparkles, X } from '@lucide/vue'
+import { FolderGit2, Loader2, RefreshCw, Search, Sparkles, X } from '@lucide/vue'
 import { computed, ref } from 'vue'
+import { filterAndSortInboxPRs } from '@/services/inbox'
 import { PR_FILTER_OPTIONS, useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore } from '@/stores/settings'
@@ -14,6 +15,15 @@ const activeFilterOption = computed(
 )
 
 const urlInput = ref('')
+const listSearchQuery = ref('')
+
+const filteredRequestedPRs = computed(() =>
+  filterAndSortInboxPRs(auth.requestedPRs, {
+    query: listSearchQuery.value,
+    repo: 'all',
+    sort: 'updated-desc',
+  }),
+)
 
 async function handleLoadUrl() {
   if (!urlInput.value.trim()) return
@@ -53,15 +63,17 @@ function isItemLoading(owner: string, repo: string, number: number): boolean {
         </div>
 
         <div class="space-y-5 p-5">
-          <!-- Load by URL -->
+          <!-- Load by URL or shorthand -->
           <div class="space-y-2">
-            <label class="block text-xs font-medium text-ink-secondary">GitHub PR URL</label>
+            <label class="block text-xs font-medium text-ink-secondary">
+              GitHub PR URL or <span class="font-mono">owner/repo#123</span>
+            </label>
             <div class="flex gap-2">
               <input
                 v-model="urlInput"
-                type="url"
+                type="text"
                 :disabled="review.isLoadingPR"
-                :placeholder="`https://${settings.githubHost}/owner/repo/pull/123`"
+                :placeholder="`https://${settings.githubHost}/owner/repo/pull/123 or owner/repo#123`"
                 class="flex-1 rounded-xl border border-border bg-canvas-inset px-3 py-2 font-mono text-xs text-ink placeholder-ink-faint focus:border-terra focus:outline-none disabled:opacity-60"
                 @keydown.enter="handleLoadUrl"
               />
@@ -143,10 +155,39 @@ function isItemLoading(owner: string, repo: string, number: number): boolean {
               {{ activeFilterOption.emptyMessage }}
             </div>
 
-            <div v-else class="max-h-56 space-y-1.5 overflow-y-auto pr-1">
-              <button
-                v-for="item in auth.requestedPRs"
-                :key="item.id"
+            <template v-else>
+              <div class="relative">
+                <Search
+                  class="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint"
+                />
+                <input
+                  v-model="listSearchQuery"
+                  type="text"
+                  placeholder="Filter by title, repo, #number, or @author…"
+                  class="w-full rounded-xl border border-border bg-canvas-inset py-1.5 pr-8 pl-8 text-xs text-ink placeholder-ink-faint focus:border-terra focus:outline-none"
+                />
+                <button
+                  v-if="listSearchQuery"
+                  type="button"
+                  aria-label="Clear filter"
+                  class="absolute top-1/2 right-2 -translate-y-1/2 rounded p-0.5 text-ink-faint hover:text-ink"
+                  @click="listSearchQuery = ''"
+                >
+                  <X class="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              <div
+                v-if="filteredRequestedPRs.length === 0"
+                class="rounded-xl border border-border-muted bg-canvas-inset p-4 text-center text-xs text-ink-faint"
+              >
+                No pull requests match "{{ listSearchQuery }}".
+              </div>
+
+              <div v-else class="max-h-56 space-y-1.5 overflow-y-auto pr-1">
+                <button
+                  v-for="item in filteredRequestedPRs"
+                  :key="item.id"
                 class="flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors"
                 :class="
                   isItemLoading(item.owner, item.repo, item.number)
@@ -177,7 +218,8 @@ function isItemLoading(owner: string, repo: string, number: number): boolean {
                   </template>
                 </div>
               </button>
-            </div>
+              </div>
+            </template>
           </div>
 
           <!-- Demo PR Fallback -->

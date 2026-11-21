@@ -155,6 +155,37 @@ describe('useSettingsStore', () => {
     expect(store.sidebarWidth).toBe(SIDEBAR_MAX_WIDTH)
   })
 
+  it('persists new diff, editor, and tour ignore settings and resets them', async () => {
+    const store = useSettingsStore()
+    await store.init()
+
+    await store.setDiffViewMode('split')
+    await store.setTabSize(2)
+    await store.setIgnoreWhitespaceDefault(true)
+    await store.setExternalEditor('cursor')
+    await store.setExternalEditorCustomCommand('idea://open?file={file}&line={line}')
+    await store.setTourIgnorePatterns(['*.snap', 'dist/**'])
+
+    setActivePinia(createPinia())
+    const reloaded = useSettingsStore()
+    await reloaded.init()
+
+    expect(reloaded.diffViewMode).toBe('split')
+    expect(reloaded.tabSize).toBe(2)
+    expect(reloaded.ignoreWhitespaceDefault).toBe(true)
+    expect(reloaded.externalEditor).toBe('cursor')
+    expect(reloaded.externalEditorCustomCommand).toBe('idea://open?file={file}&line={line}')
+    expect(reloaded.tourIgnorePatterns).toEqual(['*.snap', 'dist/**'])
+
+    await reloaded.resetToDefaults()
+    expect(reloaded.diffViewMode).toBe(DEFAULT_APP_SETTINGS.diffViewMode)
+    expect(reloaded.tabSize).toBe(DEFAULT_APP_SETTINGS.tabSize)
+    expect(reloaded.ignoreWhitespaceDefault).toBe(DEFAULT_APP_SETTINGS.ignoreWhitespaceDefault)
+    expect(reloaded.externalEditor).toBe(DEFAULT_APP_SETTINGS.externalEditor)
+    expect(reloaded.externalEditorCustomCommand).toBe('')
+    expect(reloaded.tourIgnorePatterns).toEqual([])
+  })
+
   it('persists onboardingCompleted across store reloads and preference resets', async () => {
     const store = useSettingsStore()
     await store.init()

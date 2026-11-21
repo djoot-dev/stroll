@@ -5,6 +5,7 @@ import {
   classifyLayer,
   isGeneratedOrLockfile,
   isLockfile,
+  matchesIgnorePatterns,
 } from '@/services/readingOrder'
 import type { PRFile } from '@/types/pr'
 
@@ -214,5 +215,28 @@ public sealed record OrderSummary(string Id);`,
 
     const testStep = steps.find((s) => s.file.path === 'tests/Orders.Tests/OrderServiceTests.cs')!
     expect(testStep.pairedWith).toBe('src/Orders/Services/OrderService.cs')
+  })
+
+  it('pushes files matching custom ignorePatterns to the end and marks them generated', () => {
+    expect(matchesIgnorePatterns('src/components/Button.stories.tsx', ['*.stories.tsx'])).toBe(true)
+    expect(matchesIgnorePatterns('vendor/bundle/foo.js', ['vendor/**'])).toBe(true)
+    expect(matchesIgnorePatterns('src/app.ts', ['*.stories.tsx', 'vendor/**'])).toBe(false)
+
+    const files: PRFile[] = [
+      makeFile({ path: 'src/a.stories.tsx' }),
+      makeFile({ path: 'src/core/service.ts' }),
+      makeFile({ path: 'vendor/lib/helper.js' }),
+    ]
+    const steps = buildReadingOrder(files, 'bottom-up', {
+      ignorePatterns: ['*.stories.tsx', 'vendor/**'],
+    })
+    expect(steps.map((s) => s.file.path)).toEqual([
+      'src/core/service.ts',
+      'src/a.stories.tsx',
+      'vendor/lib/helper.js',
+    ])
+    expect(steps[0].isGenerated).toBeUndefined()
+    expect(steps[1].isGenerated).toBe(true)
+    expect(steps[2].isGenerated).toBe(true)
   })
 })
