@@ -11,6 +11,7 @@ import {
   GitPullRequestClosed,
   GitPullRequestDraft,
   KeyRound,
+  Maximize2,
   Moon,
   MoreHorizontal,
   PanelLeftClose,
@@ -237,6 +238,18 @@ function handleRefreshPR() {
           <kbd class="rounded border border-border-muted bg-canvas-subtle px-1 font-mono text-[10px] text-ink-faint">
             {{ isMac ? '⌘K' : 'Ctrl+K' }}
           </kbd>
+        </button>
+
+        <button
+          v-if="review.pr"
+          type="button"
+          class="inline-flex shrink-0 items-center justify-center rounded-lg border border-border bg-canvas p-1.5 text-ink-muted transition-colors hover:border-terra-border hover:bg-canvas-elevated hover:text-ink"
+          aria-label="Enter Zen Mode"
+          :aria-pressed="review.zenMode"
+          title="Zen / Focus Mode (Z)"
+          @click="review.toggleZenMode()"
+        >
+          <Maximize2 class="h-3.5 w-3.5" />
         </button>
 
         <div ref="menuContainerRef" class="relative shrink-0">

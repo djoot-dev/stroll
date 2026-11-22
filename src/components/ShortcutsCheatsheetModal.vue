@@ -54,6 +54,7 @@ const groups: ShortcutGroup[] = [
     title: 'Review & App',
     items: [
       { keys: ['M'], description: 'Mark current step reviewed' },
+      { keys: ['Z'], description: 'Toggle Zen / Focus mode' },
       { keys: ['R'], description: 'Finish & submit review' },
       { keys: ['⌘,', 'Ctrl+,'], description: 'Open settings' },
       { keys: ['?'], description: 'Toggle keyboard shortcuts cheatsheet' },

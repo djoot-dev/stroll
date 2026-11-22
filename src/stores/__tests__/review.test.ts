@@ -1158,6 +1158,44 @@ describe('useReviewStore incremental re-review (since last review)', () => {
     expect(await loadLastReviewedSha(store.prKey)).toBeNull()
   })
 
+  it('toggles non-persisted zenMode without overwriting sidebarOpen or showShortcutsBar', async () => {
+    const store = useReviewStore()
+    const settings = useSettingsStore()
+    await store.loadMockPR()
+
+    expect(store.zenMode).toBe(false)
+    store.sidebarOpen = false
+    settings.showShortcutsBar = false
+
+    store.toggleZenMode()
+    expect(store.zenMode).toBe(true)
+    expect(store.sidebarOpen).toBe(false)
+    expect(settings.showShortcutsBar).toBe(false)
+
+    store.toggleZenMode(false)
+    expect(store.zenMode).toBe(false)
+    expect(store.sidebarOpen).toBe(false)
+    expect(settings.showShortcutsBar).toBe(false)
+
+    // Preserves true states as well and resets on backToInbox
+    store.sidebarOpen = true
+    settings.showShortcutsBar = true
+    store.toggleZenMode(true)
+    expect(store.zenMode).toBe(true)
+    expect(store.sidebarOpen).toBe(true)
+    expect(settings.showShortcutsBar).toBe(true)
+
+    // Non-persisted across fresh Pinia / store init
+    setActivePinia(createPinia())
+    const freshStore = useReviewStore()
+    await freshStore.init()
+    expect(freshStore.zenMode).toBe(false)
+
+    freshStore.toggleZenMode(true)
+    freshStore.backToInbox()
+    expect(freshStore.zenMode).toBe(false)
+  })
+
   it('shows the tour complete banner only when marking the final unreviewed step reviewed', async () => {
     const store = useReviewStore()
     await store.loadMockPR()
