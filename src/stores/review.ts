@@ -55,6 +55,7 @@ import {
   summarizePullRequest,
   togglePinRecentPR as togglePinRecentPRItem,
 } from '@/services/inbox'
+import { detectMovedCode } from '@/services/movedCode'
 import { buildReadingOrder } from '@/services/readingOrder'
 import {
   clearReviewCache,
@@ -217,6 +218,10 @@ export const useReviewStore = defineStore('review', () => {
       filteredFiles.value = null
     }
   }
+
+  const movedCodeIndex = computed(() =>
+    detectMovedCode(filteredFiles.value ?? pr.value?.files ?? []),
+  )
 
   const tourSteps = computed<TourStep[]>(() => {
     if (!pr.value) return []
@@ -591,7 +596,7 @@ export const useReviewStore = defineStore('review', () => {
     activeView.value = 'step'
   }
 
-  const focusedLine = ref<{ path: string; line: number } | null>(null)
+  const focusedLine = ref<{ path: string; line: number; side?: DiffSide } | null>(null)
 
   function goToFile(path: string): void {
     const idx = tourSteps.value.findIndex((s) => s.file.path === path)
@@ -601,9 +606,9 @@ export const useReviewStore = defineStore('review', () => {
     }
   }
 
-  function goToFileLine(path: string, line: number): void {
+  function goToFileLine(path: string, line: number, side?: DiffSide): void {
     const targetLine = Math.max(1, Math.floor(line))
-    focusedLine.value = { path, line: targetLine }
+    focusedLine.value = { path, line: targetLine, side }
     goToFile(path)
   }
 
@@ -1639,6 +1644,7 @@ export const useReviewStore = defineStore('review', () => {
     showLoaderModal,
     showFinishModal,
     prKey,
+    movedCodeIndex,
     tourSteps,
     currentStep,
     reviewedCount,
