@@ -8,6 +8,8 @@ import {
   saveAppSettings,
   saveOnboardingCompleted,
   saveTourDirection,
+  type CodeFontFamily,
+  type DiffColorPalette,
   type ExternalEditorPreset,
   type HistoryOrder,
   type PersistedAppSettings,
@@ -16,7 +18,15 @@ import {
 } from '@/services/storage'
 import type { DiffViewMode, LocalEditor, TourDirection } from '@/types/pr'
 
-export type { DiffViewMode, ExternalEditorPreset, HistoryOrder, TabSizeOption, ThemeMode }
+export type {
+  CodeFontFamily,
+  DiffColorPalette,
+  DiffViewMode,
+  ExternalEditorPreset,
+  HistoryOrder,
+  TabSizeOption,
+  ThemeMode,
+}
 
 export type SettingsSection =
   | 'general'
@@ -47,6 +57,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   sidebarDefaultOpen: true,
   sidebarWidth: 288,
   codeFontSize: 12.5,
+  codeFontFamily: 'default',
+  codeFontFamilyCustom: '',
+  diffColorPalette: 'default',
   requireAltForHover: false,
   wrapLines: false,
   diffViewMode: 'unified',
@@ -61,6 +74,33 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   inboxNotificationsEnabled: false,
   githubHost: 'github.com',
   historyOrder: 'newest',
+}
+
+const CODE_FONT_STACKS: Record<Exclude<CodeFontFamily, 'custom'>, string> = {
+  default: "'JetBrains Mono', 'Fira Code', 'SF Mono', 'Menlo', monospace",
+  'jetbrains-mono': "'JetBrains Mono', ui-monospace, 'SF Mono', 'Menlo', monospace",
+  'berkeley-mono': "'Berkeley Mono', ui-monospace, 'SF Mono', 'Menlo', monospace",
+  'fira-code': "'Fira Code', ui-monospace, 'SF Mono', 'Menlo', monospace",
+  'sf-mono': "'SF Mono', 'Menlo', 'Consolas', ui-monospace, monospace",
+}
+
+/** Resolves a monospace font preset + optional custom font name into a CSS font-family stack. */
+export function resolveCodeFontFamily(preset: CodeFontFamily, customName: string): string {
+  if (preset !== 'custom') {
+    return CODE_FONT_STACKS[preset] ?? CODE_FONT_STACKS.default
+  }
+  const sanitized = customName.replace(/[;{}]/g, '').trim()
+  if (!sanitized) {
+    return CODE_FONT_STACKS.default
+  }
+  if (sanitized.includes(',')) {
+    return /\bmonospace\b/i.test(sanitized) ? sanitized : `${sanitized}, monospace`
+  }
+  const unquoted = sanitized.replace(/^['"]|['"]$/g, '').trim()
+  if (!unquoted) {
+    return CODE_FONT_STACKS.default
+  }
+  return `'${unquoted.replace(/'/g, "\\'")}', ui-monospace, 'SF Mono', 'Menlo', monospace`
 }
 
 function getSystemPrefersDark(): boolean {
@@ -81,6 +121,9 @@ export const useSettingsStore = defineStore('settings', () => {
   const sidebarDefaultOpen = ref<boolean>(DEFAULT_APP_SETTINGS.sidebarDefaultOpen)
   const sidebarWidth = ref<number>(DEFAULT_APP_SETTINGS.sidebarWidth)
   const codeFontSize = ref<number>(DEFAULT_APP_SETTINGS.codeFontSize)
+  const codeFontFamily = ref<CodeFontFamily>(DEFAULT_APP_SETTINGS.codeFontFamily)
+  const codeFontFamilyCustom = ref<string>(DEFAULT_APP_SETTINGS.codeFontFamilyCustom)
+  const diffColorPalette = ref<DiffColorPalette>(DEFAULT_APP_SETTINGS.diffColorPalette)
   const requireAltForHover = ref<boolean>(DEFAULT_APP_SETTINGS.requireAltForHover)
   const wrapLines = ref<boolean>(DEFAULT_APP_SETTINGS.wrapLines)
   const diffViewMode = ref<DiffViewMode>(DEFAULT_APP_SETTINGS.diffViewMode)
@@ -108,6 +151,21 @@ export const useSettingsStore = defineStore('settings', () => {
   function applyThemeToDom(): void {
     if (typeof document === 'undefined') return
     document.documentElement.classList.toggle('dark', resolvedTheme.value === 'dark')
+  }
+
+  function applyCodeFontToDom(): void {
+    if (typeof document === 'undefined') return
+    const stack = resolveCodeFontFamily(codeFontFamily.value, codeFontFamilyCustom.value)
+    document.documentElement.style.setProperty('--font-mono', stack)
+  }
+
+  function applyDiffPaletteToDom(): void {
+    if (typeof document === 'undefined') return
+    const cl = document.documentElement.classList
+    cl.remove('diff-palette-blue-amber', 'diff-palette-teal-magenta')
+    if (diffColorPalette.value !== 'default') {
+      cl.add(`diff-palette-${diffColorPalette.value}`)
+    }
   }
 
   let mediaQueryBound = false
@@ -150,6 +208,26 @@ export const useSettingsStore = defineStore('settings', () => {
     }
     if (typeof savedSettings.codeFontSize === 'number') {
       codeFontSize.value = savedSettings.codeFontSize
+    }
+    if (
+      savedSettings.codeFontFamily === 'default' ||
+      savedSettings.codeFontFamily === 'jetbrains-mono' ||
+      savedSettings.codeFontFamily === 'berkeley-mono' ||
+      savedSettings.codeFontFamily === 'fira-code' ||
+      savedSettings.codeFontFamily === 'sf-mono' ||
+      savedSettings.codeFontFamily === 'custom'
+    ) {
+      codeFontFamily.value = savedSettings.codeFontFamily
+    }
+    if (typeof savedSettings.codeFontFamilyCustom === 'string') {
+      codeFontFamilyCustom.value = savedSettings.codeFontFamilyCustom
+    }
+    if (
+      savedSettings.diffColorPalette === 'default' ||
+      savedSettings.diffColorPalette === 'blue-amber' ||
+      savedSettings.diffColorPalette === 'teal-magenta'
+    ) {
+      diffColorPalette.value = savedSettings.diffColorPalette
     }
     if (typeof savedSettings.requireAltForHover === 'boolean') {
       requireAltForHover.value = savedSettings.requireAltForHover
@@ -207,6 +285,8 @@ export const useSettingsStore = defineStore('settings', () => {
     }
     syncGitHubHost(githubHost.value)
     applyThemeToDom()
+    applyCodeFontToDom()
+    applyDiffPaletteToDom()
     initialized.value = true
   }
 
@@ -219,6 +299,9 @@ export const useSettingsStore = defineStore('settings', () => {
         sidebarDefaultOpen: sidebarDefaultOpen.value,
         sidebarWidth: sidebarWidth.value,
         codeFontSize: codeFontSize.value,
+        codeFontFamily: codeFontFamily.value,
+        codeFontFamilyCustom: codeFontFamilyCustom.value,
+        diffColorPalette: diffColorPalette.value,
         requireAltForHover: requireAltForHover.value,
         wrapLines: wrapLines.value,
         diffViewMode: diffViewMode.value,
@@ -293,6 +376,24 @@ export const useSettingsStore = defineStore('settings', () => {
 
   async function setCodeFontSize(size: number): Promise<void> {
     codeFontSize.value = size
+    await persist()
+  }
+
+  async function setCodeFontFamily(family: CodeFontFamily): Promise<void> {
+    codeFontFamily.value = family
+    applyCodeFontToDom()
+    await persist()
+  }
+
+  async function setCodeFontFamilyCustom(fontName: string): Promise<void> {
+    codeFontFamilyCustom.value = fontName.trim()
+    applyCodeFontToDom()
+    await persist()
+  }
+
+  async function setDiffColorPalette(palette: DiffColorPalette): Promise<void> {
+    diffColorPalette.value = palette
+    applyDiffPaletteToDom()
     await persist()
   }
 
@@ -379,6 +480,9 @@ export const useSettingsStore = defineStore('settings', () => {
     sidebarDefaultOpen.value = DEFAULT_APP_SETTINGS.sidebarDefaultOpen
     sidebarWidth.value = DEFAULT_APP_SETTINGS.sidebarWidth
     codeFontSize.value = DEFAULT_APP_SETTINGS.codeFontSize
+    codeFontFamily.value = DEFAULT_APP_SETTINGS.codeFontFamily
+    codeFontFamilyCustom.value = DEFAULT_APP_SETTINGS.codeFontFamilyCustom
+    diffColorPalette.value = DEFAULT_APP_SETTINGS.diffColorPalette
     requireAltForHover.value = DEFAULT_APP_SETTINGS.requireAltForHover
     wrapLines.value = DEFAULT_APP_SETTINGS.wrapLines
     diffViewMode.value = DEFAULT_APP_SETTINGS.diffViewMode
@@ -395,6 +499,8 @@ export const useSettingsStore = defineStore('settings', () => {
     historyOrder.value = DEFAULT_APP_SETTINGS.historyOrder
     syncGitHubHost(githubHost.value)
     applyThemeToDom()
+    applyCodeFontToDom()
+    applyDiffPaletteToDom()
     await persist()
   }
 
@@ -412,6 +518,9 @@ export const useSettingsStore = defineStore('settings', () => {
     sidebarDefaultOpen,
     sidebarWidth,
     codeFontSize,
+    codeFontFamily,
+    codeFontFamilyCustom,
+    diffColorPalette,
     requireAltForHover,
     wrapLines,
     diffViewMode,
@@ -436,6 +545,9 @@ export const useSettingsStore = defineStore('settings', () => {
     setSidebarDefaultOpen,
     setSidebarWidth,
     setCodeFontSize,
+    setCodeFontFamily,
+    setCodeFontFamilyCustom,
+    setDiffColorPalette,
     setRequireAltForHover,
     setWrapLines,
     setDiffViewMode,

@@ -25,9 +25,11 @@ import {
   Pencil,
   Rows2,
   Search,
+  Send,
   Sparkles,
   Trash2,
   WrapText,
+  X,
 } from '@lucide/vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import {
@@ -888,15 +890,15 @@ function inlineChangeClass(pt: DiffTokenPart, lineType: DiffLine['type']): strin
 
 function diffLineSurfaceClass(line: DiffLine): string {
   if (line.moved) return 'border-l-diff-move-border bg-diff-move hover:bg-diff-move-hover'
-  if (line.type === 'add') return 'border-l-pine bg-diff-add hover:bg-diff-add-hover'
-  if (line.type === 'del') return 'border-l-crimson bg-diff-del hover:bg-diff-del-hover'
+  if (line.type === 'add') return 'border-l-diff-add-border bg-diff-add hover:bg-diff-add-hover'
+  if (line.type === 'del') return 'border-l-diff-del-border bg-diff-del hover:bg-diff-del-hover'
   return 'border-l-transparent hover:bg-diff-hover'
 }
 
 function diffLineSignClass(line: DiffLine): string {
   if (line.moved) return 'text-diff-move-text'
-  if (line.type === 'add') return 'text-pine-text'
-  if (line.type === 'del') return 'text-crimson-text'
+  if (line.type === 'add') return 'text-diff-add-text'
+  if (line.type === 'del') return 'text-diff-del-text'
   return 'text-code-gutter-text'
 }
 
@@ -1541,9 +1543,9 @@ function statusBadgeClass(status: string): string {
 
           <div class="flex shrink-0 items-center gap-2">
             <div class="hidden font-mono text-[11px] sm:block">
-              <span class="text-pine-text">+{{ step.file.additions }}</span>
+              <span class="text-diff-add-text">+{{ step.file.additions }}</span>
               <span class="mx-1 text-ink-faint">/</span>
-              <span class="text-crimson-text">-{{ step.file.deletions }}</span>
+              <span class="text-diff-del-text">-{{ step.file.deletions }}</span>
             </div>
 
             <div
@@ -1678,9 +1680,9 @@ function statusBadgeClass(status: string): string {
 
         <div class="flex flex-wrap items-center gap-2">
           <div class="font-mono text-xs">
-            <span class="text-pine-text">+{{ step.file.additions }}</span>
+            <span class="text-diff-add-text">+{{ step.file.additions }}</span>
             <span class="mx-1 text-ink-faint">/</span>
-            <span class="text-crimson-text">-{{ step.file.deletions }}</span>
+            <span class="text-diff-del-text">-{{ step.file.deletions }}</span>
           </div>
 
           <div
@@ -1793,6 +1795,61 @@ function statusBadgeClass(status: string): string {
             <span>{{ review.isStepReviewed(step.file.path) ? 'Reviewed' : 'Mark Reviewed' }}</span>
           </button>
         </div>
+      </div>
+    </div>
+
+    <!-- Tour Complete Wrap-Up Banner -->
+    <div
+      v-if="review.showTourCompleteBanner"
+      role="status"
+      data-testid="tour-complete-banner"
+      class="stroll-card animate-pop-in flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-pine-border bg-pine-soft/75 px-4 py-3"
+    >
+      <div class="flex min-w-0 items-center gap-3">
+        <div
+          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-pine/15 text-pine-text"
+        >
+          <Sparkles class="h-4 w-4" />
+        </div>
+        <div class="min-w-0">
+          <p class="text-xs font-semibold text-ink">
+            You've walked through every file — ready to finish your review?
+          </p>
+          <p class="text-[11px] text-pine-text">
+            All {{ review.tourSteps.length }}
+            {{ review.tourSteps.length === 1 ? 'file' : 'files' }} reviewed
+            <template v-if="review.draftComments.length > 0">
+              · {{ review.draftComments.length }} pending
+              {{ review.draftComments.length === 1 ? 'draft' : 'drafts' }}
+            </template>
+          </p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          class="inline-flex items-center gap-1.5 rounded-xl bg-pine px-3 py-1.5 text-xs font-semibold text-white shadow-xs transition-all hover:bg-pine-hover active:scale-[0.98]"
+          title="Finish & Submit Review (R)"
+          @click="review.openFinishReview()"
+        >
+          <Send class="h-3.5 w-3.5" />
+          <span>Finish Review</span>
+          <kbd
+            class="rounded border border-white/25 bg-white/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold leading-none text-white"
+          >
+            R
+          </kbd>
+        </button>
+        <button
+          type="button"
+          class="rounded-lg p-1.5 text-pine-text/70 transition-colors hover:bg-pine/10 hover:text-pine-text"
+          title="Dismiss"
+          aria-label="Dismiss tour complete banner"
+          @click="review.dismissTourCompleteBanner()"
+        >
+          <X class="h-3.5 w-3.5" />
+        </button>
       </div>
     </div>
 
@@ -1923,8 +1980,8 @@ function statusBadgeClass(status: string): string {
           <p class="text-xs font-medium text-ink">
             Generated / lockfile diff hidden to reduce noise
             <span class="ml-1 font-mono">
-              (<span class="text-pine-text">+{{ step.file.additions }}</span> /
-              <span class="text-crimson-text">-{{ step.file.deletions }}</span>)
+              (<span class="text-diff-add-text">+{{ step.file.additions }}</span> /
+              <span class="text-diff-del-text">-{{ step.file.deletions }}</span>)
             </span>
           </p>
           <p class="text-[11px] text-ink-muted">

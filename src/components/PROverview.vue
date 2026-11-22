@@ -39,6 +39,7 @@ import {
   toggleChecklistItem,
 } from '@/services/markdown'
 import { openExternalUrl } from '@/services/native'
+import { computeRemainingReviewEstimate } from '@/services/reviewEstimate'
 import type { CheckoutTarget } from '@/services/localCheckout'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
@@ -568,6 +569,10 @@ const tourCtaLabel = computed(() =>
     : 'Start Guided Tour',
 )
 
+const remainingEstimate = computed(() =>
+  computeRemainingReviewEstimate(review.tourSteps, review.isStepReviewed),
+)
+
 async function handleMerge(method: PRMergeMethod) {
   if (isUpdatingLifecycle.value) return
   isUpdatingLifecycle.value = true
@@ -830,6 +835,15 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
           </button>
           <span class="text-[11px] text-ink-faint">
             {{ review.reviewedCount }} of {{ review.tourSteps.length }} steps reviewed
+          </span>
+          <span
+            v-if="remainingEstimate"
+            data-testid="overview-remaining-estimate"
+            class="inline-flex items-center gap-1 text-[11px]"
+            :class="remainingEstimate.remainingFiles === 0 ? 'text-pine-text' : 'text-ink-muted'"
+          >
+            <Clock class="h-3 w-3 shrink-0 opacity-80" />
+            <span>{{ remainingEstimate.summary }}</span>
           </span>
 
           <div class="relative flex flex-wrap items-center justify-end gap-1.5 pt-1">

@@ -13,5 +13,11 @@
     } else {
       document.documentElement.classList.remove('dark')
     }
+    if (
+      parsed &&
+      (parsed.diffColorPalette === 'blue-amber' || parsed.diffColorPalette === 'teal-magenta')
+    ) {
+      document.documentElement.classList.add('diff-palette-' + parsed.diffColorPalette)
+    }
   } catch (e) {}
 })()

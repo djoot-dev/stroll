@@ -150,6 +150,18 @@ export async function saveDraftComments(prKey: string, drafts: DraftComment[]): 
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 
+/** Monospace font family presets for code and diff rendering. */
+export type CodeFontFamily =
+  | 'default'
+  | 'jetbrains-mono'
+  | 'berkeley-mono'
+  | 'fira-code'
+  | 'sf-mono'
+  | 'custom'
+
+/** Diff color palette presets, including colorblind-friendly options. */
+export type DiffColorPalette = 'default' | 'blue-amber' | 'teal-magenta'
+
 /** Display order for the overview's commit and conversation history. */
 export type HistoryOrder = 'newest' | 'oldest'
 
@@ -168,12 +180,21 @@ export interface ReviewTemplate {
   body: string
 }
 
+export interface CommentSnippet {
+  id: string
+  name: string
+  body: string
+}
+
 export interface PersistedAppSettings {
   theme: ThemeMode
   autoAdvanceOnReview: boolean
   sidebarDefaultOpen: boolean
   sidebarWidth: number
   codeFontSize: number
+  codeFontFamily: CodeFontFamily
+  codeFontFamilyCustom: string
+  diffColorPalette: DiffColorPalette
   requireAltForHover: boolean
   wrapLines: boolean
   diffViewMode: DiffViewMode
@@ -288,6 +309,15 @@ export async function loadReviewTemplates(): Promise<ReviewTemplate[]> {
 
 export async function saveReviewTemplates(templates: ReviewTemplate[]): Promise<void> {
   await setItem('review_templates', templates)
+}
+
+export async function loadCommentSnippets(): Promise<CommentSnippet[]> {
+  const items = await getItem<CommentSnippet[]>('comment_snippets')
+  return Array.isArray(items) ? items : []
+}
+
+export async function saveCommentSnippets(snippets: CommentSnippet[]): Promise<void> {
+  await setItem('comment_snippets', snippets)
 }
 
 export async function loadLastReviewedSha(prKey: string): Promise<string | null> {

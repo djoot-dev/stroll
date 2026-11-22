@@ -155,6 +155,7 @@ export const useReviewStore = defineStore('review', () => {
   const customOrderPaths = ref<string[]>([])
   const showLoaderModal = ref(false)
   const showFinishModal = ref(false)
+  const tourCompleteBannerVisible = ref(false)
   /** PR commits that touched each file path, loaded lazily per tour step. */
   const fileCommits = ref<Record<string, PRFileCommit[]>>({})
   const fileCommitsLoading = ref<Set<string>>(new Set())
@@ -272,6 +273,25 @@ export const useReviewStore = defineStore('review', () => {
     tourSteps.value.some((s) => !reviewedPaths.value.has(s.file.path)),
   )
 
+  const showTourCompleteBanner = computed(
+    () => tourCompleteBannerVisible.value && tourSteps.value.length > 0 && !hasUnreviewedSteps.value,
+  )
+
+  watch(showFinishModal, (open) => {
+    if (open) {
+      tourCompleteBannerVisible.value = false
+    }
+  })
+
+  function dismissTourCompleteBanner(): void {
+    tourCompleteBannerVisible.value = false
+  }
+
+  function openFinishReview(): void {
+    tourCompleteBannerVisible.value = false
+    showFinishModal.value = true
+  }
+
   async function init(): Promise<void> {
     const settings = useSettingsStore()
     await settings.init()
@@ -326,6 +346,7 @@ export const useReviewStore = defineStore('review', () => {
     hiddenPaths.value = new Set()
     customOrderPaths.value = []
     reviewedPaths.value = new Set()
+    tourCompleteBannerVisible.value = false
     fileFingerprints = new Map(
       data.files.map((file) => [file.path, computeFileFingerprint(file)]),
     )
@@ -622,6 +643,7 @@ export const useReviewStore = defineStore('review', () => {
     await clearReviewCache()
     draftComments.value = []
     reviewedPaths.value = new Set()
+    tourCompleteBannerVisible.value = false
     recordedLastReviewedSha.value = null
     sinceLastReviewPaths.value = null
   }
@@ -667,6 +689,7 @@ export const useReviewStore = defineStore('review', () => {
   async function toggleReviewed(path?: string): Promise<void> {
     const target = path ?? currentStep.value?.file.path
     if (!target) return
+    const wasAllReviewed = tourSteps.value.length > 0 && !hasUnreviewedSteps.value
     const next = new Set(reviewedPaths.value)
     const markingReviewed = !next.has(target)
     if (markingReviewed) {
@@ -675,6 +698,14 @@ export const useReviewStore = defineStore('review', () => {
       next.delete(target)
     }
     reviewedPaths.value = next
+
+    const isNowAllReviewed =
+      tourSteps.value.length > 0 && tourSteps.value.every((s) => next.has(s.file.path))
+    if (markingReviewed && !wasAllReviewed && isNowAllReviewed) {
+      tourCompleteBannerVisible.value = true
+    } else if (!isNowAllReviewed) {
+      tourCompleteBannerVisible.value = false
+    }
 
     const settings = useSettingsStore()
     if (markingReviewed && settings.autoAdvanceOnReview && target === currentStep.value?.file.path) {
@@ -721,6 +752,9 @@ export const useReviewStore = defineStore('review', () => {
           reverted.add(target)
         }
         reviewedPaths.value = reverted
+        if (tourSteps.value.some((s) => !reverted.has(s.file.path))) {
+          tourCompleteBannerVisible.value = false
+        }
         if (pr.value && prKey.value) {
           await saveViewedFiles(prKey.value, buildViewedMap(reverted))
         }
@@ -1658,6 +1692,9 @@ export const useReviewStore = defineStore('review', () => {
     reviewedCount,
     progressPercent,
     hasUnreviewedSteps,
+    showTourCompleteBanner,
+    dismissTourCompleteBanner,
+    openFinishReview,
     init,
     linkRepoPath,
     unlinkRepoPath,

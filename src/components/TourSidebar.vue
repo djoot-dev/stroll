@@ -7,6 +7,7 @@ import {
   CheckCheck,
   ChevronDown,
   ChevronRight,
+  Clock,
   Eye,
   EyeOff,
   FileText,
@@ -21,6 +22,7 @@ import {
 } from '@lucide/vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { isLockfile, LAYER_META } from '@/services/readingOrder'
+import { computeRemainingReviewEstimate } from '@/services/reviewEstimate'
 import { computeRevealScrollTop } from '@/services/scrollReveal'
 import { useReviewStore } from '@/stores/review'
 import {
@@ -179,6 +181,10 @@ const hasGeneratedVisibleSteps = computed(() =>
   review.tourSteps.some((s) => s.isGenerated),
 )
 
+const remainingEstimate = computed(() =>
+  computeRemainingReviewEstimate(review.tourSteps, review.isStepReviewed),
+)
+
 const filteredSteps = computed<TourStep[]>(() => {
   return review.tourSteps.filter((step) => {
     const path = step.file.path
@@ -333,6 +339,15 @@ function dirOnly(path: string): string {
             }"
           />
         </div>
+        <p
+          v-if="remainingEstimate"
+          data-testid="tour-remaining-estimate"
+          class="mt-1.5 flex items-center gap-1.5 text-[11px] leading-snug"
+          :class="remainingEstimate.remainingFiles === 0 ? 'text-pine-text' : 'text-ink-muted'"
+        >
+          <Clock class="h-3 w-3 shrink-0 opacity-80" />
+          <span>{{ remainingEstimate.summary }}</span>
+        </p>
 
         <!-- Commit / Scope Filter -->
         <div v-if="review.pr.commits.length > 0" class="mt-2.5 flex items-center gap-1.5">
