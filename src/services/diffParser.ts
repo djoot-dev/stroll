@@ -1,7 +1,8 @@
 import type { DiffSide, PRFile } from '@/types/pr'
 import { applyInlineDiffsToHunk, type InlineChangeRange } from './inlineDiff'
+import { getMovedLineInfo, type MovedCodeIndex, type MovedLineInfo } from './movedCode'
 
-export type { InlineChangeRange }
+export type { InlineChangeRange, MovedLineInfo }
 
 export interface DiffLine {
   key: string
@@ -14,6 +15,8 @@ export interface DiffLine {
   commentSide: DiffSide
   /** Character ranges within `content` that changed relative to a paired line */
   inlineChanges?: InlineChangeRange[]
+  /** Present when this line belongs to a moved block detected across the PR */
+  moved?: MovedLineInfo
 }
 
 export interface DiffGap {
@@ -169,6 +172,7 @@ export function isPureRename(file: PRFile): boolean {
 
 export interface BuildDiffOptions {
   ignoreWhitespace?: boolean
+  movedCode?: MovedCodeIndex
 }
 
 function normalizeWs(text: string): string {
@@ -271,6 +275,13 @@ export function buildDiffSegments(file: PRFile, options?: BuildDiffOptions): Dif
     const hunkLines = options?.ignoreWhitespace
       ? collapseWhitespaceOnlyLines(hunk.lines)
       : hunk.lines
+
+    if (options?.movedCode && options.movedCode.blockCount > 0) {
+      for (const line of hunkLines) {
+        const moved = getMovedLineInfo(options.movedCode, file.path, line)
+        if (moved) line.moved = moved
+      }
+    }
 
     applyInlineDiffsToHunk(hunkLines)
 

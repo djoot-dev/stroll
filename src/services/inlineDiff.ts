@@ -201,6 +201,7 @@ export interface DiffLineLike {
   type: 'add' | 'del' | 'context'
   content: string
   inlineChanges?: InlineChangeRange[]
+  moved?: unknown
 }
 
 interface BlockToken {
@@ -398,19 +399,19 @@ export function computeMultiLineBlockDiff(
 export function applyInlineDiffsToHunk<T extends DiffLineLike>(lines: T[]): void {
   let idx = 0
   while (idx < lines.length) {
-    if (lines[idx].type !== 'del') {
+    if (lines[idx].type !== 'del' || lines[idx].moved) {
       idx += 1
       continue
     }
 
     const delStart = idx
-    while (idx < lines.length && lines[idx].type === 'del') {
+    while (idx < lines.length && lines[idx].type === 'del' && !lines[idx].moved) {
       idx += 1
     }
     const delEnd = idx
 
     const addStart = idx
-    while (idx < lines.length && lines[idx].type === 'add') {
+    while (idx < lines.length && lines[idx].type === 'add' && !lines[idx].moved) {
       idx += 1
     }
     const addEnd = idx

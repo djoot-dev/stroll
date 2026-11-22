@@ -44,6 +44,7 @@ import {
 } from '@/services/codeContext'
 import { isCSharpPath, loadCSharpTypeIndex, type CSharpTypeIndex } from '@/services/csharpIndex'
 import { buildDiffSegments, isPureRename, type DiffLine } from '@/services/diffParser'
+import { formatMovedBadgeLabel, type MovedLineInfo } from '@/services/movedCode'
 import {
   computeCenteredRevealDelta,
   findDiffMatches,
@@ -408,7 +409,10 @@ const hoverableSymbols = computed<HoverableSymbols>(() => {
 
 
 const segments = computed(() =>
-  buildDiffSegments(props.step.file, { ignoreWhitespace: review.ignoreWhitespace }),
+  buildDiffSegments(props.step.file, {
+    ignoreWhitespace: review.ignoreWhitespace,
+    movedCode: review.movedCodeIndex,
+  }),
 )
 
 const gapSegments = computed(() => segments.value.filter((seg) => seg.kind === 'gap'))
@@ -882,6 +886,35 @@ function inlineChangeClass(pt: DiffTokenPart, lineType: DiffLine['type']): strin
   return classes.join(' ')
 }
 
+function diffLineSurfaceClass(line: DiffLine): string {
+  if (line.moved) return 'border-l-diff-move-border bg-diff-move hover:bg-diff-move-hover'
+  if (line.type === 'add') return 'border-l-pine bg-diff-add hover:bg-diff-add-hover'
+  if (line.type === 'del') return 'border-l-crimson bg-diff-del hover:bg-diff-del-hover'
+  return 'border-l-transparent hover:bg-diff-hover'
+}
+
+function diffLineSignClass(line: DiffLine): string {
+  if (line.moved) return 'text-diff-move-text'
+  if (line.type === 'add') return 'text-pine-text'
+  if (line.type === 'del') return 'text-crimson-text'
+  return 'text-code-gutter-text'
+}
+
+function movedBadgeLabel(line: DiffLine): string {
+  if (!line.moved || (line.type !== 'add' && line.type !== 'del')) return ''
+  return formatMovedBadgeLabel(props.step.file.path, line.type, line.moved)
+}
+
+function movedBadgeTitle(line: DiffLine): string {
+  if (!line.moved) return ''
+  const verb = line.type === 'add' ? 'Moved from' : 'Moved to'
+  return `${verb} ${line.moved.peerPath}:${line.moved.peerStartLine} (${line.moved.blockLength} lines) — Click to jump`
+}
+
+function jumpToMovedPeer(moved: MovedLineInfo): void {
+  review.goToFileLine(moved.peerPath, moved.peerStartLine, moved.peerSide)
+}
+
 const fileThreads = computed<ReviewThread[]>(() =>
   (review.pr?.threads ?? []).filter(
     (t) => t.path === props.step.file.path && t.subjectType !== 'FILE',
@@ -1342,9 +1375,19 @@ async function revealFocusedLine() {
   if (allDiffLines.value.length === 0) return
 
   const line =
-    allDiffLines.value.find((l) => l.newLineNumber === target.line) ??
-    allDiffLines.value.find((l) => l.commentLine === target.line) ??
-    allDiffLines.value.find((l) => l.oldLineNumber === target.line)
+    target.side === 'LEFT'
+      ? (allDiffLines.value.find((l) => l.oldLineNumber === target.line && l.type === 'del') ??
+         allDiffLines.value.find((l) => l.oldLineNumber === target.line) ??
+         allDiffLines.value.find((l) => l.newLineNumber === target.line) ??
+         allDiffLines.value.find((l) => l.commentLine === target.line))
+      : target.side === 'RIGHT'
+        ? (allDiffLines.value.find((l) => l.newLineNumber === target.line && l.type === 'add') ??
+           allDiffLines.value.find((l) => l.newLineNumber === target.line) ??
+           allDiffLines.value.find((l) => l.commentLine === target.line) ??
+           allDiffLines.value.find((l) => l.oldLineNumber === target.line))
+        : (allDiffLines.value.find((l) => l.newLineNumber === target.line) ??
+           allDiffLines.value.find((l) => l.commentLine === target.line) ??
+           allDiffLines.value.find((l) => l.oldLineNumber === target.line))
   if (!line) {
     review.focusedLine = null
     return
@@ -2515,11 +2558,7 @@ function statusBadgeClass(status: string): string {
                         ? [
                             selectedRange.keys.has(cellLine.key)
                               ? ['border-l-transparent', selectionRowClass(cellLine.key)]
-                              : {
-                                  'border-l-pine bg-diff-add hover:bg-diff-add-hover': cellLine.type === 'add',
-                                  'border-l-crimson bg-diff-del hover:bg-diff-del-hover': cellLine.type === 'del',
-                                  'border-l-transparent hover:bg-diff-hover': cellLine.type === 'context',
-                                },
+                              : diffLineSurfaceClass(cellLine),
                             flashLineKey === cellLine.key
                               ? 'ring-2 ring-inset ring-terra bg-terra-soft/40'
                               : activeMatchKey === cellLine.key
@@ -2552,11 +2591,7 @@ function statusBadgeClass(status: string): string {
                       </span>
                       <span
                         class="w-5 shrink-0 cursor-pointer select-none text-center font-bold"
-                        :class="{
-                          'text-pine-text': cellLine.type === 'add',
-                          'text-crimson-text': cellLine.type === 'del',
-                          'text-code-gutter-text': cellLine.type === 'context',
-                        }"
+                        :class="diffLineSignClass(cellLine)"
                         @mousedown.left="startLineDrag(cellLine)"
                       >
                         <span class="group-hover:hidden">
@@ -2596,6 +2631,17 @@ function statusBadgeClass(status: string): string {
                         v-else
                         :class="[pt.className, inlineChangeClass(pt, cellLine.type)]"
                       >{{ pt.text }}</span></template></pre>
+                      <button
+                        v-if="cellLine.moved?.isBlockStart && (cellLine.type === 'add' || cellLine.type === 'del')"
+                        type="button"
+                        :title="movedBadgeTitle(cellLine)"
+                        data-moved-badge
+                        class="my-0.5 ml-2 mr-2 inline-flex shrink-0 items-center gap-1 self-center rounded-full border border-diff-move-badge-border bg-diff-move-badge-bg px-2 py-0.5 font-sans text-[10px] font-medium text-diff-move-text transition-opacity hover:opacity-85"
+                        @click.stop="jumpToMovedPeer(cellLine.moved)"
+                      >
+                        <ArrowRightLeft class="h-2.5 w-2.5 shrink-0" />
+                        <span>{{ movedBadgeLabel(cellLine) }}</span>
+                      </button>
                     </template>
                   </div>
                 </div>
@@ -2704,11 +2750,7 @@ function statusBadgeClass(status: string): string {
                 :class="[
                   selectedRange.keys.has(line.key)
                     ? ['border-l-transparent', selectionRowClass(line.key)]
-                    : {
-                        'border-l-pine bg-diff-add hover:bg-diff-add-hover': line.type === 'add',
-                        'border-l-crimson bg-diff-del hover:bg-diff-del-hover': line.type === 'del',
-                        'border-l-transparent hover:bg-diff-hover': line.type === 'context',
-                      },
+                    : diffLineSurfaceClass(line),
                   flashLineKey === line.key
                     ? 'ring-2 ring-inset ring-terra bg-terra-soft/40'
                     : activeMatchKey === line.key
@@ -2736,11 +2778,7 @@ function statusBadgeClass(status: string): string {
                 </span>
                 <span
                   class="w-6 shrink-0 cursor-pointer select-none text-center font-bold"
-                  :class="{
-                    'text-pine-text': line.type === 'add',
-                    'text-crimson-text': line.type === 'del',
-                    'text-code-gutter-text': line.type === 'context',
-                  }"
+                  :class="diffLineSignClass(line)"
                   @mousedown.left="startLineDrag(line)"
                 >
                   <span class="group-hover:hidden">
@@ -2767,6 +2805,17 @@ function statusBadgeClass(status: string): string {
                   v-else
                   :class="[pt.className, inlineChangeClass(pt, line.type)]"
                 >{{ pt.text }}</span></template></pre>
+                <button
+                  v-if="line.moved?.isBlockStart && (line.type === 'add' || line.type === 'del')"
+                  type="button"
+                  :title="movedBadgeTitle(line)"
+                  data-moved-badge
+                  class="sticky right-3 my-0.5 ml-3 mr-3 inline-flex shrink-0 items-center gap-1 self-center rounded-full border border-diff-move-badge-border bg-diff-move-badge-bg px-2 py-0.5 font-sans text-[10px] font-medium text-diff-move-text transition-opacity hover:opacity-85"
+                  @click.stop="jumpToMovedPeer(line.moved)"
+                >
+                  <ArrowRightLeft class="h-2.5 w-2.5 shrink-0" />
+                  <span>{{ movedBadgeLabel(line) }}</span>
+                </button>
               </div>
 
               <!-- Existing GitHub Review Threads -->
