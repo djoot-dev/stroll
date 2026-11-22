@@ -1157,4 +1157,54 @@ describe('useReviewStore incremental re-review (since last review)', () => {
     expect(store.recordedLastReviewedSha).toBeNull()
     expect(await loadLastReviewedSha(store.prKey)).toBeNull()
   })
+
+  it('shows the tour complete banner only when marking the final unreviewed step reviewed', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+
+    expect(store.tourSteps.length).toBeGreaterThan(1)
+    expect(store.showTourCompleteBanner).toBe(false)
+
+    // Mark all steps except the last one
+    for (let i = 0; i < store.tourSteps.length - 1; i++) {
+      await store.toggleReviewed(store.tourSteps[i].file.path)
+      expect(store.showTourCompleteBanner).toBe(false)
+    }
+
+    // Mark the final unreviewed step reviewed
+    const lastPath = store.tourSteps[store.tourSteps.length - 1].file.path
+    await store.toggleReviewed(lastPath)
+    expect(store.showTourCompleteBanner).toBe(true)
+
+    // Unmarking a step hides the banner
+    await store.toggleReviewed(store.tourSteps[0].file.path)
+    expect(store.showTourCompleteBanner).toBe(false)
+
+    // Re-marking that remaining step shows the banner again
+    await store.toggleReviewed(store.tourSteps[0].file.path)
+    expect(store.showTourCompleteBanner).toBe(true)
+
+    // Dismissing hides the banner
+    store.dismissTourCompleteBanner()
+    expect(store.showTourCompleteBanner).toBe(false)
+  })
+
+  it('hides the tour complete banner when opening the finish review modal or reloading a PR', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+
+    for (const step of store.tourSteps) {
+      await store.toggleReviewed(step.file.path)
+    }
+    expect(store.showTourCompleteBanner).toBe(true)
+
+    store.openFinishReview()
+    expect(store.showTourCompleteBanner).toBe(false)
+    expect(store.showFinishModal).toBe(true)
+
+    // Reloading a PR also resets banner state
+    store.showFinishModal = false
+    await store.loadMockPR()
+    expect(store.showTourCompleteBanner).toBe(false)
+  })
 })
