@@ -1498,9 +1498,9 @@ function statusBadgeClass(status: string): string {
 
           <div class="flex shrink-0 items-center gap-2">
             <div class="hidden font-mono text-[11px] sm:block">
-              <span class="text-pine-text">+{{ step.file.additions }}</span>
+              <span class="text-diff-add-text">+{{ step.file.additions }}</span>
               <span class="mx-1 text-ink-faint">/</span>
-              <span class="text-crimson-text">-{{ step.file.deletions }}</span>
+              <span class="text-diff-del-text">-{{ step.file.deletions }}</span>
             </div>
 
             <div
@@ -1635,9 +1635,9 @@ function statusBadgeClass(status: string): string {
 
         <div class="flex flex-wrap items-center gap-2">
           <div class="font-mono text-xs">
-            <span class="text-pine-text">+{{ step.file.additions }}</span>
+            <span class="text-diff-add-text">+{{ step.file.additions }}</span>
             <span class="mx-1 text-ink-faint">/</span>
-            <span class="text-crimson-text">-{{ step.file.deletions }}</span>
+            <span class="text-diff-del-text">-{{ step.file.deletions }}</span>
           </div>
 
           <div
@@ -1880,8 +1880,8 @@ function statusBadgeClass(status: string): string {
           <p class="text-xs font-medium text-ink">
             Generated / lockfile diff hidden to reduce noise
             <span class="ml-1 font-mono">
-              (<span class="text-pine-text">+{{ step.file.additions }}</span> /
-              <span class="text-crimson-text">-{{ step.file.deletions }}</span>)
+              (<span class="text-diff-add-text">+{{ step.file.additions }}</span> /
+              <span class="text-diff-del-text">-{{ step.file.deletions }}</span>)
             </span>
           </p>
           <p class="text-[11px] text-ink-muted">
@@ -2516,8 +2516,8 @@ function statusBadgeClass(status: string): string {
                             selectedRange.keys.has(cellLine.key)
                               ? ['border-l-transparent', selectionRowClass(cellLine.key)]
                               : {
-                                  'border-l-pine bg-diff-add hover:bg-diff-add-hover': cellLine.type === 'add',
-                                  'border-l-crimson bg-diff-del hover:bg-diff-del-hover': cellLine.type === 'del',
+                                  'border-l-diff-add-border bg-diff-add hover:bg-diff-add-hover': cellLine.type === 'add',
+                                  'border-l-diff-del-border bg-diff-del hover:bg-diff-del-hover': cellLine.type === 'del',
                                   'border-l-transparent hover:bg-diff-hover': cellLine.type === 'context',
                                 },
                             flashLineKey === cellLine.key
@@ -2553,8 +2553,8 @@ function statusBadgeClass(status: string): string {
                       <span
                         class="w-5 shrink-0 cursor-pointer select-none text-center font-bold"
                         :class="{
-                          'text-pine-text': cellLine.type === 'add',
-                          'text-crimson-text': cellLine.type === 'del',
+                          'text-diff-add-text': cellLine.type === 'add',
+                          'text-diff-del-text': cellLine.type === 'del',
                           'text-code-gutter-text': cellLine.type === 'context',
                         }"
                         @mousedown.left="startLineDrag(cellLine)"
@@ -2705,8 +2705,8 @@ function statusBadgeClass(status: string): string {
                   selectedRange.keys.has(line.key)
                     ? ['border-l-transparent', selectionRowClass(line.key)]
                     : {
-                        'border-l-pine bg-diff-add hover:bg-diff-add-hover': line.type === 'add',
-                        'border-l-crimson bg-diff-del hover:bg-diff-del-hover': line.type === 'del',
+                        'border-l-diff-add-border bg-diff-add hover:bg-diff-add-hover': line.type === 'add',
+                        'border-l-diff-del-border bg-diff-del hover:bg-diff-del-hover': line.type === 'del',
                         'border-l-transparent hover:bg-diff-hover': line.type === 'context',
                       },
                   flashLineKey === line.key
@@ -2737,8 +2737,8 @@ function statusBadgeClass(status: string): string {
                 <span
                   class="w-6 shrink-0 cursor-pointer select-none text-center font-bold"
                   :class="{
-                    'text-pine-text': line.type === 'add',
-                    'text-crimson-text': line.type === 'del',
+                    'text-diff-add-text': line.type === 'add',
+                    'text-diff-del-text': line.type === 'del',
                     'text-code-gutter-text': line.type === 'context',
                   }"
                   @mousedown.left="startLineDrag(line)"

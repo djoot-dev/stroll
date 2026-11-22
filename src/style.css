@@ -69,9 +69,13 @@
   --stroll-diff-add: rgba(26, 127, 86, 0.15);
   --stroll-diff-add-hover: rgba(26, 127, 86, 0.22);
   --stroll-diff-add-word: rgba(26, 127, 86, 0.30);
+  --stroll-diff-add-border: var(--stroll-pine);
+  --stroll-diff-add-text: var(--stroll-pine-text);
   --stroll-diff-del: rgba(204, 46, 58, 0.13);
   --stroll-diff-del-hover: rgba(204, 46, 58, 0.20);
   --stroll-diff-del-word: rgba(204, 46, 58, 0.26);
+  --stroll-diff-del-border: var(--stroll-crimson);
+  --stroll-diff-del-text: var(--stroll-crimson-text);
   --stroll-diff-hover: rgba(22, 48, 37, 0.06);
   --stroll-diff-select: rgba(200, 97, 48, 0.15);
   --stroll-diff-select-bar: #c86130;
@@ -158,9 +162,13 @@ html.dark {
   --stroll-diff-add: rgba(46, 168, 114, 0.21);
   --stroll-diff-add-hover: rgba(46, 168, 114, 0.29);
   --stroll-diff-add-word: rgba(46, 168, 114, 0.42);
+  --stroll-diff-add-border: var(--stroll-pine);
+  --stroll-diff-add-text: var(--stroll-pine-text);
   --stroll-diff-del: rgba(235, 87, 97, 0.21);
   --stroll-diff-del-hover: rgba(235, 87, 97, 0.29);
   --stroll-diff-del-word: rgba(235, 87, 97, 0.42);
+  --stroll-diff-del-border: var(--stroll-crimson);
+  --stroll-diff-del-text: var(--stroll-crimson-text);
   --stroll-diff-hover: rgba(198, 219, 196, 0.08);
   --stroll-diff-select: rgba(222, 123, 71, 0.22);
   --stroll-diff-select-bar: #de7b47;
@@ -185,6 +193,60 @@ html.dark {
   --syn-meta: #e0c8a4;
   --syn-punctuation: #b0c4b9;
   --syn-invalid: #ff7b86;
+}
+
+/* Colorblind-friendly diff palette: Blue / Amber (Protanopia & Deuteranopia) */
+html.diff-palette-blue-amber {
+  --stroll-diff-add: rgba(25, 113, 194, 0.14);
+  --stroll-diff-add-hover: rgba(25, 113, 194, 0.21);
+  --stroll-diff-add-word: rgba(25, 113, 194, 0.28);
+  --stroll-diff-add-border: #1971c2;
+  --stroll-diff-add-text: #145a9e;
+  --stroll-diff-del: rgba(217, 119, 6, 0.14);
+  --stroll-diff-del-hover: rgba(217, 119, 6, 0.21);
+  --stroll-diff-del-word: rgba(217, 119, 6, 0.28);
+  --stroll-diff-del-border: #d97706;
+  --stroll-diff-del-text: #a35404;
+}
+
+html.dark.diff-palette-blue-amber {
+  --stroll-diff-add: rgba(56, 152, 236, 0.21);
+  --stroll-diff-add-hover: rgba(56, 152, 236, 0.29);
+  --stroll-diff-add-word: rgba(56, 152, 236, 0.42);
+  --stroll-diff-add-border: #4dabf7;
+  --stroll-diff-add-text: #7cc4fa;
+  --stroll-diff-del: rgba(245, 158, 11, 0.20);
+  --stroll-diff-del-hover: rgba(245, 158, 11, 0.28);
+  --stroll-diff-del-word: rgba(245, 158, 11, 0.40);
+  --stroll-diff-del-border: #f59e0b;
+  --stroll-diff-del-text: #fbbf24;
+}
+
+/* Colorblind-friendly diff palette: Teal / Magenta (High Contrast) */
+html.diff-palette-teal-magenta {
+  --stroll-diff-add: rgba(13, 148, 136, 0.14);
+  --stroll-diff-add-hover: rgba(13, 148, 136, 0.21);
+  --stroll-diff-add-word: rgba(13, 148, 136, 0.28);
+  --stroll-diff-add-border: #0d9488;
+  --stroll-diff-add-text: #0f766e;
+  --stroll-diff-del: rgba(190, 24, 93, 0.13);
+  --stroll-diff-del-hover: rgba(190, 24, 93, 0.20);
+  --stroll-diff-del-word: rgba(190, 24, 93, 0.27);
+  --stroll-diff-del-border: #be185d;
+  --stroll-diff-del-text: #9d174d;
+}
+
+html.dark.diff-palette-teal-magenta {
+  --stroll-diff-add: rgba(45, 212, 191, 0.20);
+  --stroll-diff-add-hover: rgba(45, 212, 191, 0.28);
+  --stroll-diff-add-word: rgba(45, 212, 191, 0.40);
+  --stroll-diff-add-border: #2dd4bf;
+  --stroll-diff-add-text: #5eead4;
+  --stroll-diff-del: rgba(244, 114, 182, 0.20);
+  --stroll-diff-del-hover: rgba(244, 114, 182, 0.28);
+  --stroll-diff-del-word: rgba(244, 114, 182, 0.40);
+  --stroll-diff-del-border: #f472b6;
+  --stroll-diff-del-text: #f9a8d4;
 }
 
 @theme {
@@ -238,9 +300,13 @@ html.dark {
   --color-diff-add: var(--stroll-diff-add);
   --color-diff-add-hover: var(--stroll-diff-add-hover);
   --color-diff-add-word: var(--stroll-diff-add-word);
+  --color-diff-add-border: var(--stroll-diff-add-border);
+  --color-diff-add-text: var(--stroll-diff-add-text);
   --color-diff-del: var(--stroll-diff-del);
   --color-diff-del-hover: var(--stroll-diff-del-hover);
   --color-diff-del-word: var(--stroll-diff-del-word);
+  --color-diff-del-border: var(--stroll-diff-del-border);
+  --color-diff-del-text: var(--stroll-diff-del-text);
   --color-diff-hover: var(--stroll-diff-hover);
   --color-diff-select: var(--stroll-diff-select);
 }

@@ -150,6 +150,18 @@ export async function saveDraftComments(prKey: string, drafts: DraftComment[]): 
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 
+/** Monospace font family presets for code and diff rendering. */
+export type CodeFontFamily =
+  | 'default'
+  | 'jetbrains-mono'
+  | 'berkeley-mono'
+  | 'fira-code'
+  | 'sf-mono'
+  | 'custom'
+
+/** Diff color palette presets, including colorblind-friendly options. */
+export type DiffColorPalette = 'default' | 'blue-amber' | 'teal-magenta'
+
 /** Display order for the overview's commit and conversation history. */
 export type HistoryOrder = 'newest' | 'oldest'
 
@@ -174,6 +186,9 @@ export interface PersistedAppSettings {
   sidebarDefaultOpen: boolean
   sidebarWidth: number
   codeFontSize: number
+  codeFontFamily: CodeFontFamily
+  codeFontFamilyCustom: string
+  diffColorPalette: DiffColorPalette
   requireAltForHover: boolean
   wrapLines: boolean
   diffViewMode: DiffViewMode
