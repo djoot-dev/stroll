@@ -687,8 +687,8 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
     </div>
 
     <!-- Header & Status Strip -->
-    <section class="stroll-card rounded-2xl border border-border bg-canvas-subtle p-5">
-      <div class="flex flex-wrap items-start justify-between gap-4">
+    <section class="stroll-card @container rounded-2xl border border-border bg-canvas-subtle p-5">
+      <div class="flex flex-col gap-4 @[680px]:flex-row @[680px]:items-start @[680px]:justify-between">
         <div class="min-w-0 flex-1 space-y-2.5">
           <!-- Status Badges Row -->
           <div class="flex flex-wrap items-center gap-2">
@@ -819,7 +819,7 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
         </div>
 
         <!-- Primary CTA & Lifecycle Actions -->
-        <div class="flex shrink-0 flex-col items-end gap-2">
+        <div class="flex shrink-0 flex-col items-start gap-2 @[680px]:items-end">
           <button
             class="inline-flex items-center gap-2 rounded-xl bg-terra px-4 py-2.5 text-xs font-semibold text-white shadow-xs transition-all hover:bg-terra-hover active:scale-[0.98] disabled:opacity-40"
             :disabled="review.tourSteps.length === 0"
