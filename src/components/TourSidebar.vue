@@ -17,7 +17,6 @@ import {
   MessageSquare,
   Pin,
   RotateCcw,
-  SkipForward,
   Sparkles,
 } from '@lucide/vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
@@ -314,21 +313,9 @@ function dirOnly(path: string): string {
           {{ review.pr.title }}
         </h2>
         <div class="mt-2 flex flex-col items-start gap-1 text-[11px] text-ink-muted @[260px]:flex-row @[260px]:items-center @[260px]:justify-between @[260px]:gap-2">
-          <div class="flex items-center gap-1.5">
-            <span class="shrink-0 whitespace-nowrap">
-              {{ review.reviewedCount }} / {{ review.tourSteps.length }} reviewed
-            </span>
-            <button
-              v-if="review.hasUnreviewedSteps"
-              type="button"
-              class="inline-flex items-center gap-0.5 rounded-md border border-border bg-canvas px-1.5 py-0.5 text-[10px] font-medium text-terra-text transition-colors hover:border-terra-border hover:bg-terra-soft"
-              title="Jump to next unreviewed step (N)"
-              @click="review.nextUnreviewedStep()"
-            >
-              <SkipForward class="h-2.5 w-2.5" />
-              <span>Next</span>
-            </button>
-          </div>
+          <span class="shrink-0 whitespace-nowrap">
+            {{ review.reviewedCount }} / {{ review.tourSteps.length }} reviewed
+          </span>
           <span
             class="w-full truncate font-mono text-[10.5px] text-ink-faint @[260px]:w-auto"
             :title="`${review.pr.headRefName} → ${review.pr.baseRefName}`"
