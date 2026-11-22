@@ -133,6 +133,14 @@ const activeReplacedCount = ref(0)
 const activeLineNumber = ref<number | null>(null)
 const copiedState = ref<'path' | 'permalink' | null>(null)
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
+
+// Compact sticky step header state
+const stepHeaderRef = ref<HTMLElement | null>(null)
+const compactHeaderRef = ref<HTMLElement | null>(null)
+const isHeaderScrolledOut = ref(false)
+const compactHeaderHeight = ref(0)
+let headerScrollEl: HTMLElement | null = null
+let compactHeaderResizeObserver: ResizeObserver | null = null
 const hoverState = ref<{
   info: HoverSymbolInfo | null
   blame: GitBlameInfo | null
@@ -1380,10 +1388,52 @@ async function openStepInEditor(line = 1) {
   }
 }
 
+function updateCompactHeaderHeight() {
+  const height = compactHeaderRef.value?.getBoundingClientRect().height ?? 0
+  // Subtract 1px so the z-10 sticky toolbar tucks cleanly under the z-20 compact header with no subpixel gap
+  compactHeaderHeight.value = height > 1 ? Math.floor(height) - 1 : 0
+}
+
+function updateStickyHeaderState() {
+  if (!stepHeaderRef.value) return
+  const scrollerTop =
+    headerScrollEl &&
+    headerScrollEl !== document.documentElement &&
+    headerScrollEl !== document.body
+      ? headerScrollEl.getBoundingClientRect().top
+      : 0
+
+  const scrolledOut = stepHeaderRef.value.getBoundingClientRect().bottom <= scrollerTop + 1
+  if (isHeaderScrolledOut.value !== scrolledOut) {
+    isHeaderScrolledOut.value = scrolledOut
+    if (scrolledOut) {
+      nextTick(updateCompactHeaderHeight)
+    }
+  }
+}
+
+onMounted(() => {
+  if (stepHeaderRef.value) {
+    headerScrollEl = getScrollParent(stepHeaderRef.value)
+    headerScrollEl.addEventListener('scroll', updateStickyHeaderState, { passive: true })
+    updateStickyHeaderState()
+  }
+
+  if (typeof ResizeObserver !== 'undefined' && compactHeaderRef.value) {
+    compactHeaderResizeObserver = new ResizeObserver(() => {
+      updateCompactHeaderHeight()
+      updateStickyHeaderState()
+    })
+    compactHeaderResizeObserver.observe(compactHeaderRef.value)
+  }
+})
+
 onBeforeUnmount(() => {
   if (flashTimer) clearTimeout(flashTimer)
   if (flashLineTimer) clearTimeout(flashLineTimer)
   if (copiedTimer) clearTimeout(copiedTimer)
+  headerScrollEl?.removeEventListener('scroll', updateStickyHeaderState)
+  compactHeaderResizeObserver?.disconnect()
 })
 
 function statusBadgeClass(status: string): string {
@@ -1402,8 +1452,118 @@ function statusBadgeClass(status: string): string {
 
 <template>
   <div class="mx-auto max-w-6xl space-y-4 p-5 pb-16">
+    <!-- Compact Sticky Step Header (appears when full Step Header scrolls out of view) -->
+    <div class="sticky top-0 z-20 h-0 overflow-visible">
+      <div
+        v-show="isHeaderScrolledOut"
+        ref="compactHeaderRef"
+        class="-mx-5 bg-canvas px-5 pt-2 pb-1.5"
+      >
+        <div
+          class="stroll-card flex flex-nowrap items-center justify-between gap-3 rounded-xl border border-border bg-canvas-subtle/95 px-3.5 py-1.5 shadow-sm"
+        >
+          <div class="flex min-w-0 flex-1 items-center gap-2">
+            <span
+              v-if="isGeneratedStep"
+              class="shrink-0 rounded-md border border-border bg-canvas-elevated px-1.5 py-0.5 font-mono text-[10px] font-semibold text-ink-muted"
+            >
+              {{ isLockfile(step.file.path) ? 'LOCKFILE' : 'GENERATED' }}
+            </span>
+            <span
+              v-else
+              class="shrink-0 rounded-md border px-1.5 py-0.5 font-mono text-[10px] font-semibold"
+              :class="LAYER_META[step.layer].badgeClass"
+            >
+              {{ LAYER_META[step.layer].shortLabel }}
+            </span>
+            <span
+              class="shrink-0 rounded-md border px-1.5 py-0.5 font-mono text-[10px] uppercase"
+              :class="statusBadgeClass(step.file.status)"
+            >
+              {{ step.file.status }}
+            </span>
+            <span class="truncate font-mono text-xs font-semibold text-ink" :title="step.file.path">
+              {{ step.file.path }}
+            </span>
+            <button
+              type="button"
+              class="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-canvas px-1.5 py-0.5 text-[10px] text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+              title="Copy file path"
+              @click="copyFilePath"
+            >
+              <Check v-if="copiedState === 'path'" class="h-3 w-3 text-pine-text" />
+              <Copy v-else class="h-3 w-3" />
+            </button>
+          </div>
+
+          <div class="flex shrink-0 items-center gap-2">
+            <div class="hidden font-mono text-[11px] sm:block">
+              <span class="text-pine-text">+{{ step.file.additions }}</span>
+              <span class="mx-1 text-ink-faint">/</span>
+              <span class="text-crimson-text">-{{ step.file.deletions }}</span>
+            </div>
+
+            <div
+              class="inline-flex rounded-lg border border-border bg-canvas p-0.5 text-[10.5px]"
+              role="group"
+              aria-label="Diff layout"
+            >
+              <button
+                type="button"
+                title="Unified diff"
+                class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors"
+                :class="
+                  settings.diffViewMode === 'unified'
+                    ? 'bg-terra font-semibold text-white'
+                    : 'text-ink-muted hover:text-ink'
+                "
+                @click="settings.setDiffViewMode('unified')"
+              >
+                <Rows2 class="h-3 w-3" />
+              </button>
+              <button
+                type="button"
+                title="Side-by-side split diff"
+                class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors"
+                :class="
+                  settings.diffViewMode === 'split'
+                    ? 'bg-terra font-semibold text-white'
+                    : 'text-ink-muted hover:text-ink'
+                "
+                @click="settings.setDiffViewMode('split')"
+              >
+                <Columns2 class="h-3 w-3" />
+              </button>
+            </div>
+
+            <button
+              type="button"
+              :title="
+                review.isStepReviewed(step.file.path)
+                  ? 'Mark as unreviewed (M)'
+                  : 'Mark as reviewed (M)'
+              "
+              class="inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[11px] font-medium transition-colors"
+              :class="
+                review.isStepReviewed(step.file.path)
+                  ? 'border-pine-border bg-pine-soft text-pine-text'
+                  : 'border-border bg-canvas text-ink-secondary hover:bg-canvas-elevated'
+              "
+              @click="review.toggleReviewed(step.file.path)"
+            >
+              <CheckCircle2 class="h-3 w-3" />
+              <span>{{ review.isStepReviewed(step.file.path) ? 'Reviewed' : 'Mark Reviewed' }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Step Header -->
-    <div class="stroll-card rounded-2xl border border-border bg-canvas-subtle p-4">
+    <div
+      ref="stepHeaderRef"
+      class="stroll-card !mt-0 rounded-2xl border border-border bg-canvas-subtle p-4"
+    >
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0 flex-1 basis-80 space-y-1">
           <div class="flex flex-wrap items-center gap-2">
@@ -1697,7 +1857,16 @@ function statusBadgeClass(status: string): string {
 
     <div
       ref="diffSurfaceRef"
-      class="stroll-card relative overflow-clip rounded-2xl border border-border bg-code"
+      class="relative"
+      :class="
+        isCollapsedGenerated ||
+        isPureRenameFile ||
+        showImagePreview ||
+        isNonImageBinary ||
+        (showMarkdownPreview && canPreviewMarkdown)
+          ? 'stroll-card overflow-hidden rounded-2xl border border-border bg-code'
+          : ''
+      "
     >
       <!-- Collapsed Generated / Lockfile Banner -->
       <div
@@ -1844,8 +2013,12 @@ function statusBadgeClass(status: string): string {
       <template v-else>
         <!-- Sticky Diff Context Toolbar (Enclosing Scope Breadcrumb + Hover Guardrail Toggle) -->
         <div
-          class="sticky top-0 z-10 flex flex-nowrap items-center justify-between gap-2 border-b border-border bg-canvas-subtle/95 px-3.5 py-1.5 text-[11px] text-ink-muted backdrop-blur-sm"
+          class="sticky z-10 bg-canvas"
+          :style="{ top: isHeaderScrolledOut ? `${compactHeaderHeight}px` : '0px' }"
         >
+          <div
+            class="flex flex-nowrap items-center justify-between gap-2 rounded-t-2xl border border-border bg-canvas-subtle/95 px-3.5 py-1.5 text-[11px] text-ink-muted backdrop-blur-sm"
+          >
           <div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
             <span class="shrink-0 text-ink-muted">Click or drag line numbers to comment</span>
             <template v-if="activeScopes.length > 0">
@@ -1967,8 +2140,10 @@ function statusBadgeClass(status: string): string {
               <span>{{ settings.wrapLines ? 'Wrap: On' : 'Wrap: Off' }}</span>
             </button>
           </div>
+          </div>
         </div>
 
+        <div class="stroll-card overflow-clip rounded-b-2xl border-x border-b border-border bg-code">
         <div v-if="segments.length === 0" class="p-8 text-center text-xs text-ink-muted">
           No textual diff available for this file (binary or empty change).
         </div>
@@ -2733,6 +2908,7 @@ function statusBadgeClass(status: string): string {
             </div>
           </div>
       </div>
+        </div>
       </template>
     </div>
 
