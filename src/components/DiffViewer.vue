@@ -436,6 +436,95 @@ const splitRowsBySegmentId = computed(() => {
   return map
 })
 
+// ── Split-view synchronized horizontal scroll ───────────────────────────────
+// Each split row is its own `grid-cols-2` so left/right lines stay vertically
+// aligned across wrapped lines and full-width comment cards. Instead of giving
+// every `<pre>` its own scrollbar, `<pre>` uses `overflow-x-hidden` and all
+// lines on each side share one synchronized `scrollLeft` driven by a single
+// sticky-bottom scrollbar per side and horizontal wheel/trackpad gestures.
+const splitLeftTrackRef = ref<HTMLElement | null>(null)
+const splitRightTrackRef = ref<HTMLElement | null>(null)
+const splitScrollWidth = ref({ left: 0, right: 0 })
+const splitScrollLeft = ref({ left: 0, right: 0 })
+let splitResizeObserver: ResizeObserver | null = null
+
+function syncSplitSideScroll(side: 'left' | 'right', scrollLeft: number) {
+  splitScrollLeft.value[side] = scrollLeft
+  const pres = diffSurfaceRef.value?.querySelectorAll<HTMLPreElement>(
+    `pre[data-split-side="${side}"]`,
+  )
+  if (!pres) return
+  for (const pre of pres) {
+    if (pre.scrollLeft !== scrollLeft) {
+      pre.scrollLeft = scrollLeft
+    }
+  }
+}
+
+function handleSplitTrackScroll(side: 'left' | 'right') {
+  const track = side === 'left' ? splitLeftTrackRef.value : splitRightTrackRef.value
+  if (!track) return
+  syncSplitSideScroll(side, track.scrollLeft)
+}
+
+function handleSplitCellWheel(event: WheelEvent, side: 'left' | 'right') {
+  if (settings.diffViewMode !== 'split' || settings.wrapLines) return
+  const dx =
+    event.shiftKey && Math.abs(event.deltaY) > Math.abs(event.deltaX)
+      ? event.deltaY
+      : event.deltaX
+  if (dx === 0 || (!event.shiftKey && Math.abs(event.deltaX) <= Math.abs(event.deltaY))) {
+    return
+  }
+  const track = side === 'left' ? splitLeftTrackRef.value : splitRightTrackRef.value
+  if (!track || track.scrollWidth <= track.clientWidth) return
+
+  event.preventDefault()
+  const maxScroll = track.scrollWidth - track.clientWidth
+  const nextLeft = Math.max(0, Math.min(maxScroll, track.scrollLeft + dx))
+  if (track.scrollLeft !== nextLeft) {
+    track.scrollLeft = nextLeft
+  }
+  syncSplitSideScroll(side, nextLeft)
+}
+
+function measureSplitOverflow() {
+  if (settings.diffViewMode !== 'split' || settings.wrapLines || !diffSurfaceRef.value) {
+    splitScrollWidth.value = { left: 0, right: 0 }
+    splitScrollLeft.value = { left: 0, right: 0 }
+    return
+  }
+
+  const nextWidths = { left: 0, right: 0 }
+  for (const side of ['left', 'right'] as const) {
+    const pres = diffSurfaceRef.value.querySelectorAll<HTMLPreElement>(
+      `pre[data-split-side="${side}"]`,
+    )
+    let maxScrollWidth = 0
+    let clientWidth = 0
+    for (const pre of pres) {
+      if (pre.clientWidth > 0) clientWidth = pre.clientWidth
+      if (pre.scrollWidth > maxScrollWidth) maxScrollWidth = pre.scrollWidth
+    }
+    const overflows = clientWidth > 0 && maxScrollWidth > clientWidth + 1
+    nextWidths[side] = overflows ? maxScrollWidth : 0
+    const clamped = overflows
+      ? Math.min(splitScrollLeft.value[side], maxScrollWidth - clientWidth)
+      : 0
+    syncSplitSideScroll(side, clamped)
+  }
+
+  splitScrollWidth.value = nextWidths
+  void nextTick(() => {
+    if (splitLeftTrackRef.value) {
+      splitLeftTrackRef.value.scrollLeft = splitScrollLeft.value.left
+    }
+    if (splitRightTrackRef.value) {
+      splitRightTrackRef.value.scrollLeft = splitScrollLeft.value.right
+    }
+  })
+}
+
 // ── Find-in-file palette ────────────────────────────────────────────────────
 // Searches every line of the file (collapsed gaps included). Opening it never
 // moves the page: the first match is the one nearest the reader's position,
@@ -658,13 +747,39 @@ function handleDiffKeydown(e: KeyboardEvent) {
   }
 }
 
+watch(
+  [
+    () => settings.diffViewMode,
+    () => settings.wrapLines,
+    () => settings.codeFontSize,
+    () => settings.tabSize,
+    () => props.step.file.path,
+    () => expandedGaps.value.size,
+    isGeneratedExpanded,
+    showSvgSource,
+    showMarkdownPreview,
+  ],
+  () => {
+    void nextTick(measureSplitOverflow)
+  },
+)
+
 onMounted(() => {
   window.addEventListener('keydown', handleDiffKeydown)
+  if (typeof ResizeObserver !== 'undefined' && diffSurfaceRef.value) {
+    splitResizeObserver = new ResizeObserver(() => {
+      measureSplitOverflow()
+    })
+    splitResizeObserver.observe(diffSurfaceRef.value)
+  }
+  void nextTick(measureSplitOverflow)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleDiffKeydown)
   if (lingerTimer) clearTimeout(lingerTimer)
+  splitResizeObserver?.disconnect()
+  splitResizeObserver = null
 })
 
 const showImagePreview = computed(
@@ -2037,7 +2152,9 @@ function statusBadgeClass(status: string): string {
           v-else
           class="@container font-mono leading-[1.55]"
           :class="[
-            settings.wrapLines ? 'overflow-x-hidden' : 'overflow-x-auto',
+            settings.wrapLines || settings.diffViewMode === 'split'
+              ? 'overflow-x-clip'
+              : 'overflow-x-auto',
             { 'select-none': isDraggingSelection },
           ]"
           :style="{ fontSize: `${settings.codeFontSize}px`, tabSize: settings.tabSize }"
@@ -2100,6 +2217,7 @@ function statusBadgeClass(status: string): string {
                           : 'bg-canvas-subtle/40'
                       "
                       @mouseenter="cellLine && handleLineMouseEnter(cellLine, seg.lines, 0)"
+                      @wheel="handleSplitCellWheel($event, sideIdx === 0 ? 'left' : 'right')"
                     >
                       <template v-if="cellLine">
                         <span
@@ -2115,11 +2233,12 @@ function statusBadgeClass(status: string): string {
                           <MessageSquarePlus class="mx-auto mt-1 hidden h-3 w-3 text-terra group-hover:block" />
                         </span>
                         <pre
+                          :data-split-side="sideIdx === 0 ? 'left' : 'right'"
                           class="min-w-0 flex-1 pr-3 text-ink"
                           :class="
                             settings.wrapLines
                               ? 'whitespace-pre-wrap [overflow-wrap:anywhere]'
-                              : 'overflow-x-auto whitespace-pre'
+                              : 'overflow-x-hidden whitespace-pre'
                           "
                         ><template
                           v-for="(pt, pIdx) in tokenizedByKey.get(cellLine.key)"
@@ -2422,6 +2541,7 @@ function statusBadgeClass(status: string): string {
                           seg.lines.indexOf(cellLine),
                         )
                     "
+                    @wheel="handleSplitCellWheel($event, sideIdx === 0 ? 'left' : 'right')"
                   >
                     <template v-if="cellLine">
                       <span
@@ -2445,11 +2565,12 @@ function statusBadgeClass(status: string): string {
                         <MessageSquarePlus class="mx-auto mt-1 hidden h-3 w-3 text-terra group-hover:block" />
                       </span>
                       <pre
+                        :data-split-side="sideIdx === 0 ? 'left' : 'right'"
                         class="min-w-0 flex-1 pr-3 text-ink"
                         :class="
                           settings.wrapLines
                             ? 'whitespace-pre-wrap [overflow-wrap:anywhere]'
-                            : 'overflow-x-auto whitespace-pre'
+                            : 'overflow-x-hidden whitespace-pre'
                         "
                       ><template
                         v-for="(pt, pIdx) in tokenizedByKey.get(cellLine.key)"
@@ -2745,6 +2866,46 @@ function statusBadgeClass(status: string): string {
             </template>
           </template>
         </template>
+          </div>
+          <div
+            v-if="
+              settings.diffViewMode === 'split' &&
+              !settings.wrapLines &&
+              (splitScrollWidth.left > 0 || splitScrollWidth.right > 0)
+            "
+            data-split-scrollbar-bar
+            class="sticky bottom-0 z-10 grid grid-cols-2 divide-x divide-border-muted border-t border-border-muted bg-canvas-subtle/95 backdrop-blur-xs"
+          >
+            <div class="flex min-w-0 items-center border-l-2 border-l-transparent">
+              <div class="w-11 shrink-0 border-r border-border-muted" />
+              <div class="w-5 shrink-0" />
+              <div
+                ref="splitLeftTrackRef"
+                data-split-scroll-track="left"
+                class="min-w-0 flex-1 overflow-x-auto"
+                @scroll="handleSplitTrackScroll('left')"
+              >
+                <div
+                  v-if="splitScrollWidth.left > 0"
+                  :style="{ width: `${splitScrollWidth.left}px`, height: '1px' }"
+                />
+              </div>
+            </div>
+            <div class="flex min-w-0 items-center border-l-2 border-l-transparent">
+              <div class="w-11 shrink-0 border-r border-border-muted" />
+              <div class="w-5 shrink-0" />
+              <div
+                ref="splitRightTrackRef"
+                data-split-scroll-track="right"
+                class="min-w-0 flex-1 overflow-x-auto"
+                @scroll="handleSplitTrackScroll('right')"
+              >
+                <div
+                  v-if="splitScrollWidth.right > 0"
+                  :style="{ width: `${splitScrollWidth.right}px`, height: '1px' }"
+                />
+              </div>
+            </div>
           </div>
       </div>
         </div>
