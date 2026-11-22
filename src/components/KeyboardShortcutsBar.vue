@@ -1,11 +1,29 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { getContextualShortcutHints } from '@/services/shortcutsBar'
+import { useReviewStore } from '@/stores/review'
 import UpdateIndicator from './UpdateIndicator.vue'
 
 const emit = defineEmits<{
   (e: 'openCheatsheet'): void
 }>()
 
+const review = useReviewStore()
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
+
+const hints = computed(() =>
+  getContextualShortcutHints({
+    hasPR: Boolean(review.pr),
+    activeView: review.activeView,
+    stepCount: review.tourSteps.length,
+    currentStepIndex: review.currentStepIndex,
+    hasUnreviewedSteps: review.reviewedCount < review.tourSteps.length,
+    currentStepReviewed: review.currentStep
+      ? review.isStepReviewed(review.currentStep.file.path)
+      : false,
+    isMac,
+  }),
+)
 </script>
 
 <template>
@@ -13,15 +31,22 @@ const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(n
     class="flex h-7 shrink-0 items-center justify-between gap-4 overflow-hidden border-t border-border bg-canvas-subtle px-4 text-[11px] text-ink-muted"
   >
     <div class="flex items-center gap-4 overflow-x-auto whitespace-nowrap">
-      <span><kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">O</kbd> Toggle Overview</span>
-      <span><kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">L</kbd> / <kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">→</kbd> Next</span>
-      <span><kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">H</kbd> / <kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">←</kbd> Prev</span>
-      <span><kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">J</kbd> / <kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">K</kbd> Scroll</span>
-      <span><kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">N</kbd> Next unreviewed</span>
-      <span><kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">M</kbd> Mark Reviewed</span>
-      <span><kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">R</kbd> Finish Review</span>
-      <span><kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">{{ isMac ? '⌘K' : 'Ctrl+K' }}</kbd> Jump</span>
-      <span><kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">{{ isMac ? '⌘F' : 'Ctrl+F' }}</kbd> Find</span>
+      <span
+        v-for="hint in hints"
+        :key="hint.id"
+        class="inline-flex items-center gap-1 transition-opacity duration-150"
+        :class="hint.enabled ? 'opacity-100' : 'opacity-35'"
+        :aria-disabled="!hint.enabled || undefined"
+        :title="hint.disabledReason"
+      >
+        <template v-for="(key, idx) in hint.keys" :key="key">
+          <span v-if="idx > 0" class="text-ink-faint">/</span>
+          <kbd class="rounded border border-border bg-canvas px-1 font-mono text-ink-secondary">
+            {{ key }}
+          </kbd>
+        </template>
+        <span>{{ hint.label }}</span>
+      </span>
     </div>
     <div class="flex shrink-0 items-center gap-3">
       <button

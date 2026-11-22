@@ -55,15 +55,18 @@ import {
   summarizePullRequest,
   togglePinRecentPR as togglePinRecentPRItem,
 } from '@/services/inbox'
+import { detectMovedCode } from '@/services/movedCode'
 import { buildReadingOrder } from '@/services/readingOrder'
 import {
   clearReviewCache,
   computeFileFingerprint,
   loadDraftComments,
+  loadLastReviewedSha,
   loadRecentPRs,
   loadRepoPaths,
   loadViewedFiles,
   saveDraftComments,
+  saveLastReviewedSha,
   saveRecentPRs,
   saveRepoPaths,
   saveViewedFiles,
@@ -144,6 +147,8 @@ export const useReviewStore = defineStore('review', () => {
   const commitFilter = ref<string>('all')
   const filteredFiles = ref<PRFile[] | null>(null)
   const isLoadingCommitFilter = ref(false)
+  const recordedLastReviewedSha = ref<string | null>(null)
+  const sinceLastReviewPaths = ref<Set<string> | null>(null)
   const pinnedPaths = ref<Set<string>>(new Set())
   const hiddenPaths = ref<Set<string>>(new Set())
   const customOrderPaths = ref<string[]>([])
@@ -164,7 +169,7 @@ export const useReviewStore = defineStore('review', () => {
     return repoPaths.value[`${pr.value.owner}/${pr.value.repo}`] ?? null
   })
 
-  const lastReviewedCommitOid = computed<string | null>(() => {
+  const commitBasedFallbackOid = computed<string | null>(() => {
     if (!pr.value || pr.value.commits.length < 2) return null
     const auth = useAuthStore()
     const viewerLogin = auth.viewer?.login
@@ -186,6 +191,37 @@ export const useReviewStore = defineStore('review', () => {
     }
     return hasNewerCommit ? lastCommitBeforeReview : null
   })
+
+  const lastReviewedCommitOid = computed<string | null>(() => {
+    if (!pr.value) return null
+    if (recordedLastReviewedSha.value) {
+      return recordedLastReviewedSha.value === pr.value.headRefOid
+        ? null
+        : recordedLastReviewedSha.value
+    }
+    return commitBasedFallbackOid.value
+  })
+
+  async function recordLastReviewedSha(sha: string): Promise<void> {
+    recordedLastReviewedSha.value = sha
+    sinceLastReviewPaths.value = null
+    if (prKey.value) {
+      await saveLastReviewedSha(prKey.value, sha)
+    }
+  }
+
+  async function markHeadReviewed(): Promise<void> {
+    if (!pr.value) return
+    await recordLastReviewedSha(pr.value.headRefOid)
+    if (commitFilter.value === 'since-last-review') {
+      commitFilter.value = 'all'
+      filteredFiles.value = null
+    }
+  }
+
+  const movedCodeIndex = computed(() =>
+    detectMovedCode(filteredFiles.value ?? pr.value?.files ?? []),
+  )
 
   const tourSteps = computed<TourStep[]>(() => {
     if (!pr.value) return []
@@ -283,6 +319,8 @@ export const useReviewStore = defineStore('review', () => {
     tourStarted.value = false
     commitFilter.value = 'all'
     filteredFiles.value = null
+    recordedLastReviewedSha.value = null
+    sinceLastReviewPaths.value = null
     pinnedPaths.value = new Set()
     hiddenPaths.value = new Set()
     customOrderPaths.value = []
@@ -300,11 +338,13 @@ export const useReviewStore = defineStore('review', () => {
     submitError.value = null
     submitSuccessMessage.value = null
     const key = `${data.owner}/${data.repo}#${data.number}`
-    const [savedDrafts, savedViewed] = await Promise.all([
+    const [savedDrafts, savedViewed, savedLastReviewedSha] = await Promise.all([
       loadDraftComments(key),
       loadViewedFiles(key),
+      loadLastReviewedSha(key),
     ])
     draftComments.value = savedDrafts
+    recordedLastReviewedSha.value = savedLastReviewedSha
 
     const restoredPaths = new Set<string>()
     const validViewed: ViewedFilesMap = {}
@@ -425,6 +465,7 @@ export const useReviewStore = defineStore('review', () => {
     const prevView = activeView.value
     const prevFingerprints = new Map(fileFingerprints)
     const prevReviewed = new Set(reviewedPaths.value)
+    const prevHeadRefOid = pr.value.headRefOid
     const { owner, repo, number } = pr.value
     const localRepoPath = currentRepoPath.value
 
@@ -451,6 +492,13 @@ export const useReviewStore = defineStore('review', () => {
       }
 
       pr.value = data
+      if (data.headRefOid !== prevHeadRefOid) {
+        sinceLastReviewPaths.value = null
+        if (commitFilter.value !== 'all') {
+          commitFilter.value = 'all'
+          filteredFiles.value = null
+        }
+      }
       prHasRemoteUpdates.value = false
       remoteUpdateSummary.value = null
       pulseBaseline = baselineFromPR(data)
@@ -548,7 +596,7 @@ export const useReviewStore = defineStore('review', () => {
     activeView.value = 'step'
   }
 
-  const focusedLine = ref<{ path: string; line: number } | null>(null)
+  const focusedLine = ref<{ path: string; line: number; side?: DiffSide } | null>(null)
 
   function goToFile(path: string): void {
     const idx = tourSteps.value.findIndex((s) => s.file.path === path)
@@ -558,9 +606,9 @@ export const useReviewStore = defineStore('review', () => {
     }
   }
 
-  function goToFileLine(path: string, line: number): void {
+  function goToFileLine(path: string, line: number, side?: DiffSide): void {
     const targetLine = Math.max(1, Math.floor(line))
-    focusedLine.value = { path, line: targetLine }
+    focusedLine.value = { path, line: targetLine, side }
     goToFile(path)
   }
 
@@ -568,6 +616,8 @@ export const useReviewStore = defineStore('review', () => {
     await clearReviewCache()
     draftComments.value = []
     reviewedPaths.value = new Set()
+    recordedLastReviewedSha.value = null
+    sinceLastReviewPaths.value = null
   }
 
   function nextStep(): void {
@@ -670,7 +720,17 @@ export const useReviewStore = defineStore('review', () => {
         }
         refreshError.value =
           err instanceof Error ? err.message : 'Failed to sync viewed state with GitHub'
+        return
       }
+    }
+
+    if (
+      markingReviewed &&
+      pr.value &&
+      recordedLastReviewedSha.value === null &&
+      commitBasedFallbackOid.value === null
+    ) {
+      await recordLastReviewedSha(pr.value.headRefOid)
     }
   }
 
@@ -853,12 +913,18 @@ export const useReviewStore = defineStore('review', () => {
       return
     }
     if (pr.value.isMock) {
-      const idx = pr.value.commits.findIndex((c) => c.oid === mode)
-      if (idx >= 0) {
-        const start = idx % pr.value.files.length
-        filteredFiles.value = pr.value.files.slice(start, start + 2)
+      if (mode === 'since-last-review') {
+        const files = pr.value.files.slice(-2)
+        filteredFiles.value = files
+        sinceLastReviewPaths.value = new Set(files.map((f) => f.path))
       } else {
-        filteredFiles.value = pr.value.files.slice(-2)
+        const idx = pr.value.commits.findIndex((c) => c.oid === mode)
+        if (idx >= 0) {
+          const start = idx % pr.value.files.length
+          filteredFiles.value = pr.value.files.slice(start, start + 2)
+        } else {
+          filteredFiles.value = pr.value.files.slice(-2)
+        }
       }
       currentStepIndex.value = 0
       return
@@ -883,7 +949,9 @@ export const useReviewStore = defineStore('review', () => {
           commitFilter.value = 'all'
           return
         }
-        filteredFiles.value = await fetchCompareDiffFiles(auth.pat, owner, repo, baseOid, headRefOid)
+        const files = await fetchCompareDiffFiles(auth.pat, owner, repo, baseOid, headRefOid)
+        filteredFiles.value = files
+        sinceLastReviewPaths.value = new Set(files.map((f) => f.path))
       } else {
         filteredFiles.value = await fetchCommitDiffFiles(auth.pat, owner, repo, mode)
       }
@@ -1027,6 +1095,7 @@ export const useReviewStore = defineStore('review', () => {
         }
         draftComments.value = []
         await saveDraftComments(prKey.value, [])
+        await markHeadReviewed()
         lastSubmitted.value = {
           prRef: prKey.value,
           prTitle: pr.value.title,
@@ -1077,6 +1146,7 @@ export const useReviewStore = defineStore('review', () => {
       draftComments.value = []
       await saveDraftComments(prKey.value, [])
       pr.value.pendingReviewId = null
+      await markHeadReviewed()
       lastSubmitted.value = {
         prRef: prKey.value,
         prTitle: pr.value.title,
@@ -1564,13 +1634,17 @@ export const useReviewStore = defineStore('review', () => {
     showUnresolvedOnly,
     commitFilter,
     isLoadingCommitFilter,
+    recordedLastReviewedSha,
     lastReviewedCommitOid,
+    sinceLastReviewPaths,
+    markHeadReviewed,
     pinnedPaths,
     hiddenPaths,
     customOrderPaths,
     showLoaderModal,
     showFinishModal,
     prKey,
+    movedCodeIndex,
     tourSteps,
     currentStep,
     reviewedCount,

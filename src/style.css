@@ -76,6 +76,12 @@
   --stroll-diff-del-word: rgba(204, 46, 58, 0.26);
   --stroll-diff-del-border: var(--stroll-crimson);
   --stroll-diff-del-text: var(--stroll-crimson-text);
+  --stroll-diff-move: rgba(88, 101, 178, 0.11);
+  --stroll-diff-move-hover: rgba(88, 101, 178, 0.18);
+  --stroll-diff-move-border: #6370b8;
+  --stroll-diff-move-text: #465296;
+  --stroll-diff-move-badge-bg: rgba(88, 101, 178, 0.13);
+  --stroll-diff-move-badge-border: rgba(88, 101, 178, 0.30);
   --stroll-diff-hover: rgba(22, 48, 37, 0.06);
   --stroll-diff-select: rgba(200, 97, 48, 0.15);
   --stroll-diff-select-bar: #c86130;
@@ -169,6 +175,12 @@ html.dark {
   --stroll-diff-del-word: rgba(235, 87, 97, 0.42);
   --stroll-diff-del-border: var(--stroll-crimson);
   --stroll-diff-del-text: var(--stroll-crimson-text);
+  --stroll-diff-move: rgba(124, 140, 224, 0.14);
+  --stroll-diff-move-hover: rgba(124, 140, 224, 0.22);
+  --stroll-diff-move-border: #8b9cf0;
+  --stroll-diff-move-text: #a5b4fc;
+  --stroll-diff-move-badge-bg: rgba(124, 140, 224, 0.16);
+  --stroll-diff-move-badge-border: rgba(124, 140, 224, 0.34);
   --stroll-diff-hover: rgba(198, 219, 196, 0.08);
   --stroll-diff-select: rgba(222, 123, 71, 0.22);
   --stroll-diff-select-bar: #de7b47;
@@ -207,6 +219,13 @@ html.diff-palette-blue-amber {
   --stroll-diff-del-word: rgba(217, 119, 6, 0.28);
   --stroll-diff-del-border: #d97706;
   --stroll-diff-del-text: #a35404;
+  /* Neutral slate for moved code so it doesn't collide with blue additions */
+  --stroll-diff-move: rgba(100, 116, 139, 0.11);
+  --stroll-diff-move-hover: rgba(100, 116, 139, 0.18);
+  --stroll-diff-move-border: #64748b;
+  --stroll-diff-move-text: #475569;
+  --stroll-diff-move-badge-bg: rgba(100, 116, 139, 0.13);
+  --stroll-diff-move-badge-border: rgba(100, 116, 139, 0.30);
 }
 
 html.dark.diff-palette-blue-amber {
@@ -220,6 +239,12 @@ html.dark.diff-palette-blue-amber {
   --stroll-diff-del-word: rgba(245, 158, 11, 0.40);
   --stroll-diff-del-border: #f59e0b;
   --stroll-diff-del-text: #fbbf24;
+  --stroll-diff-move: rgba(148, 163, 184, 0.14);
+  --stroll-diff-move-hover: rgba(148, 163, 184, 0.22);
+  --stroll-diff-move-border: #94a3b8;
+  --stroll-diff-move-text: #cbd5e1;
+  --stroll-diff-move-badge-bg: rgba(148, 163, 184, 0.16);
+  --stroll-diff-move-badge-border: rgba(148, 163, 184, 0.34);
 }
 
 /* Colorblind-friendly diff palette: Teal / Magenta (High Contrast) */
@@ -307,6 +332,12 @@ html.dark.diff-palette-teal-magenta {
   --color-diff-del-word: var(--stroll-diff-del-word);
   --color-diff-del-border: var(--stroll-diff-del-border);
   --color-diff-del-text: var(--stroll-diff-del-text);
+  --color-diff-move: var(--stroll-diff-move);
+  --color-diff-move-hover: var(--stroll-diff-move-hover);
+  --color-diff-move-border: var(--stroll-diff-move-border);
+  --color-diff-move-text: var(--stroll-diff-move-text);
+  --color-diff-move-badge-bg: var(--stroll-diff-move-badge-bg);
+  --color-diff-move-badge-border: var(--stroll-diff-move-badge-border);
   --color-diff-hover: var(--stroll-diff-hover);
   --color-diff-select: var(--stroll-diff-select);
 }

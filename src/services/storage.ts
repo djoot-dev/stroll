@@ -305,9 +305,27 @@ export async function saveReviewTemplates(templates: ReviewTemplate[]): Promise<
   await setItem('review_templates', templates)
 }
 
+export async function loadLastReviewedSha(prKey: string): Promise<string | null> {
+  if (!prKey) return null
+  const all = (await getItem<Record<string, string>>('last_reviewed_shas')) ?? {}
+  return all[prKey] ?? null
+}
+
+export async function saveLastReviewedSha(prKey: string, sha: string | null): Promise<void> {
+  if (!prKey) return
+  const all = (await getItem<Record<string, string>>('last_reviewed_shas')) ?? {}
+  if (!sha) {
+    delete all[prKey]
+  } else {
+    all[prKey] = sha
+  }
+  await setItem('last_reviewed_shas', all)
+}
+
 /**
  * Clears cached PR review progress (viewed files), pending inline draft comments,
- * and saved review summary drafts while keeping PAT, settings, and linked repos intact.
+ * saved review summary drafts, and last-reviewed commit SHAs while keeping PAT,
+ * settings, and linked repos intact.
  */
 export async function clearReviewCache(): Promise<void> {
   await viewedFilesWriteQueue
@@ -315,6 +333,7 @@ export async function clearReviewCache(): Promise<void> {
     deleteItem('draft_comments'),
     deleteItem('viewed_files'),
     deleteItem('review_summary_drafts'),
+    deleteItem('last_reviewed_shas'),
   ])
 }
 

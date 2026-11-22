@@ -1,7 +1,13 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MOCK_PR } from '@/data/mockPR'
-import { computeFileFingerprint, loadAllPRProgress, loadRecentPRs, loadViewedFiles } from '@/services/storage'
+import {
+  computeFileFingerprint,
+  loadAllPRProgress,
+  loadLastReviewedSha,
+  loadRecentPRs,
+  loadViewedFiles,
+} from '@/services/storage'
 import type { PRHeadPulse } from '@/services/github'
 import type { PullRequestData } from '@/types/pr'
 import { useAuthStore } from '../auth'
@@ -28,6 +34,9 @@ const addReviewThreadMock = vi.fn(async () => ({ threadId: 'thread_line', commen
 const addFileReviewThreadMock = vi.fn(async () => ({ threadId: 'thread_file', commentId: 'comment_file' }))
 const updateReviewCommentMock = vi.fn(async (_pat: string, _id: string, body: string) => body)
 const fetchPRHeadPulseMock = vi.fn<() => Promise<PRHeadPulse | null>>()
+const fetchCompareDiffFilesMock = vi.fn<
+  (pat: string, owner: string, repo: string, baseOid: string, headOid: string) => Promise<PullRequestData['files']>
+>()
 const updatePullRequestBodyMock = vi.fn<
   (pat: string, pullRequestId: string, body: string) => Promise<string>
 >(async (_pat, _id, body) => body)
@@ -70,6 +79,13 @@ vi.mock('@/services/github', async (importOriginal) => {
     updateReviewComment: (pat: string, id: string, body: string) =>
       updateReviewCommentMock(pat, id, body),
     fetchPRHeadPulse: () => fetchPRHeadPulseMock(),
+    fetchCompareDiffFiles: (
+      pat: string,
+      owner: string,
+      repo: string,
+      baseOid: string,
+      headOid: string,
+    ) => fetchCompareDiffFilesMock(pat, owner, repo, baseOid, headOid),
     updatePullRequestBody: (pat: string, pullRequestId: string, body: string) =>
       updatePullRequestBodyMock(pat, pullRequestId, body),
     requestPullRequestReviewers: (
@@ -1050,5 +1066,95 @@ describe('useReviewStore navigation and customization', () => {
     store.hideGeneratedSteps()
     expect(store.hiddenPaths.has(genPath)).toBe(true)
     expect(store.tourSteps.some((s) => s.file.path === genPath)).toBe(false)
+  })
+})
+
+describe('useReviewStore incremental re-review (since last review)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.stubGlobal('localStorage', createMemoryStorage())
+    fetchPullRequestMock.mockReset()
+    fetchCompareDiffFilesMock.mockReset()
+    setFileViewedStateMock.mockClear()
+    createPendingReviewMock.mockClear()
+    submitReviewMock.mockClear()
+  })
+
+  it('records headRefOid on first review, detects newer headRefOid on refresh, and filters since-last-review', async () => {
+    const prV1 = makePR({ owner: 'acme', repo: 'stroll', number: 42, headRefOid: 'sha_v1' })
+    fetchPullRequestMock.mockResolvedValueOnce(prV1)
+    useAuthStore().pat = 'ghp_test_token'
+    const store = useReviewStore()
+    await store.loadPRByRepo('acme', 'stroll', 42)
+
+    expect(store.lastReviewedCommitOid).toBeNull()
+
+    // Marking a file reviewed records sha_v1 as the reviewed baseline
+    await store.toggleReviewed(prV1.files[0].path)
+    expect(store.recordedLastReviewedSha).toBe('sha_v1')
+    expect(await loadLastReviewedSha('acme/stroll#42')).toBe('sha_v1')
+    // Same headRefOid -> nothing new since last review
+    expect(store.lastReviewedCommitOid).toBeNull()
+
+    // Author pushes new commits -> refresh loads sha_v2
+    const prV2 = makePR({
+      owner: 'acme',
+      repo: 'stroll',
+      number: 42,
+      headRefOid: 'sha_v2',
+      files: [
+        ...prV1.files,
+        {
+          path: 'src/fix.ts',
+          status: 'added',
+          language: 'typescript',
+          additions: 5,
+          deletions: 0,
+          patch: '@@ -0,0 +1,5 @@\n+export const fix = true',
+          baseContent: null,
+          headContent: 'export const fix = true',
+        },
+      ],
+    })
+    fetchPullRequestMock.mockResolvedValueOnce(prV2)
+    await store.refreshCurrentPR()
+
+    expect(store.lastReviewedCommitOid).toBe('sha_v1')
+
+    // Filtering to since-last-review compares sha_v1..sha_v2
+    const compareFiles = [prV2.files[prV2.files.length - 1]]
+    fetchCompareDiffFilesMock.mockResolvedValueOnce(compareFiles)
+    await store.setCommitFilter('since-last-review')
+
+    expect(fetchCompareDiffFilesMock).toHaveBeenCalledWith(
+      'ghp_test_token',
+      'acme',
+      'stroll',
+      'sha_v1',
+      'sha_v2',
+    )
+    expect(store.commitFilter).toBe('since-last-review')
+    expect(store.tourSteps.map((s) => s.file.path)).toEqual(['src/fix.ts'])
+    expect(store.sinceLastReviewPaths).toEqual(new Set(['src/fix.ts']))
+
+    // Submitting a review updates baseline to sha_v2 and clears active since-last-review filter
+    const ok = await store.submitCompleteReview('APPROVE', 'LGTM')
+    expect(ok).toBe(true)
+    expect(store.recordedLastReviewedSha).toBe('sha_v2')
+    expect(await loadLastReviewedSha('acme/stroll#42')).toBe('sha_v2')
+    expect(store.lastReviewedCommitOid).toBeNull()
+    expect(store.commitFilter).toBe('all')
+    expect(store.sinceLastReviewPaths).toBeNull()
+  })
+
+  it('clears recordedLastReviewedSha when clearAllCachedReviewData is called', async () => {
+    const store = useReviewStore()
+    await store.loadMockPR()
+    await store.toggleReviewed(store.tourSteps[0].file.path)
+    expect(store.recordedLastReviewedSha).toBe(store.pr?.headRefOid)
+
+    await store.clearAllCachedReviewData()
+    expect(store.recordedLastReviewedSha).toBeNull()
+    expect(await loadLastReviewedSha(store.prKey)).toBeNull()
   })
 })

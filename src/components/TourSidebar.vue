@@ -347,7 +347,7 @@ function dirOnly(path: string): string {
           >
             <option value="all">All commits ({{ review.pr.commits.length }})</option>
             <option v-if="review.lastReviewedCommitOid" value="since-last-review">
-              Since my last review
+              Since last review ({{ review.lastReviewedCommitOid.slice(0, 7) }}..{{ review.pr.headRefOid.slice(0, 7) }})
             </option>
             <option
               v-for="commit in review.pr.commits"
@@ -478,6 +478,33 @@ function dirOnly(path: string): string {
             <span>Unresolved</span>
             <span v-if="filterCounts.unresolved > 0" class="font-mono text-[9.5px] opacity-80">
               {{ filterCounts.unresolved }}
+            </span>
+          </button>
+          <button
+            v-if="review.lastReviewedCommitOid"
+            type="button"
+            :aria-pressed="review.commitFilter === 'since-last-review'"
+            :disabled="review.isLoadingCommitFilter"
+            class="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10.5px] font-medium transition-colors disabled:opacity-50"
+            :class="
+              review.commitFilter === 'since-last-review'
+                ? 'border-ochre-border bg-ochre-soft text-ochre-text'
+                : 'border-border-muted bg-canvas text-ink-muted hover:border-ochre-border hover:bg-ochre-soft/50 hover:text-ochre-text'
+            "
+            :title="`Show only files touched since ${review.lastReviewedCommitOid.slice(0, 7)}`"
+            @click="
+              review.setCommitFilter(
+                review.commitFilter === 'since-last-review' ? 'all' : 'since-last-review',
+              )
+            "
+          >
+            <Sparkles class="h-2.5 w-2.5" />
+            <span>Since last review</span>
+            <span
+              v-if="review.sinceLastReviewPaths !== null"
+              class="font-mono text-[9.5px] opacity-80"
+            >
+              {{ review.sinceLastReviewPaths.size }}
             </span>
           </button>
         </div>
@@ -734,21 +761,34 @@ function dirOnly(path: string): string {
                   </span>
                 </div>
 
-                <span
-                  v-if="unresolvedCountForFile(step.file.path) > 0"
-                  class="inline-flex shrink-0 items-center gap-0.5 rounded-md border border-ochre-border bg-ochre-soft px-1.5 py-0.2 font-mono text-[10px] font-semibold text-ochre-text"
-                  :title="`${unresolvedCountForFile(step.file.path)} unresolved thread(s)`"
-                >
-                  <MessageSquare class="h-2.5 w-2.5" />
-                  {{ unresolvedCountForFile(step.file.path) }}
-                </span>
-                <span
-                  v-else-if="draftCountForFile(step.file.path) > 0"
-                  class="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-terra-soft px-1.5 py-0.2 font-mono text-[10px] font-medium text-terra-text"
-                >
-                  <MessageSquare class="h-2.5 w-2.5" />
-                  {{ draftCountForFile(step.file.path) }}
-                </span>
+                <div class="flex shrink-0 items-center gap-1">
+                  <span
+                    v-if="
+                      review.lastReviewedCommitOid &&
+                      review.commitFilter !== 'since-last-review' &&
+                      review.sinceLastReviewPaths?.has(step.file.path)
+                    "
+                    class="shrink-0 rounded border border-ochre-border bg-ochre-soft px-1 py-0.2 font-mono text-[9px] font-semibold text-ochre-text"
+                    :title="`Touched since ${review.lastReviewedCommitOid.slice(0, 7)}`"
+                  >
+                    UPDATED
+                  </span>
+                  <span
+                    v-if="unresolvedCountForFile(step.file.path) > 0"
+                    class="inline-flex shrink-0 items-center gap-0.5 rounded-md border border-ochre-border bg-ochre-soft px-1.5 py-0.2 font-mono text-[10px] font-semibold text-ochre-text"
+                    :title="`${unresolvedCountForFile(step.file.path)} unresolved thread(s)`"
+                  >
+                    <MessageSquare class="h-2.5 w-2.5" />
+                    {{ unresolvedCountForFile(step.file.path) }}
+                  </span>
+                  <span
+                    v-else-if="draftCountForFile(step.file.path) > 0"
+                    class="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-terra-soft px-1.5 py-0.2 font-mono text-[10px] font-medium text-terra-text"
+                  >
+                    <MessageSquare class="h-2.5 w-2.5" />
+                    {{ draftCountForFile(step.file.path) }}
+                  </span>
+                </div>
               </div>
 
               <div class="flex flex-col items-start gap-1 text-[10px] text-ink-faint @[260px]:flex-row @[260px]:items-center @[260px]:justify-between @[260px]:gap-2">
