@@ -3,17 +3,16 @@ import {
   AlertTriangle,
   ArrowDownUp,
   ArrowLeft,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
   FolderGit2,
-  GitBranch,
   GitMerge,
   GitPullRequestClosed,
   GitPullRequestDraft,
   KeyRound,
   Moon,
+  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   RefreshCw,
@@ -23,7 +22,7 @@ import {
   SkipForward,
   Sun,
 } from '@lucide/vue'
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { openExternalUrl } from '@/services/native'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
@@ -38,6 +37,36 @@ const emit = defineEmits<{
 const auth = useAuthStore()
 const review = useReviewStore()
 const settings = useSettingsStore()
+
+const menuOpen = ref(false)
+const menuContainerRef = ref<HTMLElement | null>(null)
+
+function closeMenu() {
+  menuOpen.value = false
+}
+
+function onDocumentPointerDown(e: PointerEvent) {
+  if (!menuOpen.value) return
+  if (menuContainerRef.value && !menuContainerRef.value.contains(e.target as Node)) {
+    menuOpen.value = false
+  }
+}
+
+function onDocumentKeyDown(e: KeyboardEvent) {
+  if (menuOpen.value && e.key === 'Escape') {
+    menuOpen.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('pointerdown', onDocumentPointerDown)
+  document.addEventListener('keydown', onDocumentKeyDown)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onDocumentPointerDown)
+  document.removeEventListener('keydown', onDocumentKeyDown)
+})
 
 const prStatePill = computed(() => {
   const pr = review.pr
@@ -92,7 +121,7 @@ function handleRefreshPR() {
 <template>
   <header class="shrink-0 border-b border-border bg-canvas-subtle">
     <div class="flex h-12 items-center justify-between gap-3 px-4">
-      <!-- Left: Back to PRs + Sidebar toggle + Brand + PR badge -->
+      <!-- Left: Back to PRs + Sidebar toggle + PR identity -->
       <div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
         <button
           class="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-border bg-canvas px-2 py-1 text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated"
@@ -113,17 +142,6 @@ function handleRefreshPR() {
           <PanelLeftClose v-if="review.sidebarOpen" class="h-4 w-4" />
           <PanelLeftOpen v-else class="h-4 w-4" />
         </button>
-
-        <div class="flex shrink-0 items-center gap-2">
-          <img
-            src="/logo.svg"
-            alt="Stroll"
-            class="h-6 w-6 shrink-0 rounded-md shadow-xs"
-          />
-          <span class="hidden whitespace-nowrap text-sm font-semibold tracking-tight text-ink sm:inline">
-            Stroll
-          </span>
-        </div>
 
         <template v-if="review.pr">
           <span class="shrink-0 text-ink-faint">/</span>
@@ -155,19 +173,12 @@ function handleRefreshPR() {
               <AlertTriangle class="h-3 w-3" />
               <span class="hidden sm:inline">Conflicts</span>
             </span>
-            <span
-              class="hidden max-w-44 items-center gap-1 truncate rounded-md border border-border-muted bg-canvas px-1.5 py-0.5 font-mono text-[10px] text-ink-muted 2xl:inline-flex"
-              :title="`${review.pr.headRefName} → ${review.pr.baseRefName}`"
-            >
-              <GitBranch class="h-2.5 w-2.5 shrink-0 text-ink-faint" />
-              <span class="truncate">{{ review.pr.headRefName }}</span>
-            </span>
           </div>
         </template>
       </div>
 
       <!-- Center: Step Progress -->
-      <div v-if="review.tourSteps.length > 0" class="flex shrink-0 items-center gap-2">
+      <div v-if="review.tourSteps.length > 0" class="flex shrink-0 items-center gap-1.5">
         <button
           class="shrink-0 rounded-lg border border-border bg-canvas px-2 py-1 text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated disabled:opacity-40"
           :disabled="review.activeView === 'overview' || review.currentStepIndex === 0"
@@ -210,27 +221,10 @@ function handleRefreshPR() {
           <SkipForward class="h-3.5 w-3.5 text-terra" />
           <span class="hidden xl:inline text-[11px]">Next unreviewed</span>
         </button>
-
-        <button
-          v-if="review.activeView === 'step' && review.currentStep"
-          class="ml-1 inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors"
-          :class="
-            review.isStepReviewed(review.currentStep.file.path)
-              ? 'border-pine-border bg-pine-soft text-pine-text'
-              : 'border-border bg-canvas text-ink-secondary hover:bg-canvas-elevated'
-          "
-          title="Mark step reviewed (M)"
-          @click="review.toggleReviewed()"
-        >
-          <CheckCircle2 class="h-3.5 w-3.5" />
-          <span class="hidden xl:inline">
-            {{ review.isStepReviewed(review.currentStep.file.path) ? 'Reviewed' : 'Mark Reviewed' }}
-          </span>
-        </button>
       </div>
 
-      <!-- Right: Command Palette, Refresh, Open on GitHub, Reading Order Toggle, Load PR, Theme, Settings, Finish Review -->
-      <div class="flex shrink-0 items-center gap-1.5">
+      <!-- Right: Command Palette, Overflow Menu, Finish Review -->
+      <div class="flex shrink-0 items-center gap-2">
         <button
           v-if="review.pr"
           type="button"
@@ -245,86 +239,134 @@ function handleRefreshPR() {
           </kbd>
         </button>
 
-        <button
-          v-if="review.pr"
-          class="shrink-0 rounded-lg border border-border bg-canvas p-1.5 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink disabled:opacity-40"
-          :disabled="review.pr.isMock || review.isRefreshingPR"
-          :aria-busy="review.isRefreshingPR"
-          aria-label="Refresh Pull Request"
-          :title="
-            review.pr.isMock
-              ? 'Refresh is disabled in Demo PR mode'
-              : review.isRefreshingPR
-                ? 'Refreshing Pull Request…'
-                : 'Refresh Pull Request'
-          "
-          @click="handleRefreshPR"
-        >
-          <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin text-terra': review.isRefreshingPR }" />
-        </button>
+        <div ref="menuContainerRef" class="relative shrink-0">
+          <button
+            type="button"
+            class="inline-flex items-center justify-center rounded-lg border border-border bg-canvas p-1.5 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+            aria-label="More PR & app actions"
+            aria-haspopup="menu"
+            :aria-expanded="menuOpen"
+            title="More actions"
+            @click="menuOpen = !menuOpen"
+          >
+            <MoreHorizontal class="h-4 w-4" />
+          </button>
 
-        <button
-          v-if="review.pr"
-          class="shrink-0 rounded-lg border border-border bg-canvas p-1.5 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
-          aria-label="Open PR on GitHub"
-          title="Open PR on GitHub"
-          @click="handleOpenOnGitHub"
-        >
-          <ExternalLink class="h-3.5 w-3.5" />
-        </button>
-        <button
-          class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-border bg-canvas px-2.5 py-1 text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated"
-          :aria-label="`Switch reading order (currently ${review.tourDirection})`"
-          :title="`Current reading order: ${review.tourDirection}. Click to switch.`"
-          @click="toggleDirection"
-        >
-          <ArrowDownUp class="h-3.5 w-3.5 text-terra" />
-          <span class="hidden 2xl:inline">
-            {{ review.tourDirection === 'bottom-up' ? 'Bottom-Up' : 'Top-Down' }}
-          </span>
-        </button>
+          <div
+            v-if="menuOpen"
+            role="menu"
+            class="absolute right-0 top-full z-40 mt-1.5 w-56 rounded-xl border border-border bg-canvas-subtle p-1.5 shadow-lg"
+          >
+            <template v-if="review.pr">
+              <button
+                type="button"
+                role="menuitem"
+                class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated hover:text-ink disabled:opacity-40"
+                :disabled="review.pr.isMock || review.isRefreshingPR"
+                @click="
+                  handleRefreshPR();
+                  closeMenu()
+                "
+              >
+                <RefreshCw class="h-3.5 w-3.5 shrink-0 text-ink-muted" :class="{ 'animate-spin text-terra': review.isRefreshingPR }" />
+                <span>{{ review.isRefreshingPR ? 'Refreshing PR…' : 'Refresh Pull Request' }}</span>
+              </button>
 
-        <button
-          class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-border bg-canvas px-2.5 py-1 text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated"
-          aria-label="Load Pull Request"
-          title="Load Pull Request"
-          @click="review.showLoaderModal = true"
-        >
-          <FolderGit2 class="h-3.5 w-3.5 text-ink-muted" />
-          <span class="hidden lg:inline">Load PR</span>
-        </button>
+              <button
+                type="button"
+                role="menuitem"
+                class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated hover:text-ink"
+                @click="
+                  handleOpenOnGitHub();
+                  closeMenu()
+                "
+              >
+                <ExternalLink class="h-3.5 w-3.5 shrink-0 text-ink-muted" />
+                <span>Open PR on GitHub</span>
+              </button>
 
-        <button
-          class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-border bg-canvas px-2.5 py-1 text-xs transition-colors hover:bg-canvas-elevated"
-          :class="auth.isAuthenticated ? 'text-pine-text' : 'text-ink-secondary'"
-          aria-label="GitHub Authentication Settings"
-          title="GitHub Authentication Settings"
-          @click="settings.openSettings('github')"
-        >
-          <KeyRound class="h-3.5 w-3.5" />
-          <span class="hidden xl:inline">
-            {{ auth.viewer ? `@${auth.viewer.login}` : 'Connect GitHub' }}
-          </span>
-        </button>
+              <button
+                type="button"
+                role="menuitem"
+                class="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated hover:text-ink"
+                @click="
+                  toggleDirection();
+                  closeMenu()
+                "
+              >
+                <span class="flex items-center gap-2.5">
+                  <ArrowDownUp class="h-3.5 w-3.5 shrink-0 text-terra" />
+                  <span>Reading order</span>
+                </span>
+                <span class="font-mono text-[10px] text-ink-muted">
+                  {{ review.tourDirection === 'bottom-up' ? 'Bottom-Up' : 'Top-Down' }}
+                </span>
+              </button>
 
-        <button
-          class="shrink-0 rounded-lg border border-border bg-canvas p-1.5 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
-          :aria-label="settings.resolvedTheme === 'dark' ? 'Switch to Warm Light theme' : 'Switch to Deep Pine Dark theme'"
-          :title="settings.resolvedTheme === 'dark' ? 'Switch to Warm Light theme' : 'Switch to Deep Pine Dark theme'"
-          @click="settings.toggleTheme()"
-        >
-          <Sun v-if="settings.resolvedTheme === 'dark'" class="h-3.5 w-3.5 text-terra" />
-          <Moon v-else class="h-3.5 w-3.5 text-pine" />
-        </button>
+              <div class="my-1 border-t border-border-muted" />
+            </template>
 
-        <button
-          class="shrink-0 rounded-lg border border-border bg-canvas p-1.5 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
-          aria-label="Settings"
-          :title="isMac ? 'Settings (⌘,)' : 'Settings (Ctrl+,)'"
-          @click="settings.openSettings('general')"
-        >
-          <Settings class="h-3.5 w-3.5" />
-        </button>
+            <button
+              type="button"
+              role="menuitem"
+              class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated hover:text-ink"
+              @click="
+                review.showLoaderModal = true;
+                closeMenu()
+              "
+            >
+              <FolderGit2 class="h-3.5 w-3.5 shrink-0 text-ink-muted" />
+              <span>Load Pull Request…</span>
+            </button>
+
+            <button
+              type="button"
+              role="menuitem"
+              class="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated hover:text-ink"
+              @click="
+                settings.openSettings('github');
+                closeMenu()
+              "
+            >
+              <span class="flex items-center gap-2.5">
+                <KeyRound class="h-3.5 w-3.5 shrink-0" :class="auth.isAuthenticated ? 'text-pine-text' : 'text-ink-muted'" />
+                <span>{{ auth.viewer ? `@${auth.viewer.login}` : 'Connect GitHub' }}</span>
+              </span>
+            </button>
+
+            <button
+              type="button"
+              role="menuitem"
+              class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated hover:text-ink"
+              @click="
+                settings.toggleTheme();
+                closeMenu()
+              "
+            >
+              <Sun v-if="settings.resolvedTheme === 'dark'" class="h-3.5 w-3.5 shrink-0 text-terra" />
+              <Moon v-else class="h-3.5 w-3.5 shrink-0 text-pine" />
+              <span>{{ settings.resolvedTheme === 'dark' ? 'Switch to Warm Light' : 'Switch to Deep Pine Dark' }}</span>
+            </button>
+
+            <button
+              type="button"
+              role="menuitem"
+              class="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated hover:text-ink"
+              @click="
+                settings.openSettings('general');
+                closeMenu()
+              "
+            >
+              <span class="flex items-center gap-2.5">
+                <Settings class="h-3.5 w-3.5 shrink-0 text-ink-muted" />
+                <span>Settings…</span>
+              </span>
+              <kbd class="rounded border border-border-muted bg-canvas px-1 font-mono text-[10px] text-ink-faint">
+                {{ isMac ? '⌘,' : 'Ctrl+,' }}
+              </kbd>
+            </button>
+          </div>
+        </div>
 
         <button
           v-if="review.pr"
