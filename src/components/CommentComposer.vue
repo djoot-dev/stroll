@@ -1,6 +1,15 @@
 <script setup lang="ts">
-import { FileDiff } from '@lucide/vue'
+import { BookmarkPlus, FileDiff, X } from '@lucide/vue'
 import { computed, onMounted, ref } from 'vue'
+import {
+  CONVENTIONAL_PREFIXES,
+  applyConventionalPrefix,
+  deriveSnippetName,
+  detectActivePrefix,
+  insertSnippetAtCursor,
+  useCommentSnippets,
+  type ConventionalPrefix,
+} from '@/services/commentSnippets'
 import MarkdownContent from './MarkdownContent.vue'
 
 const props = defineProps<{
@@ -44,13 +53,78 @@ const originalLines = computed(() =>
   props.originalCode !== undefined ? props.originalCode.split('\n') : undefined,
 )
 
+const { snippets, ensureLoaded, addSnippet, removeSnippet } = useCommentSnippets()
+const activePrefix = computed(() => detectActivePrefix(body.value))
+const isSavingSnippet = ref(false)
+const snippetNameInput = ref('')
+const snippetNameRef = ref<HTMLInputElement | null>(null)
+const snippetSavedNotice = ref(false)
+
 onMounted(() => {
+  void ensureLoaded()
   const el = textareaRef.value
   if (!el) return
   el.focus()
   // Place the caret at the end so editing continues where the text left off.
   el.setSelectionRange(el.value.length, el.value.length)
 })
+
+function focusTextareaAt(cursor: number) {
+  requestAnimationFrame(() => {
+    const el = textareaRef.value
+    if (!el) return
+    el.focus()
+    el.setSelectionRange(cursor, cursor)
+  })
+}
+
+function handlePrefixClick(prefixLabel: ConventionalPrefix['label']) {
+  const next = applyConventionalPrefix(body.value, prefixLabel)
+  body.value = next
+  confirmDiscard.value = false
+  previewMode.value = false
+  focusTextareaAt(next.length)
+}
+
+function handleSnippetClick(snippetBody: string) {
+  const el = textareaRef.value
+  const start = !previewMode.value && el ? el.selectionStart : undefined
+  const end = !previewMode.value && el ? el.selectionEnd : undefined
+  const { text, cursor } = insertSnippetAtCursor(body.value, snippetBody, start, end)
+  body.value = text
+  confirmDiscard.value = false
+  previewMode.value = false
+  focusTextareaAt(cursor)
+}
+
+function openSaveSnippet() {
+  if (!body.value.trim()) return
+  snippetNameInput.value = deriveSnippetName(body.value)
+  isSavingSnippet.value = true
+  requestAnimationFrame(() => {
+    snippetNameRef.value?.focus()
+    snippetNameRef.value?.select()
+  })
+}
+
+async function confirmSaveSnippet() {
+  const trimmedBody = body.value.trim()
+  if (!trimmedBody) return
+  await addSnippet(snippetNameInput.value, trimmedBody)
+  isSavingSnippet.value = false
+  snippetNameInput.value = ''
+  snippetSavedNotice.value = true
+  setTimeout(() => {
+    snippetSavedNotice.value = false
+  }, 1500)
+  requestAnimationFrame(() => textareaRef.value?.focus())
+}
+
+function cancelSaveSnippet() {
+  isSavingSnippet.value = false
+  snippetNameInput.value = ''
+  requestAnimationFrame(() => textareaRef.value?.focus())
+}
 
 function insertSuggestion() {
   const snippet = props.originalCode ?? ''
@@ -115,6 +189,95 @@ function handleSubmit() {
         </div>
       </div>
       <span class="text-ink-faint">{{ isMac ? '⌘↵' : 'Ctrl+↵' }} to save · Pending until Finish Review</span>
+    </div>
+
+    <!-- Quick-insert conventional comment prefixes & saved snippets -->
+    <div class="mb-2 flex flex-wrap items-center gap-1.5">
+      <button
+        v-for="prefix in CONVENTIONAL_PREFIXES"
+        :key="prefix.id"
+        type="button"
+        class="rounded-full border px-2 py-0.5 font-mono text-[10.5px] transition-colors"
+        :class="
+          activePrefix === prefix.label
+            ? 'border-terra-border bg-terra-soft font-medium text-terra-text'
+            : 'border-border-muted bg-canvas text-ink-secondary hover:border-border hover:text-ink'
+        "
+        :title="prefix.description"
+        :aria-pressed="activePrefix === prefix.label"
+        @click="handlePrefixClick(prefix.label)"
+      >
+        {{ prefix.label }}
+      </button>
+
+      <template v-if="snippets.length > 0">
+        <span class="mx-0.5 h-3.5 w-px bg-border" aria-hidden="true" />
+        <div
+          v-for="snippet in snippets"
+          :key="snippet.id"
+          class="inline-flex items-center rounded-full border border-border-muted bg-canvas text-[10.5px] text-ink-secondary transition-colors hover:border-pine-border"
+        >
+          <button
+            type="button"
+            class="rounded-full px-2 py-0.5 transition-colors hover:text-pine-text"
+            :title="snippet.body"
+            @click="handleSnippetClick(snippet.body)"
+          >
+            {{ snippet.name }}
+          </button>
+          <button
+            type="button"
+            class="pr-1.5 text-ink-faint transition-colors hover:text-crimson-text"
+            title="Remove saved snippet"
+            aria-label="Remove saved snippet"
+            @click="removeSnippet(snippet.id)"
+          >
+            <X class="h-2.5 w-2.5" />
+          </button>
+        </div>
+      </template>
+
+      <button
+        v-if="body.trim() && !isSavingSnippet"
+        type="button"
+        class="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+        title="Save current comment as a reusable snippet"
+        @click="openSaveSnippet"
+      >
+        <BookmarkPlus class="h-3 w-3" />
+        <span>{{ snippetSavedNotice ? 'Saved!' : 'Save snippet' }}</span>
+      </button>
+    </div>
+
+    <div
+      v-if="isSavingSnippet"
+      class="mb-2 flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-canvas px-2.5 py-1.5 text-xs"
+    >
+      <span class="text-[11px] font-medium text-ink-secondary">Snippet name:</span>
+      <input
+        ref="snippetNameRef"
+        v-model="snippetNameInput"
+        type="text"
+        maxlength="40"
+        placeholder="e.g. Add unit test"
+        class="min-w-[140px] flex-1 rounded border border-border bg-canvas-inset px-2 py-0.5 text-xs text-ink placeholder-ink-faint focus:border-terra focus:outline-none"
+        @keydown.enter.stop.prevent="confirmSaveSnippet"
+        @keydown.esc.stop.prevent="cancelSaveSnippet"
+      />
+      <button
+        type="button"
+        class="rounded-md bg-pine px-2 py-0.5 text-[11px] font-medium text-white transition-colors hover:bg-pine-hover"
+        @click="confirmSaveSnippet"
+      >
+        Save
+      </button>
+      <button
+        type="button"
+        class="rounded-md border border-border bg-canvas-subtle px-2 py-0.5 text-[11px] text-ink-secondary transition-colors hover:bg-canvas-elevated"
+        @click="cancelSaveSnippet"
+      >
+        Cancel
+      </button>
     </div>
 
     <div

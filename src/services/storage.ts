@@ -168,6 +168,12 @@ export interface ReviewTemplate {
   body: string
 }
 
+export interface CommentSnippet {
+  id: string
+  name: string
+  body: string
+}
+
 export interface PersistedAppSettings {
   theme: ThemeMode
   autoAdvanceOnReview: boolean
@@ -288,6 +294,15 @@ export async function loadReviewTemplates(): Promise<ReviewTemplate[]> {
 
 export async function saveReviewTemplates(templates: ReviewTemplate[]): Promise<void> {
   await setItem('review_templates', templates)
+}
+
+export async function loadCommentSnippets(): Promise<CommentSnippet[]> {
+  const items = await getItem<CommentSnippet[]>('comment_snippets')
+  return Array.isArray(items) ? items : []
+}
+
+export async function saveCommentSnippets(snippets: CommentSnippet[]): Promise<void> {
+  await setItem('comment_snippets', snippets)
 }
 
 export async function loadLastReviewedSha(prKey: string): Promise<string | null> {
