@@ -38,6 +38,14 @@ cargo check --manifest-path src-tauri/Cargo.toml   # Verify Rust backend compile
 - **Offline Demo Mode**:
   - `src/data/mockPR.ts` provides a realistic 6-file PR loaded on startup so UI/UX changes can always be verified without a GitHub PAT.
 
+## Verification & Visual Checks
+
+- **Unit Tests & Build:** Run `bun run test` and `bun run build` after code changes (and `cargo check --manifest-path src-tauri/Cargo.toml` when touching `src-tauri/`).
+- **Mandatory Visual Verification for UI/UX Changes:** Any change affecting UI, styling, layout, components, or user-facing behavior (`src/components/`, `src/App.vue`, `src/style.css`, `index.html`, or UI state) **must** be visually verified in a live browser before finishing:
+  1. Start the Vite dev server (`bun run dev`, which serves `http://localhost:1420` with `strictPort: true`).
+  2. Open `http://localhost:1420` in the browser (via the browser subagent) — offline demo mode (`src/data/mockPR.ts`) loads automatically without a GitHub PAT, and browser fallbacks handle Tauri APIs.
+  3. Inspect the rendered UI, exercise the modified flows/states (modals, popovers, themes, responsive layout), and verify there are no visual regressions or console/runtime errors.
+
 ## Git Workflow
 
 - **Feature Branches Only:** Do all development on dedicated feature branches created from `main` (never commit directly to `main`).
