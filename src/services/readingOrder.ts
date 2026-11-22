@@ -368,6 +368,7 @@ function extractCSharpTypeNames(content: string): string[] {
 interface ParsedCSharpUsing {
   namespace: string
   explicitSymbol?: string
+  isGlobal: boolean
 }
 
 /**
@@ -376,26 +377,35 @@ interface ParsedCSharpUsing {
 function parseCSharpUsings(content: string): ParsedCSharpUsing[] {
   const results: ParsedCSharpUsing[] = []
   const regex =
-    /^\s*(?:global\s+)?using\s+(?:(static)\s+)?(?:([A-Za-z_]\w*)\s*=\s*)?([A-Za-z_][\w.]*)\s*;/gm
+    /^\s*(global\s+)?using\s+(?:(static)\s+)?(?:([A-Za-z_]\w*)\s*=\s*)?([A-Za-z_][\w.]*)\s*;/gm
   let match: RegExpExecArray | null
   while ((match = regex.exec(content)) !== null) {
-    const isStatic = Boolean(match[1])
-    const alias = match[2]
-    const target = match[3]
+    const isGlobal = Boolean(match[1])
+    const isStatic = Boolean(match[2])
+    const alias = match[3]
+    const target = match[4]
     if (isStatic || alias) {
       const lastDot = target.lastIndexOf('.')
       if (lastDot > 0) {
         results.push({
           namespace: target.slice(0, lastDot),
           explicitSymbol: target.slice(lastDot + 1),
+          isGlobal,
         })
       }
-      results.push({ namespace: target })
+      results.push({ namespace: target, isGlobal })
     } else {
-      results.push({ namespace: target })
+      results.push({ namespace: target, isGlobal })
     }
   }
   return results
+}
+
+function enclosingCSharpNamespaces(ns: string): string[] {
+  const parts = ns.split('.')
+  const out: string[] = []
+  for (let i = parts.length; i > 0; i--) out.push(parts.slice(0, i).join('.'))
+  return out
 }
 
 /**
@@ -492,9 +502,10 @@ export function buildReadingOrder(
     strippedPathMap.set(stripExt(f.path), f.path)
   }
 
-  // Build C# namespace -> file paths and file -> declared type names indexes
+  // Build C# namespace -> file paths, file -> declared type names, and PR-wide global usings
   const csharpNamespaceFiles = new Map<string, string[]>()
   const csharpFileTypes = new Map<string, string[]>()
+  const csharpGlobalUsings = new Set<string>()
   for (const f of files) {
     if (!f.path.toLowerCase().endsWith('.cs')) continue
     if (isDeprioritized(f)) continue
@@ -503,6 +514,9 @@ export function buildReadingOrder(
     for (const ns of extractCSharpNamespaces(content)) {
       if (!csharpNamespaceFiles.has(ns)) csharpNamespaceFiles.set(ns, [])
       csharpNamespaceFiles.get(ns)!.push(f.path)
+    }
+    for (const u of parseCSharpUsings(content)) {
+      if (u.isGlobal) csharpGlobalUsings.add(u.namespace)
     }
     csharpFileTypes.set(f.path, extractCSharpTypeNames(content))
   }
@@ -537,10 +551,31 @@ export function buildReadingOrder(
       }
     }
 
-    // C# `using Namespace.SubNamespace;` -> match against PR `.cs` files declaring that namespace
+    // C# `using Namespace.SubNamespace;` + same/enclosing namespaces + PR-wide `global using`
     if (f.path.toLowerCase().endsWith('.cs')) {
+      const addCSharpEdge = (target: string, syms: string[]) => {
+        dependencies.get(f.path)!.add(target)
+        dependents.get(target)!.add(f.path)
+        if (syms.length > 0) {
+          const symMap = importedSymbols.get(f.path)!
+          if (!symMap.has(target)) symMap.set(target, new Set())
+          syms.forEach((s) => symMap.get(target)!.add(s))
+        }
+      }
+
+      const matchReferencedTypes = (candPath: string, explicitSymbol?: string): string[] => {
+        const types = csharpFileTypes.get(candPath) ?? []
+        return types.filter((t) => {
+          if (explicitSymbol && explicitSymbol === t) return true
+          const escaped = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+          return new RegExp(`\\b${escaped}\\b`).test(content)
+        })
+      }
+
       const usings = parseCSharpUsings(content)
+      const explicitNamespaces = new Set<string>()
       for (const u of usings) {
+        explicitNamespaces.add(u.namespace)
         const candidates = (csharpNamespaceFiles.get(u.namespace) ?? []).filter(
           (p) => p !== f.path,
         )
@@ -549,12 +584,7 @@ export function buildReadingOrder(
         // Prefer candidates whose declared types are actually referenced in `content`
         const matchedCandidates: Array<{ path: string; syms: string[] }> = []
         for (const candPath of candidates) {
-          const types = csharpFileTypes.get(candPath) ?? []
-          const referenced = types.filter((t) => {
-            if (u.explicitSymbol && u.explicitSymbol === t) return true
-            const escaped = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-            return new RegExp(`\\b${escaped}\\b`).test(content)
-          })
+          const referenced = matchReferencedTypes(candPath, u.explicitSymbol)
           if (referenced.length > 0) {
             matchedCandidates.push({ path: candPath, syms: referenced })
           }
@@ -569,12 +599,25 @@ export function buildReadingOrder(
               }))
 
         for (const { path: target, syms } of targets) {
-          dependencies.get(f.path)!.add(target)
-          dependents.get(target)!.add(f.path)
-          if (syms.length > 0) {
-            const symMap = importedSymbols.get(f.path)!
-            if (!symMap.has(target)) symMap.set(target, new Set())
-            syms.forEach((s) => symMap.get(target)!.add(s))
+          addCSharpEdge(target, syms)
+        }
+      }
+
+      // Implicitly visible namespaces: file's own enclosing namespaces + PR-wide `global using`
+      const implicitNamespaces = new Set<string>(csharpGlobalUsings)
+      for (const ns of extractCSharpNamespaces(content)) {
+        for (const enclosing of enclosingCSharpNamespaces(ns)) {
+          implicitNamespaces.add(enclosing)
+        }
+      }
+
+      for (const ns of implicitNamespaces) {
+        if (explicitNamespaces.has(ns)) continue
+        const candidates = (csharpNamespaceFiles.get(ns) ?? []).filter((p) => p !== f.path)
+        for (const candPath of candidates) {
+          const referenced = matchReferencedTypes(candPath)
+          if (referenced.length > 0) {
+            addCSharpEdge(candPath, referenced)
           }
         }
       }

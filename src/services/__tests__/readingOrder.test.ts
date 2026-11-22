@@ -217,6 +217,63 @@ public sealed record OrderSummary(string Id);`,
     expect(testStep.pairedWith).toBe('src/Orders/Services/OrderService.cs')
   })
 
+  it('orders C# files by same/enclosing namespace and PR-wide global usings without local usings', () => {
+    const csFiles: PRFile[] = [
+      makeFile({
+        path: 'src/Orders/Services/OrderProcessor.cs',
+        language: 'csharp',
+        headContent: `namespace MyApp.Orders.Services;
+
+public class OrderProcessor
+{
+    public OrderTotal Calculate(Money amount) => new OrderTotal(amount);
+}`,
+      }),
+      makeFile({
+        path: 'src/Orders/Services/OrderTotal.cs',
+        language: 'csharp',
+        headContent: `namespace MyApp.Orders.Services;
+
+public sealed record OrderTotal(Money Amount);`,
+      }),
+      makeFile({
+        path: 'src/Orders/Services/UnrelatedHelper.cs',
+        language: 'csharp',
+        headContent: `namespace MyApp.Orders.Services;
+
+public static class UnrelatedHelper {}`,
+      }),
+      makeFile({
+        path: 'src/Orders/Shared/Money.cs',
+        language: 'csharp',
+        headContent: `namespace MyApp.Orders.Shared;
+
+public readonly record struct Money(decimal Value);`,
+      }),
+      makeFile({
+        path: 'src/Orders/GlobalUsings.cs',
+        language: 'csharp',
+        headContent: `global using MyApp.Orders.Shared;`,
+      }),
+    ]
+
+    const steps = buildReadingOrder(csFiles, 'bottom-up')
+    const paths = steps.map((s) => s.file.path)
+
+    // Money (from global using) -> OrderTotal (uses Money, same ns as OrderProcessor) -> OrderProcessor
+    expect(paths.indexOf('src/Orders/Shared/Money.cs')).toBeLessThan(
+      paths.indexOf('src/Orders/Services/OrderTotal.cs'),
+    )
+    expect(paths.indexOf('src/Orders/Services/OrderTotal.cs')).toBeLessThan(
+      paths.indexOf('src/Orders/Services/OrderProcessor.cs'),
+    )
+
+    const processorStep = steps.find((s) => s.file.path === 'src/Orders/Services/OrderProcessor.cs')!
+    expect(processorStep.dependencies).toContain('src/Orders/Services/OrderTotal.cs')
+    expect(processorStep.dependencies).toContain('src/Orders/Shared/Money.cs')
+    expect(processorStep.dependencies).not.toContain('src/Orders/Services/UnrelatedHelper.cs')
+  })
+
   it('pushes files matching custom ignorePatterns to the end and marks them generated', () => {
     expect(matchesIgnorePatterns('src/components/Button.stories.tsx', ['*.stories.tsx'])).toBe(true)
     expect(matchesIgnorePatterns('vendor/bundle/foo.js', ['vendor/**'])).toBe(true)
