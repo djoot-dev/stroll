@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   ArrowDown,
+  ArrowDownUp,
   ArrowUp,
   Check,
   CheckCheck,
@@ -521,6 +522,17 @@ function dirOnly(path: string): string {
             >
               <Sparkles class="h-2.5 w-2.5" />
               <span>Mute gen</span>
+            </button>
+
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 rounded-md border border-border-muted bg-canvas px-1.5 py-0.5 text-[10px] font-medium text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+              :aria-label="`Switch reading order (currently ${review.tourDirection})`"
+              :title="`Reading order: ${review.tourDirection === 'bottom-up' ? 'Bottom-Up' : 'Top-Down'}. Click to switch.`"
+              @click="review.setTourDirection(review.tourDirection === 'bottom-up' ? 'top-down' : 'bottom-up')"
+            >
+              <ArrowDownUp class="h-3 w-3 text-terra" />
+              <span>{{ review.tourDirection === 'bottom-up' ? 'Bottom-Up' : 'Top-Down' }}</span>
             </button>
 
             <button
