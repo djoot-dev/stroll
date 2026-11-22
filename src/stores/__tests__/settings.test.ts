@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   clampSidebarWidth,
   DEFAULT_APP_SETTINGS,
+  resolveCodeFontFamily,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
   useSettingsStore,
@@ -201,5 +202,43 @@ describe('useSettingsStore', () => {
     const reloaded = useSettingsStore()
     await reloaded.init()
     expect(reloaded.onboardingCompleted).toBe(true)
+  })
+
+  it('persists monospace font family and diff color palette and resets them', async () => {
+    const store = useSettingsStore()
+    await store.init()
+
+    expect(store.codeFontFamily).toBe('default')
+    expect(store.codeFontFamilyCustom).toBe('')
+    expect(store.diffColorPalette).toBe('default')
+
+    await store.setCodeFontFamily('berkeley-mono')
+    await store.setCodeFontFamilyCustom('Iosevka')
+    await store.setCodeFontFamily('custom')
+    await store.setDiffColorPalette('blue-amber')
+
+    setActivePinia(createPinia())
+    const reloaded = useSettingsStore()
+    await reloaded.init()
+
+    expect(reloaded.codeFontFamily).toBe('custom')
+    expect(reloaded.codeFontFamilyCustom).toBe('Iosevka')
+    expect(reloaded.diffColorPalette).toBe('blue-amber')
+
+    await reloaded.resetToDefaults()
+    expect(reloaded.codeFontFamily).toBe(DEFAULT_APP_SETTINGS.codeFontFamily)
+    expect(reloaded.codeFontFamilyCustom).toBe(DEFAULT_APP_SETTINGS.codeFontFamilyCustom)
+    expect(reloaded.diffColorPalette).toBe(DEFAULT_APP_SETTINGS.diffColorPalette)
+  })
+
+  it('resolves monospace font stacks safely for presets and custom fonts', () => {
+    expect(resolveCodeFontFamily('jetbrains-mono', '')).toContain('JetBrains Mono')
+    expect(resolveCodeFontFamily('berkeley-mono', '')).toContain('Berkeley Mono')
+    expect(resolveCodeFontFamily('fira-code', '')).toContain('Fira Code')
+    expect(resolveCodeFontFamily('custom', 'Cascadia Code')).toBe(
+      "'Cascadia Code', ui-monospace, 'SF Mono', 'Menlo', monospace",
+    )
+    expect(resolveCodeFontFamily('custom', 'Iosevka, Consolas')).toBe('Iosevka, Consolas, monospace')
+    expect(resolveCodeFontFamily('custom', '')).toBe(resolveCodeFontFamily('default', ''))
   })
 })

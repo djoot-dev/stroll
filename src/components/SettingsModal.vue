@@ -43,6 +43,8 @@ import MarkdownContent from './MarkdownContent.vue'
 import { useReviewStore } from '@/stores/review'
 import {
   useSettingsStore,
+  type CodeFontFamily,
+  type DiffColorPalette,
   type ExternalEditorPreset,
   type SettingsSection,
   type TabSizeOption,
@@ -63,6 +65,7 @@ const clearCacheDone = ref(false)
 const settingsSearchQuery = ref('')
 const ignorePatternInput = ref('')
 const customEditorInput = ref(settings.externalEditorCustomCommand)
+const customFontInput = ref(settings.codeFontFamilyCustom)
 const notificationPermissionError = ref<string | null>(null)
 const repoInput = ref('')
 const pathInput = ref('')
@@ -111,6 +114,7 @@ watch(
       tokenInput.value = auth.pat
       githubHostInput.value = settings.githubHost
       customEditorInput.value = settings.externalEditorCustomCommand
+      customFontInput.value = settings.codeFontFamilyCustom
       showToken.value = false
       resetDone.value = false
       clearCacheDone.value = false
@@ -154,7 +158,7 @@ const navItems: Array<{
     id: 'diff',
     label: 'Diff & Code',
     icon: Code2,
-    keywords: 'font size hover popover wrap lines unified split diff view mode tab size spaces ignore whitespace',
+    keywords: 'font family size monospace jetbrains berkeley fira colorblind palette green red blue amber teal magenta hover popover wrap lines unified split diff view mode tab size spaces ignore whitespace',
   },
   {
     id: 'github',
@@ -241,6 +245,10 @@ async function saveCustomEditorCommand() {
   await settings.setExternalEditorCustomCommand(customEditorInput.value)
 }
 
+async function saveCustomFontFamily() {
+  await settings.setCodeFontFamilyCustom(customFontInput.value)
+}
+
 const themeOptions: Array<{
   value: ThemeMode
   label: string
@@ -283,6 +291,45 @@ const fontSizeOptions = [
   { label: 'Default', value: 12.5 },
   { label: 'Comfortable', value: 13.5 },
   { label: 'Large', value: 14.5 },
+]
+
+const fontFamilyOptions: Array<{ value: CodeFontFamily; label: string; hint: string }> = [
+  { value: 'default', label: 'Auto (Default)', hint: 'JetBrains Mono / SF Mono' },
+  { value: 'jetbrains-mono', label: 'JetBrains Mono', hint: 'Tall x-height, crisp' },
+  { value: 'berkeley-mono', label: 'Berkeley Mono', hint: 'Industrial precision' },
+  { value: 'fira-code', label: 'Fira Code', hint: 'Rich code ligatures' },
+  { value: 'sf-mono', label: 'SF Mono / Menlo', hint: 'System monospace' },
+  { value: 'custom', label: 'Custom…', hint: 'Any local font' },
+]
+
+const diffPaletteOptions: Array<{
+  value: DiffColorPalette
+  label: string
+  subtitle: string
+  addColor: string
+  delColor: string
+}> = [
+  {
+    value: 'default',
+    label: 'Classic (Green / Red)',
+    subtitle: 'Default pine additions & crimson deletions',
+    addColor: '#245e48',
+    delColor: '#b83a3a',
+  },
+  {
+    value: 'blue-amber',
+    label: 'Blue / Amber',
+    subtitle: 'Red-green colorblind friendly (Deuteranopia & Protanopia)',
+    addColor: '#1971c2',
+    delColor: '#d97706',
+  },
+  {
+    value: 'teal-magenta',
+    label: 'Teal / Magenta',
+    subtitle: 'High-contrast alternative diff palette',
+    addColor: '#0d9488',
+    delColor: '#be185d',
+  },
 ]
 
 const shortcutRows = [
@@ -862,7 +909,7 @@ async function handleResetDefaults() {
             <!-- DIFF & CODE -->
             <template v-else-if="settings.activeSection === 'diff'">
               <div class="space-y-4">
-                <div class="rounded-xl border border-border bg-canvas/60 p-4">
+                <div class="space-y-4 rounded-xl border border-border bg-canvas/60 p-4">
                   <div class="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p class="text-xs font-medium text-ink">Code Font Size</p>
@@ -887,12 +934,101 @@ async function handleResetDefaults() {
                     </div>
                   </div>
 
+                  <div class="border-t border-border-muted pt-3">
+                    <p class="text-xs font-medium text-ink">Monospace Font Family</p>
+                    <p class="mt-0.5 text-[11px] text-ink-muted">
+                      Choose a locally installed monospace font for diffs and code blocks.
+                    </p>
+                    <div class="mt-2.5 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                      <button
+                        v-for="opt in fontFamilyOptions"
+                        :key="opt.value"
+                        type="button"
+                        class="rounded-xl border px-2.5 py-2 text-left transition-colors"
+                        :class="
+                          settings.codeFontFamily === opt.value
+                            ? 'border-terra-border bg-terra-soft'
+                            : 'border-border bg-canvas-subtle hover:bg-canvas-elevated/60'
+                        "
+                        @click="settings.setCodeFontFamily(opt.value)"
+                      >
+                        <p class="text-[11px] font-semibold text-ink">{{ opt.label }}</p>
+                        <p class="mt-0.5 truncate text-[10px] text-ink-muted">{{ opt.hint }}</p>
+                      </button>
+                    </div>
+
+                    <div v-if="settings.codeFontFamily === 'custom'" class="mt-2.5 flex gap-2">
+                      <input
+                        v-model="customFontInput"
+                        type="text"
+                        placeholder="e.g. Cascadia Code, Iosevka, MonoLisa"
+                        aria-label="Custom monospace font family"
+                        class="flex-1 rounded-xl border border-border bg-canvas-inset px-3 py-1.5 font-mono text-xs text-ink placeholder-ink-faint focus:border-terra focus:outline-none"
+                        @blur="saveCustomFontFamily"
+                        @keydown.enter.prevent="saveCustomFontFamily"
+                      />
+                      <button
+                        type="button"
+                        class="rounded-xl border border-border bg-canvas-subtle px-3 py-1.5 text-xs font-medium text-ink-secondary hover:bg-canvas-elevated"
+                        @click="saveCustomFontFamily"
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  </div>
+
                   <div
-                    class="mt-3 overflow-hidden rounded-xl border border-border-muted bg-code p-2.5 font-mono leading-[1.55]"
+                    class="overflow-hidden rounded-xl border border-border-muted bg-code font-mono leading-[1.55]"
                     :style="{ fontSize: `${settings.codeFontSize}px` }"
                   >
-                    <div class="text-ink-muted">  const order = buildReadingOrder(files, dir)</div>
-                    <div class="bg-diff-add text-pine-text">+ return order.filter((s) =&gt; !s.skipped)</div>
+                    <div class="border-l-2 border-l-transparent px-2.5 py-0.5 text-ink-muted">
+                      &nbsp; const order = buildReadingOrder(files, dir)
+                    </div>
+                    <div class="border-l-2 border-l-diff-del-border bg-diff-del px-2.5 py-0.5 text-ink">
+                      <span class="font-bold text-diff-del-text">-</span>
+                      return order.filter((s) =&gt; <span class="rounded-xs bg-diff-del-word px-0.5">s.skipped !== true</span>)
+                    </div>
+                    <div class="border-l-2 border-l-diff-add-border bg-diff-add px-2.5 py-0.5 text-ink">
+                      <span class="font-bold text-diff-add-text">+</span>
+                      return order.filter((s) =&gt; <span class="rounded-xs bg-diff-add-word px-0.5">!s.skipped</span>)
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Diff Color Palette (Colorblind Accessibility) -->
+                <div class="rounded-xl border border-border bg-canvas/60 p-4">
+                  <p class="text-xs font-medium text-ink">Diff Color Palette</p>
+                  <p class="mt-0.5 text-[11px] text-ink-muted">
+                    Choose a color palette for diff additions and deletions, including colorblind-friendly options.
+                  </p>
+                  <div class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <button
+                      v-for="opt in diffPaletteOptions"
+                      :key="opt.value"
+                      type="button"
+                      class="rounded-xl border p-2.5 text-left transition-colors"
+                      :class="
+                        settings.diffColorPalette === opt.value
+                          ? 'border-terra-border bg-terra-soft'
+                          : 'border-border bg-canvas-subtle hover:bg-canvas-elevated/60'
+                      "
+                      @click="settings.setDiffColorPalette(opt.value)"
+                    >
+                      <div class="flex items-center gap-1.5">
+                        <span
+                          class="inline-flex h-4 w-4 items-center justify-center rounded text-[10px] font-bold text-white"
+                          :style="{ backgroundColor: opt.addColor }"
+                          aria-hidden="true"
+                        >+</span>
+                        <span
+                          class="inline-flex h-4 w-4 items-center justify-center rounded text-[10px] font-bold text-white"
+                          :style="{ backgroundColor: opt.delColor }"
+                          aria-hidden="true"
+                        >-</span>
+                      </div>
+                      <p class="mt-2 text-xs font-semibold text-ink">{{ opt.label }}</p>
+                      <p class="mt-0.5 text-[10px] leading-snug text-ink-muted">{{ opt.subtitle }}</p>
+                    </button>
                   </div>
                 </div>
 

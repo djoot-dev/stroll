@@ -888,15 +888,15 @@ function inlineChangeClass(pt: DiffTokenPart, lineType: DiffLine['type']): strin
 
 function diffLineSurfaceClass(line: DiffLine): string {
   if (line.moved) return 'border-l-diff-move-border bg-diff-move hover:bg-diff-move-hover'
-  if (line.type === 'add') return 'border-l-pine bg-diff-add hover:bg-diff-add-hover'
-  if (line.type === 'del') return 'border-l-crimson bg-diff-del hover:bg-diff-del-hover'
+  if (line.type === 'add') return 'border-l-diff-add-border bg-diff-add hover:bg-diff-add-hover'
+  if (line.type === 'del') return 'border-l-diff-del-border bg-diff-del hover:bg-diff-del-hover'
   return 'border-l-transparent hover:bg-diff-hover'
 }
 
 function diffLineSignClass(line: DiffLine): string {
   if (line.moved) return 'text-diff-move-text'
-  if (line.type === 'add') return 'text-pine-text'
-  if (line.type === 'del') return 'text-crimson-text'
+  if (line.type === 'add') return 'text-diff-add-text'
+  if (line.type === 'del') return 'text-diff-del-text'
   return 'text-code-gutter-text'
 }
 
@@ -1541,9 +1541,9 @@ function statusBadgeClass(status: string): string {
 
           <div class="flex shrink-0 items-center gap-2">
             <div class="hidden font-mono text-[11px] sm:block">
-              <span class="text-pine-text">+{{ step.file.additions }}</span>
+              <span class="text-diff-add-text">+{{ step.file.additions }}</span>
               <span class="mx-1 text-ink-faint">/</span>
-              <span class="text-crimson-text">-{{ step.file.deletions }}</span>
+              <span class="text-diff-del-text">-{{ step.file.deletions }}</span>
             </div>
 
             <div
@@ -1678,9 +1678,9 @@ function statusBadgeClass(status: string): string {
 
         <div class="flex flex-wrap items-center gap-2">
           <div class="font-mono text-xs">
-            <span class="text-pine-text">+{{ step.file.additions }}</span>
+            <span class="text-diff-add-text">+{{ step.file.additions }}</span>
             <span class="mx-1 text-ink-faint">/</span>
-            <span class="text-crimson-text">-{{ step.file.deletions }}</span>
+            <span class="text-diff-del-text">-{{ step.file.deletions }}</span>
           </div>
 
           <div
@@ -1923,8 +1923,8 @@ function statusBadgeClass(status: string): string {
           <p class="text-xs font-medium text-ink">
             Generated / lockfile diff hidden to reduce noise
             <span class="ml-1 font-mono">
-              (<span class="text-pine-text">+{{ step.file.additions }}</span> /
-              <span class="text-crimson-text">-{{ step.file.deletions }}</span>)
+              (<span class="text-diff-add-text">+{{ step.file.additions }}</span> /
+              <span class="text-diff-del-text">-{{ step.file.deletions }}</span>)
             </span>
           </p>
           <p class="text-[11px] text-ink-muted">
