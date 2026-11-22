@@ -6,7 +6,9 @@ import {
   FolderGit2,
   GitBranch,
   ListOrdered,
+  Maximize2,
   MessageSquare,
+  Minimize2,
   RefreshCw,
   Search,
   Send,
@@ -94,6 +96,14 @@ const actionItems = computed<PaletteItem[]>(() => {
         run: () => void review.toggleReviewed(stepPath),
       })
     }
+
+    actions.push({
+      id: 'action:toggle-zen-mode',
+      kind: 'action',
+      title: review.zenMode ? 'Action: Exit Zen Mode' : 'Action: Enter Zen Mode',
+      subtitle: 'Distraction-free review view (Z)',
+      run: () => review.toggleZenMode(),
+    })
 
     actions.push({
       id: 'action:finish-review',
@@ -399,6 +409,10 @@ function handleKeydown(e: KeyboardEvent) {
             <SunMoon v-else-if="item.id === 'action:toggle-theme'" class="h-4 w-4 shrink-0 text-terra-text" />
             <ListOrdered v-else-if="item.id === 'action:toggle-order'" class="h-4 w-4 shrink-0 text-terra-text" />
             <CheckCircle2 v-else-if="item.id === 'action:toggle-reviewed'" class="h-4 w-4 shrink-0 text-pine-text" />
+            <template v-else-if="item.id === 'action:toggle-zen-mode'">
+              <Minimize2 v-if="review.zenMode" class="h-4 w-4 shrink-0 text-terra-text" />
+              <Maximize2 v-else class="h-4 w-4 shrink-0 text-terra-text" />
+            </template>
             <Send v-else-if="item.id === 'action:finish-review'" class="h-4 w-4 shrink-0 text-pine-text" />
             <RefreshCw v-else-if="item.id === 'action:refresh-pr'" class="h-4 w-4 shrink-0 text-ink-muted" />
             <ExternalLink v-else-if="item.id === 'action:open-github'" class="h-4 w-4 shrink-0 text-ink-muted" />

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronLeft, ChevronRight, FolderGit2, RefreshCw, X } from '@lucide/vue'
+import { Check, ChevronLeft, ChevronRight, FolderGit2, Minimize2, RefreshCw, X } from '@lucide/vue'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import CommandPaletteModal from '@/components/CommandPaletteModal.vue'
 import DiffViewer from '@/components/DiffViewer.vue'
@@ -186,6 +186,14 @@ function handleKeydown(e: KeyboardEvent) {
       }
       return
     }
+    if (e.defaultPrevented) {
+      return
+    }
+    if (review.screen === 'review' && review.zenMode && !isEditableElement(e.target)) {
+      e.preventDefault()
+      review.toggleZenMode(false)
+      return
+    }
   }
 
   if (settings.isOpen || review.showFinishModal || review.showLoaderModal || showCommandPalette.value) return
@@ -235,6 +243,9 @@ function handleKeydown(e: KeyboardEvent) {
   } else if (e.key === '[') {
     e.preventDefault()
     review.sidebarOpen = !review.sidebarOpen
+  } else if (e.key === 'z' || e.key === 'Z') {
+    e.preventDefault()
+    review.toggleZenMode()
   } else if (e.key === 'r' || e.key === 'R') {
     e.preventDefault()
     if (review.pr) review.showFinishModal = true
@@ -357,11 +368,11 @@ onBeforeUnmount(() => {
 
     <!-- 3. Guided PR Review Screen -->
     <div v-else key="review" class="flex h-screen flex-col overflow-hidden bg-canvas text-ink">
-      <TopBar @open-command-palette="showCommandPalette = true" />
+      <TopBar v-if="!review.zenMode" @open-command-palette="showCommandPalette = true" />
 
       <!-- Live PR Update Banner -->
       <div
-        v-if="review.prHasRemoteUpdates"
+        v-if="review.prHasRemoteUpdates && !review.zenMode"
         class="flex items-center justify-between gap-3 border-b border-terra-border bg-terra-soft px-4 py-1.5 text-xs text-terra-text"
       >
         <span class="font-medium">
@@ -391,7 +402,7 @@ onBeforeUnmount(() => {
 
       <!-- Active Commit Filter Banner when Sidebar is Collapsed -->
       <div
-        v-if="review.commitFilter !== 'all' && !review.sidebarOpen"
+        v-if="review.commitFilter !== 'all' && !review.sidebarOpen && !review.zenMode"
         class="flex items-center justify-between gap-3 border-b border-ochre-border bg-ochre-soft px-4 py-1 text-xs text-ochre-text"
       >
         <span class="font-medium">
@@ -416,7 +427,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="flex min-h-0 flex-1 overflow-hidden">
-        <TourSidebar />
+        <TourSidebar v-if="!review.zenMode" />
 
         <main
           ref="previewScrollRef"
@@ -481,15 +492,63 @@ onBeforeUnmount(() => {
       </div>
 
       <KeyboardShortcutsBar
-        v-if="settings.showShortcutsBar"
+        v-if="settings.showShortcutsBar && !review.zenMode"
         @open-cheatsheet="showShortcutsModal = true"
       />
+
+      <!-- Zen Mode Floating Exit Pill -->
+      <div
+        v-if="review.zenMode"
+        role="region"
+        aria-label="Zen mode controls"
+        class="fixed right-6 top-3 z-30 flex items-center gap-1.5 rounded-full border border-border bg-canvas-subtle/90 px-2.5 py-1 text-xs opacity-60 shadow-md backdrop-blur-md transition-opacity duration-200 hover:opacity-100 focus-within:opacity-100"
+      >
+        <span
+          v-if="review.tourSteps.length > 0"
+          class="px-1.5 font-mono text-[11px] font-medium text-ink-secondary"
+        >
+          <template v-if="review.activeView === 'overview'">Overview</template>
+          <template v-else>Step {{ review.currentStepIndex + 1 }}/{{ review.tourSteps.length }}</template>
+        </span>
+
+        <template v-if="review.activeView === 'step' && review.currentStep">
+          <span class="h-3.5 w-px bg-border-muted" aria-hidden="true" />
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium transition-colors"
+            :class="
+              review.isStepReviewed(review.currentStep.file.path)
+                ? 'bg-pine-soft text-pine-text hover:bg-pine-soft/80'
+                : 'text-ink-secondary hover:bg-canvas-elevated hover:text-ink'
+            "
+            title="Mark step reviewed (M)"
+            @click="review.toggleReviewed()"
+          >
+            <Check class="h-3 w-3" />
+            <span>{{ review.isStepReviewed(review.currentStep.file.path) ? 'Reviewed' : 'Mark Reviewed' }}</span>
+            <kbd class="rounded border border-border-muted bg-canvas px-1 font-mono text-[9.5px] text-ink-faint">M</kbd>
+          </button>
+        </template>
+
+        <span class="h-3.5 w-px bg-border-muted" aria-hidden="true" />
+
+        <button
+          type="button"
+          class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium text-ink-secondary transition-colors hover:bg-canvas-elevated hover:text-ink"
+          title="Exit Zen Mode (Esc or Z)"
+          @click="review.toggleZenMode(false)"
+        >
+          <Minimize2 class="h-3 w-3" />
+          <span>Exit Zen</span>
+          <kbd class="rounded border border-border-muted bg-canvas px-1 font-mono text-[9.5px] text-ink-faint">Esc</kbd>
+        </button>
+      </div>
     </div>
   </Transition>
 
   <!-- Update indicator for screens without the shortcuts footer -->
   <UpdateIndicator
-    v-if="review.screen !== 'splash' && !(review.screen === 'review' && settings.showShortcutsBar)"
+    v-if="review.screen !== 'splash' && !review.zenMode && !(review.screen === 'review' && settings.showShortcutsBar)"
     variant="floating"
   />
 

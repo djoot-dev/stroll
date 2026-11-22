@@ -142,6 +142,7 @@ export const useReviewStore = defineStore('review', () => {
   const submitSuccessMessage = ref<string | null>(null)
 
   const sidebarOpen = ref(true)
+  const zenMode = ref(false)
   const ignoreWhitespace = ref(false)
   const showUnresolvedOnly = ref(false)
   const commitFilter = ref<string>('all')
@@ -375,8 +376,13 @@ export const useReviewStore = defineStore('review', () => {
 
   function backToInbox(): void {
     showFinishModal.value = false
+    zenMode.value = false
     prError.value = null
     screen.value = 'inbox'
+  }
+
+  function toggleZenMode(value?: boolean): void {
+    zenMode.value = value ?? !zenMode.value
   }
 
   async function loadMockPR(): Promise<void> {
@@ -1630,6 +1636,8 @@ export const useReviewStore = defineStore('review', () => {
     submitError,
     submitSuccessMessage,
     sidebarOpen,
+    zenMode,
+    toggleZenMode,
     ignoreWhitespace,
     showUnresolvedOnly,
     commitFilter,
