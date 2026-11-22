@@ -7,7 +7,7 @@ A cross-platform desktop application built with **Tauri v2**, **Vue 3**, **TypeS
 
 ## Features
 
-- **Guided Reading Order Engine**: Classifies changed files into architectural layers (`config`, `types`, `core`, `ui`, `tests`), parses relative, `@/`, and Python imports to topologically sort dependencies before consumers (`Bottom-Up` or `Top-Down`), and pairs test files immediately after their implementation.
+- **Guided Reading Order Engine**: Classifies changed files into architectural layers (`config`, `types`, `core`, `ui`, `tests`), parses relative, `@/`, Python, and C# (`using`/namespace) imports to topologically sort dependencies before consumers (`Bottom-Up` or `Top-Down`), and pairs test files immediately after their implementation.
 - **PR Inbox & Overview**: Browse open PRs filtered by **Review Requested**, **My PRs**, or **All Involved** (with optional auto-refresh and desktop notifications), or load any PR by URL. Includes a dedicated PR Overview with description, checks, commits, labels, reviewers, and conversation.
 - **Isolated Single-File Diff Viewer**: Syntax-highlighted diffs via CodeMirror 6 with collapsible unchanged sections, in-diff search (`Cmd/Ctrl + F`), and **Referenced PR Context** cards for modified types and functions imported from other files in the same PR.
 - **Local Repo & AST Code Intelligence**: Link local Git repositories in Settings to enable Tree-sitter symbol resolution (TypeScript, JavaScript, Rust, Python, C#) and `git blame` context directly in code hover popovers.

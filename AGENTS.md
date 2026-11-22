@@ -29,7 +29,7 @@ cargo check --manifest-path src-tauri/Cargo.toml   # Verify Rust backend compile
 
 - **Keep business logic in TypeScript** (`src/services/`, `src/stores/`):
   - `src/services/github.ts`: GitHub GraphQL API v4 client + REST `/pulls/{n}/files` patch loader.
-  - `src/services/readingOrder.ts`: Layer classifier (`config`, `types`, `core`, `ui`, `tests`), relative/`@/`/`python` import-graph topological sorter (`bottom-up` / `top-down`), test-to-implementation pairing, and `ReferencedContext` snippet extraction.
+  - `src/services/readingOrder.ts`: Layer classifier (`config`, `types`, `core`, `ui`, `tests`), relative/`@/`/`python`/C# (`using` & namespace) import-graph topological sorter (`bottom-up` / `top-down`), test-to-implementation pairing, and `ReferencedContext` snippet extraction.
   - `src/services/diffParser.ts`: Converts unified patches + full base/head blobs into `DiffHunkBlock` and expandable `DiffGap` segments.
   - `src/services/http.ts` & `src/services/storage.ts`: Wrap `@tauri-apps/plugin-http` and `@tauri-apps/plugin-store` with automatic browser fallbacks (`fetch` / `localStorage`) when `__TAURI_INTERNALS__` is absent.
 - **Keep `src-tauri/` minimal for Phase 1**:
