@@ -35,9 +35,19 @@ const groups: ShortcutGroup[] = [
     title: 'Diff, Search & Comments',
     items: [
       { keys: ['⌘F', 'Ctrl+F'], description: 'Search within current file diff' },
+      { keys: ['Shift+Enter'], description: 'Previous match in diff search' },
       { keys: ['⌘K', 'Ctrl+K'], description: 'Jump to file, symbol, or unresolved thread' },
       { keys: ['⌘Enter', 'Ctrl+Enter'], description: 'Submit comment or thread reply' },
       { keys: ['Esc'], description: 'Cancel composer, diff search, or modal' },
+    ],
+  },
+  {
+    title: 'PR Inbox',
+    items: [
+      { keys: ['/', '⌘K', 'Ctrl+K'], description: 'Focus inbox search' },
+      { keys: ['J / ↓', 'K / ↑'], description: 'Move PR selection down / up' },
+      { keys: ['Enter'], description: 'Open selected PR' },
+      { keys: ['Esc'], description: 'Clear or exit inbox search' },
     ],
   },
   {
