@@ -284,7 +284,7 @@ function dirOnly(path: string): string {
   <Transition name="sidebar-slide">
     <aside
       v-if="review.sidebarOpen && review.pr"
-      class="relative flex shrink-0 flex-col border-r border-border bg-canvas-subtle"
+      class="@container relative flex shrink-0 flex-col border-r border-border bg-canvas-subtle"
       :style="{ width: `${settings.sidebarWidth}px`, '--sidebar-width': `${settings.sidebarWidth}px` }"
     >
       <!-- Resize handle -->
@@ -313,7 +313,7 @@ function dirOnly(path: string): string {
         <h2 class="line-clamp-2 text-xs font-semibold leading-snug text-ink">
           {{ review.pr.title }}
         </h2>
-        <div class="mt-2 flex items-center justify-between gap-2 text-[11px] text-ink-muted">
+        <div class="mt-2 flex flex-col items-start gap-1 text-[11px] text-ink-muted @[260px]:flex-row @[260px]:items-center @[260px]:justify-between @[260px]:gap-2">
           <div class="flex items-center gap-1.5">
             <span class="shrink-0 whitespace-nowrap">
               {{ review.reviewedCount }} / {{ review.tourSteps.length }} reviewed
@@ -330,7 +330,7 @@ function dirOnly(path: string): string {
             </button>
           </div>
           <span
-            class="truncate font-mono text-[10.5px] text-ink-faint"
+            class="w-full truncate font-mono text-[10.5px] text-ink-faint @[260px]:w-auto"
             :title="`${review.pr.headRefName} → ${review.pr.baseRefName}`"
           >
             {{ review.pr.headRefName }} → {{ review.pr.baseRefName }}
@@ -380,7 +380,7 @@ function dirOnly(path: string): string {
       <!-- Pinned Step 0: PR Overview -->
       <div class="border-b border-border-muted px-2.5 py-2">
         <button
-          class="group flex w-full items-center justify-between gap-2 rounded-xl border px-2.5 py-2 text-left transition-all"
+          class="group flex w-full flex-col items-start gap-1.5 rounded-xl border px-2.5 py-2 text-left transition-all @[260px]:flex-row @[260px]:items-center @[260px]:justify-between @[260px]:gap-2"
           :class="
             review.activeView === 'overview'
               ? 'stroll-card border-terra-border bg-terra-soft'
@@ -389,7 +389,7 @@ function dirOnly(path: string): string {
           title="PR Overview (0 or O)"
           @click="review.openOverview()"
         >
-          <div class="flex min-w-0 items-center gap-2.5">
+          <div class="flex w-full min-w-0 items-center gap-2.5 @[260px]:w-auto">
             <span
               class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-colors"
               :class="
@@ -400,7 +400,7 @@ function dirOnly(path: string): string {
             >
               <FileText class="h-3 w-3" />
             </span>
-            <div class="min-w-0">
+            <div class="min-w-0 flex-1">
               <div
                 class="truncate text-xs font-semibold"
                 :class="review.activeView === 'overview' ? 'text-ink' : 'text-ink-secondary group-hover:text-ink'"
@@ -413,7 +413,7 @@ function dirOnly(path: string): string {
             </div>
           </div>
 
-          <div class="flex shrink-0 items-center gap-1.5">
+          <div class="flex shrink-0 items-center gap-1.5 pl-[30px] @[260px]:pl-0">
             <span
               v-if="overviewCommentCount > 0"
               class="inline-flex items-center gap-0.5 rounded-md bg-canvas-elevated px-1.5 py-0.2 font-mono text-[10px] text-ink-muted"
@@ -495,7 +495,7 @@ function dirOnly(path: string): string {
           </button>
         </div>
 
-        <div class="flex items-center justify-between gap-1.5">
+        <div class="flex flex-col items-start gap-1.5 @[260px]:flex-row @[260px]:flex-wrap @[260px]:items-center @[260px]:justify-between">
           <button
             type="button"
             :aria-pressed="hideReviewed"
@@ -512,7 +512,7 @@ function dirOnly(path: string): string {
             <span>Hide reviewed</span>
           </button>
 
-          <div class="flex items-center gap-1">
+          <div class="flex flex-wrap items-center gap-1">
             <button
               v-if="hasGeneratedVisibleSteps"
               type="button"
@@ -624,8 +624,8 @@ function dirOnly(path: string): string {
                 </span>
 
                 <div class="min-w-0 flex-1 space-y-1">
-                  <div class="flex items-center justify-between gap-1.5">
-                    <div class="flex min-w-0 items-center gap-1.5">
+                  <div class="flex flex-col items-start gap-1 @[260px]:flex-row @[260px]:items-center @[260px]:justify-between @[260px]:gap-1.5">
+                    <div class="flex w-full min-w-0 flex-col items-start gap-1 @[260px]:w-auto @[260px]:flex-row @[260px]:items-center @[260px]:gap-1.5">
                       <span
                         v-if="step.isGenerated"
                         class="shrink-0 rounded border border-border bg-canvas-elevated px-1 py-0.2 font-mono text-[9px] font-semibold text-ink-muted"
@@ -633,7 +633,7 @@ function dirOnly(path: string): string {
                         {{ isLockfile(step.file.path) ? 'LOCKFILE' : 'GENERATED' }}
                       </span>
                       <span
-                        class="truncate font-mono text-xs font-medium"
+                        class="w-full truncate font-mono text-xs font-medium @[260px]:w-auto"
                         :class="
                           review.activeView === 'step' && step.stepIndex === review.currentStepIndex
                             ? 'text-ink'
@@ -655,8 +655,8 @@ function dirOnly(path: string): string {
                     </span>
                   </div>
 
-                  <div class="flex items-center justify-between gap-2 text-[10px] text-ink-faint">
-                    <span class="truncate">{{ dirOnly(step.file.path) || '.' }}</span>
+                  <div class="flex flex-col items-start gap-1 text-[10px] text-ink-faint @[260px]:flex-row @[260px]:items-center @[260px]:justify-between @[260px]:gap-2">
+                    <span class="w-full truncate @[260px]:w-auto">{{ dirOnly(step.file.path) || '.' }}</span>
                     <span class="shrink-0 font-mono">
                       <span class="text-pine-text">+{{ step.file.additions }}</span>
                       <span class="mx-0.5 text-ink-faint">/</span>
@@ -718,8 +718,8 @@ function dirOnly(path: string): string {
 
             <!-- Step File Metadata -->
             <div class="min-w-0 flex-1 space-y-1">
-              <div class="flex items-center justify-between gap-1.5">
-                <div class="flex min-w-0 items-center gap-1.5">
+              <div class="flex flex-col items-start gap-1 @[260px]:flex-row @[260px]:items-center @[260px]:justify-between @[260px]:gap-1.5">
+                <div class="flex w-full min-w-0 flex-col items-start gap-1 @[260px]:w-auto @[260px]:flex-row @[260px]:items-center @[260px]:gap-1.5">
                   <span
                     v-if="step.isGenerated"
                     class="shrink-0 rounded border border-border bg-canvas-elevated px-1 py-0.2 font-mono text-[9px] font-semibold text-ink-muted"
@@ -734,7 +734,7 @@ function dirOnly(path: string): string {
                     {{ LAYER_META[step.layer].shortLabel }}
                   </span>
                   <span
-                    class="truncate font-mono text-xs font-medium"
+                    class="w-full truncate font-mono text-xs font-medium @[260px]:w-auto"
                     :class="
                       review.activeView === 'step' && step.stepIndex === review.currentStepIndex
                         ? 'text-ink'
@@ -764,11 +764,11 @@ function dirOnly(path: string): string {
                 </span>
               </div>
 
-              <div class="flex items-center justify-between gap-2 text-[10px] text-ink-faint">
-                <span class="truncate">{{ dirOnly(step.file.path) || '.' }}</span>
-                <div class="flex shrink-0 items-center gap-1">
+              <div class="flex flex-col items-start gap-1 text-[10px] text-ink-faint @[260px]:flex-row @[260px]:items-center @[260px]:justify-between @[260px]:gap-2">
+                <span class="w-full truncate @[260px]:w-auto">{{ dirOnly(step.file.path) || '.' }}</span>
+                <div class="flex w-full shrink-0 items-center justify-between gap-1 @[260px]:w-auto @[260px]:justify-end">
                   <div
-                    class="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                    class="hidden items-center gap-0.5 group-hover:flex group-focus-within:flex"
                     @click.stop
                   >
                     <GripVertical
@@ -813,7 +813,7 @@ function dirOnly(path: string): string {
                   </div>
                   <Pin
                     v-if="review.pinnedPaths.has(step.file.path)"
-                    class="h-2.5 w-2.5 text-terra-text group-hover:hidden"
+                    class="h-2.5 w-2.5 text-terra-text group-hover:hidden group-focus-within:hidden"
                   />
                   <span class="font-mono">
                     <span class="text-pine-text">+{{ step.file.additions }}</span>
@@ -832,7 +832,7 @@ function dirOnly(path: string): string {
         v-if="review.hiddenPaths.size > 0 || review.customOrderPaths.length > 0 || review.pinnedPaths.size > 0"
         class="border-t border-border-muted bg-canvas text-[11px] text-ink-muted"
       >
-        <div class="flex items-center justify-between px-3 py-2">
+        <div class="flex flex-col items-start gap-1.5 px-3 py-2 @[260px]:flex-row @[260px]:items-center @[260px]:justify-between">
           <button
             v-if="review.hiddenPaths.size > 0"
             type="button"
