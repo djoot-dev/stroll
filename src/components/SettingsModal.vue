@@ -249,49 +249,6 @@ async function saveCustomFontFamily() {
   await settings.setCodeFontFamilyCustom(customFontInput.value)
 }
 
-const activeFontPrimaryName = computed<string | null>(() => {
-  switch (settings.codeFontFamily) {
-    case 'jetbrains-mono':
-      return 'JetBrains Mono'
-    case 'berkeley-mono':
-      return 'Berkeley Mono'
-    case 'fira-code':
-      return 'Fira Code'
-    case 'custom': {
-      const first = settings.codeFontFamilyCustom.split(',')[0]?.replace(/['"]/g, '').trim()
-      return first || null
-    }
-    default:
-      return null
-  }
-})
-
-function isLocalFontInstalled(fontName: string): boolean {
-  if (typeof document === 'undefined') return true
-  const canvas = document.createElement('canvas')
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return true
-  const sample = 'mmmmmmmmmmlli1!|=>!==0O'
-  const cleanName = fontName.replace(/['"]/g, '').trim()
-  if (!cleanName) return true
-
-  for (const fallback of ['monospace', 'sans-serif']) {
-    ctx.font = `16px ${fallback}`
-    const baselineWidth = ctx.measureText(sample).width
-    ctx.font = `16px "${cleanName}", ${fallback}`
-    if (ctx.measureText(sample).width !== baselineWidth) {
-      return true
-    }
-  }
-  return false
-}
-
-const isSelectedFontMissing = computed<boolean>(() => {
-  const name = activeFontPrimaryName.value
-  if (!name) return false
-  return !isLocalFontInstalled(name)
-})
-
 const themeOptions: Array<{
   value: ThemeMode
   label: string
@@ -1018,13 +975,6 @@ async function handleResetDefaults() {
                         Apply
                       </button>
                     </div>
-
-                    <p
-                      v-if="isSelectedFontMissing"
-                      class="mt-2 text-[10.5px] text-ochre-text"
-                    >
-                      <span class="font-medium">{{ activeFontPrimaryName }}</span> was not detected on this system — falling back to system monospace.
-                    </p>
                   </div>
 
                   <div
