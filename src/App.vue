@@ -397,7 +397,13 @@ onBeforeUnmount(() => {
         <span class="font-medium">
           Tour is filtered to
           <code class="rounded bg-canvas px-1 py-0.5 font-mono text-[11px]">
-            {{ review.commitFilter === 'since-last-review' ? 'since last review' : review.commitFilter.slice(0, 7) }}
+            {{
+              review.commitFilter === 'since-last-review'
+                ? review.lastReviewedCommitOid && review.pr
+                  ? `${review.lastReviewedCommitOid.slice(0, 7)}..${review.pr.headRefOid.slice(0, 7)}`
+                  : 'since last review'
+                : review.commitFilter.slice(0, 7)
+            }}
           </code>
         </span>
         <button
