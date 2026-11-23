@@ -5,6 +5,23 @@
 
 A cross-platform desktop application built with **Tauri v2**, **Vue 3**, **TypeScript**, **Pinia**, **Tailwind CSS v4**, and **CodeMirror 6** for reviewing GitHub Pull Requests as a guided, dependency-aware tour instead of a flat alphabetical file list.
 
+## Screenshots
+
+### Guided Diff Tour (Light Theme)
+Dependency-ordered tour sidebar (`CONFIG` → `TYPES` → `CORE` → `TEST` → `UI`), **Referenced PR Context** cards, and isolated CodeMirror 6 diff viewer.
+
+![Guided Diff Tour in Paper Light theme](docs/screenshots/guided-diff-tour.png)
+
+### PR Overview
+PR summary, stack chain, description, checks, commits, and review progress at a glance.
+
+![PR Overview](docs/screenshots/pr-overview.png)
+
+### Dark Mode & Inline Review Threads
+**Deep Pine Dark** theme with inline review threads, emoji reactions, and resolution controls.
+
+![Dark Mode and Inline Review Threads](docs/screenshots/dark-mode-inline-review.png)
+
 ## Features
 
 - **Guided Reading Order Engine**: Classifies changed files into architectural layers (`config`, `types`, `core`, `ui`, `tests`), parses relative, `@/`, Python, and C# (`using`/namespace) imports to topologically sort dependencies before consumers (`Bottom-Up` or `Top-Down`), and pairs test files immediately after their implementation.
