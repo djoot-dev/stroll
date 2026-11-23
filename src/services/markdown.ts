@@ -48,7 +48,19 @@ function applyEmphasis(html: string): string {
   return html
 }
 
-function renderInline(raw: string): string {
+function buildRefChip(
+  href: string,
+  refKey: string,
+  label: string,
+  kind: 'pull' | 'issue' | 'unknown' = 'unknown',
+): string {
+  const safeHref = escapeHtml(href)
+  const safeKey = escapeHtml(refKey)
+  const safeLabel = escapeHtml(label)
+  return `<a href="${safeHref}" data-pr-ref="${safeKey}" data-pr-kind="${kind}" data-external-url="${safeHref}" class="inline-flex max-w-full items-center gap-1 rounded border border-border bg-canvas-elevated/80 px-1.5 py-0.5 align-baseline font-mono text-[11px] font-medium text-ink transition-colors hover:border-terra-border hover:text-terra-text"><span data-ref-dot class="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-ink-faint"></span><span class="shrink-0">${safeLabel}</span><span data-ref-title class="hidden max-w-44 truncate font-sans text-[10.5px] font-normal text-ink-muted"></span></a>`
+}
+
+function renderInline(raw: string, repoContext?: { owner: string; repo: string }): string {
   // Split around inline code spans first (double or single backticks) so markdown inside isn't transformed
   const parts = raw.split(/(``(?:[^`]|`(?!`))+``|`[^`]+`)/g)
   return parts
@@ -92,14 +104,66 @@ function renderInline(raw: string): string {
         },
       )
 
-      // Bare http(s) URLs
+      // Bare http(s) URLs (including GitHub PR/issue URLs rendered as rich chips)
       html = html.replace(
         /(^|[\s(])(https?:\/\/[^\s<)]+)/g,
-        (_match, prefix: string, url: string) => {
+        (_match, prefix: string, rawUrl: string) => {
+          const trailingMatch = rawUrl.match(/([.,;:!?]+)$/)
+          const trailing = trailingMatch ? trailingMatch[1] : ''
+          const url = trailing ? rawUrl.slice(0, -trailing.length) : rawUrl
           const safe = sanitizeHref(url)
-          if (!safe) return `${prefix}${url}`
+          if (!safe) return `${prefix}${rawUrl}`
+          const ghMatch = safe.match(
+            /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/(pull|issues)\/(\d+)(?:[/?#].*)?$/i,
+          )
+          if (ghMatch) {
+            const [, owner, repo, type, num] = ghMatch
+            const refKey = `${owner}/${repo}#${num}`
+            const label =
+              repoContext &&
+              owner.toLowerCase() === repoContext.owner.toLowerCase() &&
+              repo.toLowerCase() === repoContext.repo.toLowerCase()
+                ? `#${num}`
+                : refKey
+            return `${prefix}${stash(
+              buildRefChip(safe, refKey, label, type.toLowerCase() === 'pull' ? 'pull' : 'issue'),
+            )}${trailing}`
+          }
           return `${prefix}${stash(
             `<a href="${safe}" data-external-url="${safe}" class="font-medium text-terra-text underline decoration-terra-border underline-offset-2 transition-colors hover:text-terra">${safe}</a>`,
+          )}${trailing}`
+        },
+      )
+
+      // Cross-repo owner/repo#123 references
+      html = html.replace(
+        /(^|[\s(])([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#(\d+)\b/g,
+        (_match, prefix: string, slug: string, num: string) => {
+          const refKey = `${slug}#${num}`
+          const href = `https://github.com/${slug}/issues/${num}`
+          return `${prefix}${stash(buildRefChip(href, refKey, refKey, 'unknown'))}`
+        },
+      )
+
+      // Same-repo #123 references
+      if (repoContext) {
+        html = html.replace(
+          /(^|[\s(])#(\d+)\b/g,
+          (_match, prefix: string, num: string) => {
+            const refKey = `${repoContext.owner}/${repoContext.repo}#${num}`
+            const href = `https://github.com/${repoContext.owner}/${repoContext.repo}/issues/${num}`
+            return `${prefix}${stash(buildRefChip(href, refKey, `#${num}`, 'unknown'))}`
+          },
+        )
+      }
+
+      // @username mentions
+      html = html.replace(
+        /(^|[\s(])@([a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38})\b/g,
+        (_match, prefix: string, login: string) => {
+          const href = `https://github.com/${login}`
+          return `${prefix}${stash(
+            `<a href="${href}" data-external-url="${href}" data-mention="${login}" class="font-medium text-terra-text hover:underline">@${login}</a>`,
           )}`
         },
       )
@@ -186,6 +250,7 @@ function parseList(
   ordered: boolean,
   interactiveChecklist: boolean,
   taskCounter: TaskCounter,
+  repoContext?: { owner: string; repo: string },
 ): { html: string; nextIndex: number } {
   const items: string[] = []
   let isTaskList = false
@@ -203,7 +268,7 @@ function parseList(
 
     if (indent > baseIndent) {
       // Malformed leading deeper indent without a parent item: treat at current level
-      const nested = parseList(lines, i, indent, isItemOrdered, interactiveChecklist, taskCounter)
+      const nested = parseList(lines, i, indent, isItemOrdered, interactiveChecklist, taskCounter, repoContext)
       if (items.length > 0) {
         const last = items[items.length - 1]
         items[items.length - 1] = last.replace(/<\/li>$/, `${nested.html}</li>`)
@@ -228,9 +293,9 @@ function parseList(
         : checked
           ? '<span class="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border border-pine-border bg-pine text-[10px] font-bold text-white" aria-label="Checked">✓</span>'
           : '<span class="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border border-border bg-canvas" aria-label="Unchecked"></span>'
-      itemBody = `<div class="flex items-start gap-2">${box}<span class="${checked ? 'text-ink-muted line-through' : ''}">${renderInline(taskMatch[2])}</span></div>`
+      itemBody = `<div class="flex items-start gap-2">${box}<span class="${checked ? 'text-ink-muted line-through' : ''}">${renderInline(taskMatch[2], repoContext)}</span></div>`
     } else {
-      itemBody = renderInline(content)
+      itemBody = renderInline(content, repoContext)
     }
 
     i += 1
@@ -275,6 +340,7 @@ function parseList(
 export interface MarkdownRenderOptions {
   originalLines?: string[]
   interactiveChecklist?: boolean
+  repoContext?: { owner: string; repo: string }
 }
 
 export interface ChecklistProgress {
@@ -505,6 +571,23 @@ function renderSuggestionBlock(codeLines: string[], originalLines?: string[]): s
   return `<div class="my-3 overflow-hidden rounded-lg border border-pine-border/60 bg-code"><div class="flex items-center justify-between border-b border-border-muted bg-canvas-elevated/60 px-3 py-1 font-mono text-[10px] font-semibold uppercase tracking-wider text-pine-text">Suggested change</div><div class="overflow-x-auto py-1">${removedHtml}${addedHtml}</div></div>`
 }
 
+export function isVideoAttachmentUrl(rawUrl: string): boolean {
+  const safe = sanitizeHref(rawUrl)
+  if (!safe) return false
+  try {
+    const parsed = new URL(safe)
+    if (
+      parsed.hostname === 'github.com' &&
+      /^\/user-attachments\/assets\/[A-Za-z0-9-]+\/?$/.test(parsed.pathname)
+    ) {
+      return true
+    }
+    return /\.(mp4|mov|webm|m4v|ogg)$/i.test(parsed.pathname)
+  } catch {
+    return false
+  }
+}
+
 export function renderSafeMarkdown(
   markdown: string,
   options?: MarkdownRenderOptions,
@@ -515,6 +598,7 @@ export function renderSafeMarkdown(
   const lines = normalized.split('\n')
   const out: string[] = []
   const interactiveChecklist = Boolean(options?.interactiveChecklist)
+  const repoContext = options?.repoContext
   const taskCounter: TaskCounter = { index: 0 }
 
   let i = 0
@@ -539,11 +623,12 @@ export function renderSafeMarkdown(
         out.push(renderSuggestionBlock(codeLines, options?.originalLines))
         continue
       }
+      const copyBtn = `<button type="button" data-copy-code aria-label="Copy code" title="Copy code" class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-[10px] font-medium normal-case tracking-normal text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-terra">Copy</button>`
       const langBadge = lang
-        ? `<div class="border-b border-border-muted bg-canvas-elevated/50 px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-ink-faint">${lang}</div>`
-        : ''
+        ? `<div class="flex items-center justify-between border-b border-border-muted bg-canvas-elevated/50 px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-ink-faint"><div>${lang}</div>${copyBtn}</div>`
+        : `<button type="button" data-copy-code aria-label="Copy code" title="Copy code" class="absolute right-2 top-2 z-10 inline-flex items-center gap-1 rounded border border-border bg-canvas-elevated/90 px-1.5 py-0.5 font-sans text-[10px] font-medium text-ink-muted opacity-0 transition-opacity hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-terra group-hover:opacity-100">Copy</button>`
       out.push(
-        `<div class="my-3 overflow-hidden rounded-lg border border-border bg-code">${langBadge}<pre class="overflow-x-auto p-3 font-mono text-xs leading-relaxed text-ink"><code>${escapeHtml(codeLines.join('\n'))}</code></pre></div>`,
+        `<div class="group relative my-3 overflow-hidden rounded-lg border border-border bg-code">${langBadge}<pre class="overflow-x-auto p-3 font-mono text-xs leading-relaxed text-ink"><code>${escapeHtml(codeLines.join('\n'))}</code></pre></div>`,
       )
       continue
     }
@@ -566,7 +651,7 @@ export function renderSafeMarkdown(
     if (headingMatch) {
       const level = headingMatch[1].length
       out.push(
-        `<h${level} class="${HEADING_CLASSES[level]}">${renderInline(headingMatch[2].trim())}</h${level}>`,
+        `<h${level} class="${HEADING_CLASSES[level]}">${renderInline(headingMatch[2].trim(), repoContext)}</h${level}>`,
       )
       i += 1
       continue
@@ -586,14 +671,14 @@ export function renderSafeMarkdown(
         const style = ALERT_STYLES[kind]
         const bodyLines = quoteLines.slice(1)
         const bodyHtml = bodyLines.length > 0
-          ? `<div class="mt-1 text-xs text-ink-secondary">${bodyLines.map((l) => renderInline(l)).join('<br />')}</div>`
+          ? `<div class="mt-1 text-xs text-ink-secondary">${bodyLines.map((l) => renderInline(l, repoContext)).join('<br />')}</div>`
           : ''
         out.push(
           `<div class="my-2.5 rounded-lg border-l-2 px-3 py-2 ${style.wrapper}"><div class="text-[11px] font-semibold uppercase tracking-wide ${style.title}">${style.label}</div>${bodyHtml}</div>`,
         )
       } else {
         out.push(
-          `<blockquote class="my-2.5 border-l-2 border-terra-border bg-canvas/60 px-3 py-1.5 text-xs text-ink-muted">${quoteLines.map((l) => renderInline(l)).join('<br />')}</blockquote>`,
+          `<blockquote class="my-2.5 border-l-2 border-terra-border bg-canvas/60 px-3 py-1.5 text-xs text-ink-muted">${quoteLines.map((l) => renderInline(l, repoContext)).join('<br />')}</blockquote>`,
         )
       }
       continue
@@ -626,7 +711,7 @@ export function renderSafeMarkdown(
       const ths = headers
         .map(
           (h, idx) =>
-            `<th class="border-b border-border bg-canvas-elevated/60 px-3 py-1.5 font-semibold text-ink ${alignClass(idx)}">${renderInline(h)}</th>`,
+            `<th class="border-b border-border bg-canvas-elevated/60 px-3 py-1.5 font-semibold text-ink ${alignClass(idx)}">${renderInline(h, repoContext)}</th>`,
         )
         .join('')
 
@@ -635,7 +720,7 @@ export function renderSafeMarkdown(
           const tds = headers
             .map(
               (_h, idx) =>
-                `<td class="border-b border-border-muted px-3 py-1.5 text-ink-secondary ${alignClass(idx)}">${renderInline(row[idx] ?? '')}</td>`,
+                `<td class="border-b border-border-muted px-3 py-1.5 text-ink-secondary ${alignClass(idx)}">${renderInline(row[idx] ?? '', repoContext)}</td>`,
             )
             .join('')
           return `<tr class="last:[&>td]:border-b-0">${tds}</tr>`
@@ -659,6 +744,7 @@ export function renderSafeMarkdown(
         ordered,
         interactiveChecklist,
         taskCounter,
+        repoContext,
       )
       out.push(parsed.html)
       i = parsed.nextIndex
@@ -680,8 +766,21 @@ export function renderSafeMarkdown(
       paraLines.push(lines[i])
       i += 1
     }
+    if (paraLines.length === 1) {
+      const singleLine = paraLines[0].trim()
+      if (/^https?:\/\/[^\s<>]+$/.test(singleLine) && isVideoAttachmentUrl(singleLine)) {
+        const safeVideoUrl = sanitizeHref(singleLine)
+        if (safeVideoUrl) {
+          const escaped = escapeHtml(safeVideoUrl)
+          out.push(
+            `<div class="my-2 overflow-hidden rounded-lg border border-border bg-code"><video controls preload="metadata" playsinline class="max-h-96 w-full bg-black/80" src="${escaped}" data-video-attachment="${escaped}"></video><div class="flex items-center justify-between border-t border-border-muted bg-canvas-elevated/50 px-2.5 py-1 text-[10.5px] text-ink-muted"><span>Video attachment</span><a href="${escaped}" data-external-url="${escaped}" class="text-terra-text hover:underline">Open in browser</a></div></div>`,
+          )
+          continue
+        }
+      }
+    }
     out.push(
-      `<p class="my-2 leading-relaxed first:mt-0 last:mb-0">${paraLines.map((l) => renderInline(l)).join('<br />')}</p>`,
+      `<p class="my-2 leading-relaxed first:mt-0 last:mb-0">${paraLines.map((l) => renderInline(l, repoContext)).join('<br />')}</p>`,
     )
   }
 

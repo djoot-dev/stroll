@@ -41,6 +41,10 @@ describe('buildExternalEditorUrl', () => {
     expect(
       buildExternalEditorUrl('zed', '', '/Users/dev/repo', 'src/app.ts', 17.8),
     ).toBe('zed://file/Users/dev/repo/src/app.ts:17')
+
+    expect(
+      buildExternalEditorUrl('vscode', '', '\\\\?\\C:\\Users\\dev\\my repo', 'src\\file #1.ts', 12),
+    ).toBe('vscode://file/C:/Users/dev/my%20repo/src/file%20%231.ts:12')
   })
 
   it('substitutes {file} and {line} for custom templates and returns null when empty', () => {

@@ -10,6 +10,8 @@ import {
   useCommentSnippets,
   type ConventionalPrefix,
 } from '@/services/commentSnippets'
+import { useCommentAutocomplete } from '@/composables/useCommentAutocomplete'
+import CommentAutocompletePopover from './CommentAutocompletePopover.vue'
 import MarkdownContent from './MarkdownContent.vue'
 
 const props = defineProps<{
@@ -59,6 +61,21 @@ const isSavingSnippet = ref(false)
 const snippetNameInput = ref('')
 const snippetNameRef = ref<HTMLInputElement | null>(null)
 const snippetSavedNotice = ref(false)
+
+const autocomplete = useCommentAutocomplete(
+  textareaRef,
+  () => body.value,
+  (next) => {
+    body.value = next
+    confirmDiscard.value = false
+  },
+)
+
+function onTextareaKeydown(e: KeyboardEvent) {
+  if (autocomplete.handleKeydown(e)) {
+    e.stopPropagation()
+  }
+}
 
 onMounted(() => {
   void ensureLoaded()
@@ -296,7 +313,20 @@ function handleSubmit() {
       rows="3"
       placeholder="Write a review comment (Markdown & ```suggestion supported)..."
       class="w-full rounded-lg border border-border bg-canvas-inset px-3 py-2 font-sans text-xs text-ink placeholder-ink-faint focus:border-terra focus:outline-none"
-      @input="confirmDiscard = false"
+      @input="confirmDiscard = false; autocomplete.onInputOrCursor()"
+      @click="autocomplete.onInputOrCursor()"
+      @keydown="onTextareaKeydown"
+      @blur="autocomplete.close()"
+    />
+    <CommentAutocompletePopover
+      :open="autocomplete.isOpen.value"
+      :trigger="autocomplete.trigger.value"
+      :options="autocomplete.options.value"
+      :active-index="autocomplete.activeIndex.value"
+      :is-loading="autocomplete.isLoading.value"
+      :coords="autocomplete.coords.value"
+      @select="autocomplete.selectOption"
+      @hover="autocomplete.activeIndex.value = $event"
     />
 
     <div class="mt-2 flex flex-wrap items-center justify-between gap-2">

@@ -2,6 +2,7 @@
 import {
   ArrowRight,
   ArrowUpDown,
+  Check,
   CheckCheck,
   CheckCircle2,
   Clock,
@@ -11,6 +12,7 @@ import {
   GitPullRequest,
   History,
   KeyRound,
+  Link2,
   Loader2,
   MessageSquare,
   Moon,
@@ -32,6 +34,9 @@ import {
   prRefKey,
 } from '@/services/inbox'
 import { checkoutKey, localBranchForPR, type CheckoutTarget } from '@/services/localCheckout'
+import { copyToClipboard } from '@/services/native'
+import { annotateInboxStacks } from '@/services/prStack'
+import { getReviewDecisionDisplay } from '@/services/reviewDecision'
 import { loadAllPRProgress } from '@/services/storage'
 import { PR_FILTER_OPTIONS, useAuthStore } from '@/stores/auth'
 import { useCheckoutStore } from '@/stores/checkout'
@@ -73,6 +78,7 @@ const sortOptions: ReadonlyArray<{ value: PRInboxSortOption; label: string }> = 
 ]
 
 const availableRepos = computed(() => extractInboxRepos(auth.requestedPRs))
+const inboxStacks = computed(() => annotateInboxStacks(auth.requestedPRs))
 
 const filteredPRs = computed(() =>
   filterAndSortInboxPRs(auth.requestedPRs, {
@@ -278,29 +284,23 @@ function ciStatusMeta(state: CheckRollupState | null): {
   }
 }
 
-function reviewDecisionMeta(decision: PRReviewDecision): {
-  label: string
-  badgeClass: string
-} | null {
-  switch (decision) {
-    case 'APPROVED':
-      return {
-        label: 'Approved',
-        badgeClass: 'border-pine-border bg-pine-soft text-pine-text',
-      }
-    case 'CHANGES_REQUESTED':
-      return {
-        label: 'Changes requested',
-        badgeClass: 'border-crimson-border bg-crimson-soft text-crimson-text',
-      }
-    case 'REVIEW_REQUIRED':
-      return {
-        label: 'Review required',
-        badgeClass: 'border-ochre-border bg-ochre-soft text-ochre-text',
-      }
-    default:
-      return null
-  }
+function reviewDecisionMeta(decision: PRReviewDecision, authorLogin?: string | null) {
+  return getReviewDecisionDisplay(decision, authorLogin, auth.viewer?.login)
+}
+
+const copiedPRKey = ref<string | null>(null)
+let copiedPRTimer: ReturnType<typeof setTimeout> | null = null
+
+async function copyPRLink(item: PRSummary) {
+  if (!item.url) return
+  const ok = await copyToClipboard(item.url)
+  if (!ok) return
+  const key = prRefKey(item)
+  copiedPRKey.value = key
+  if (copiedPRTimer) clearTimeout(copiedPRTimer)
+  copiedPRTimer = setTimeout(() => {
+    copiedPRKey.value = null
+  }, 1500)
 }
 
 function openInboxItem(item: PRSummary) {
@@ -909,11 +909,11 @@ onBeforeUnmount(() => {
 
                     <!-- Review decision badge -->
                     <span
-                      v-if="reviewDecisionMeta(item.reviewDecision)"
+                      v-if="reviewDecisionMeta(item.reviewDecision, item.author.login)"
                       class="rounded-full border px-1.5 py-0.5 text-[10px] font-medium"
-                      :class="reviewDecisionMeta(item.reviewDecision)!.badgeClass"
+                      :class="reviewDecisionMeta(item.reviewDecision, item.author.login)!.badgeClass"
                     >
-                      {{ reviewDecisionMeta(item.reviewDecision)!.label }}
+                      {{ reviewDecisionMeta(item.reviewDecision, item.author.login)!.label }}
                     </span>
 
                     <!-- CI check rollup status -->
@@ -942,6 +942,15 @@ onBeforeUnmount(() => {
                     >
                       <MessageSquare class="h-3 w-3 text-ink-faint" />
                       <span>{{ item.totalCommentsCount }}</span>
+                    </span>
+
+                    <!-- Stack badge -->
+                    <span
+                      v-if="inboxStacks.get(`${item.owner}/${item.repo}#${item.number}`)"
+                      class="inline-flex items-center gap-1 rounded-full border border-terra-border/60 bg-terra-soft/60 px-1.5 py-0.5 font-mono text-[10px] font-medium text-terra-text"
+                      :title="`Part of a ${inboxStacks.get(`${item.owner}/${item.repo}#${item.number}`)!.total}-PR stack`"
+                    >
+                      stack {{ inboxStacks.get(`${item.owner}/${item.repo}#${item.number}`)!.position }}/{{ inboxStacks.get(`${item.owner}/${item.repo}#${item.number}`)!.total }}
                     </span>
 
                     <!-- Local unsent drafts badge -->
@@ -988,6 +997,24 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div class="flex shrink-0 items-center gap-4">
+                  <button
+                    v-if="item.url"
+                    type="button"
+                    class="inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-1 text-[11px] text-ink-secondary transition-all hover:border-border-strong hover:text-ink focus:opacity-100"
+                    :class="
+                      copiedPRKey === prRefKey(item)
+                        ? 'border-pine-border bg-pine-soft text-pine-text opacity-100'
+                        : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
+                    "
+                    :title="copiedPRKey === prRefKey(item) ? 'Copied!' : 'Copy PR link'"
+                    :aria-label="copiedPRKey === prRefKey(item) ? 'Copied PR link' : `Copy link to PR #${item.number}`"
+                    @click.stop="copyPRLink(item)"
+                    @keydown.stop
+                  >
+                    <Check v-if="copiedPRKey === prRefKey(item)" class="h-3 w-3 text-pine-text" />
+                    <Link2 v-else class="h-3 w-3" />
+                    <span v-if="copiedPRKey === prRefKey(item)" class="font-medium">Copied!</span>
+                  </button>
                   <template v-if="canCheckout(item)">
                     <span
                       v-if="checkout.stateFor(checkoutTargetFor(item))?.kind === 'on-pr'"

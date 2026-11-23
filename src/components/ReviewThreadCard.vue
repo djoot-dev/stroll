@@ -7,14 +7,18 @@ import {
   CornerDownRight,
   Loader2,
   Pencil,
+  Quote,
   RotateCcw,
   Trash2,
 } from '@lucide/vue'
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
+import { useCommentAutocomplete } from '@/composables/useCommentAutocomplete'
+import { appendQuoteToDraft, getCommentQuoteText } from '@/services/quoteReply'
 import { extractSuggestionBlocks } from '@/services/suggestions'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 import type { ReviewThread } from '@/types/pr'
+import CommentAutocompletePopover from './CommentAutocompletePopover.vue'
 import MarkdownContent from './MarkdownContent.vue'
 import ReactionBar from './ReactionBar.vue'
 
@@ -40,7 +44,34 @@ const originalLinesForThread = computed<string[] | undefined>(() => {
 
 const isReplying = ref(false)
 const replyBody = ref('')
+const replyTextareaRef = ref<HTMLTextAreaElement | null>(null)
 const isSubmitting = ref(false)
+const commentBodyRefs = new Map<string, HTMLElement>()
+
+function setCommentBodyRef(id: string, el: unknown) {
+  if (el instanceof HTMLElement) commentBodyRefs.set(id, el)
+  else commentBodyRefs.delete(id)
+}
+
+const replyAutocomplete = useCommentAutocomplete(
+  replyTextareaRef,
+  () => replyBody.value,
+  (next) => {
+    replyBody.value = next
+  },
+)
+
+function handleQuoteComment(commentId: string, fullBody: string) {
+  const quoteText = getCommentQuoteText(fullBody, commentBodyRefs.get(commentId))
+  replyBody.value = appendQuoteToDraft(replyBody.value, quoteText)
+  isReplying.value = true
+  void nextTick(() => {
+    const el = replyTextareaRef.value
+    if (!el) return
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+  })
+}
 const isTogglingResolve = ref(false)
 const editingCommentId = ref<string | null>(null)
 const editBody = ref('')
@@ -245,6 +276,15 @@ async function handleToggleResolve() {
             <span class="text-ink-faint">
               {{ new Date(comment.createdAt).toLocaleString() }}
             </span>
+            <button
+              type="button"
+              title="Quote reply"
+              aria-label="Quote reply"
+              class="rounded p-0.5 text-ink-faint transition-colors hover:bg-canvas-elevated hover:text-ink"
+              @click="handleQuoteComment(comment.id, comment.body)"
+            >
+              <Quote class="h-3 w-3" />
+            </button>
             <template v-if="canModifyComment(comment.author.login)">
               <button
                 type="button"
@@ -325,11 +365,13 @@ async function handleToggleResolve() {
           </div>
         </div>
         <template v-else>
-          <MarkdownContent
-            :content="comment.body"
-            :original-lines="originalLinesForThread"
-            class="text-xs leading-relaxed text-ink-secondary"
-          />
+          <div :ref="(el) => setCommentBodyRef(comment.id, el)">
+            <MarkdownContent
+              :content="comment.body"
+              :original-lines="originalLinesForThread"
+              class="text-xs leading-relaxed text-ink-secondary"
+            />
+          </div>
           <div
             v-if="canApplyThreadSuggestions && extractSuggestionBlocks(comment.body).length > 0"
             class="flex flex-wrap items-center gap-2 pt-1"
@@ -384,13 +426,28 @@ async function handleToggleResolve() {
 
         <div v-else class="animate-pop-in space-y-2">
           <textarea
+            ref="replyTextareaRef"
             v-model="replyBody"
             rows="2"
             placeholder="Write a reply to this thread…"
             class="w-full rounded-lg border border-border bg-canvas-inset px-2.5 py-1.5 text-xs text-ink placeholder-ink-faint focus:border-terra focus:outline-none"
-            @keydown.meta.enter.prevent="handleReply"
-            @keydown.ctrl.enter.prevent="handleReply"
-            @keydown.esc.prevent="isReplying = false"
+            @input="replyAutocomplete.onInputOrCursor()"
+            @click="replyAutocomplete.onInputOrCursor()"
+            @keydown="replyAutocomplete.handleKeydown($event) && $event.stopPropagation()"
+            @keydown.meta.enter.prevent="!replyAutocomplete.isOpen.value && handleReply()"
+            @keydown.ctrl.enter.prevent="!replyAutocomplete.isOpen.value && handleReply()"
+            @keydown.esc.prevent="!replyAutocomplete.isOpen.value && (isReplying = false)"
+            @blur="replyAutocomplete.close()"
+          />
+          <CommentAutocompletePopover
+            :open="replyAutocomplete.isOpen.value"
+            :trigger="replyAutocomplete.trigger.value"
+            :options="replyAutocomplete.options.value"
+            :active-index="replyAutocomplete.activeIndex.value"
+            :is-loading="replyAutocomplete.isLoading.value"
+            :coords="replyAutocomplete.coords.value"
+            @select="replyAutocomplete.selectOption"
+            @hover="replyAutocomplete.activeIndex.value = $event"
           />
 
           <div class="flex items-center justify-between gap-2">

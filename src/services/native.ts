@@ -160,13 +160,9 @@ export async function openFileInEditor(
     return
   }
 
-  const normalizedRepo = repoPath.replace(/\\/g, '/').replace(/\/+$/, '')
-  const normalizedFile = filePath.replace(/\\/g, '/').replace(/^\/+/, '')
-  const fullPath = `${normalizedRepo}/${normalizedFile}`
-  const prefix = fullPath.startsWith('/') ? '' : '/'
-  const url = `${editor}://file${prefix}${fullPath}:${safeLine}:1`
-  if (typeof window !== 'undefined') {
-    window.open(url, '_blank', 'noopener,noreferrer')
+  const fallbackUrl = buildExternalEditorUrl(editor, '', repoPath, filePath, safeLine)
+  if (fallbackUrl && typeof window !== 'undefined') {
+    window.open(`${fallbackUrl}:1`, '_blank', 'noopener,noreferrer')
   }
 }
 
@@ -205,9 +201,13 @@ export function buildExternalEditorUrl(
   relativePath: string,
   line = 1,
 ): string | null {
-  const cleanRoot = repoRoot.replace(/\/+$/, '')
-  const cleanRel = relativePath.replace(/^\/+/, '')
-  const fullPath = `${cleanRoot}/${cleanRel}`
+  const strippedRoot = repoRoot
+    .replace(/^\\\\\?\\UNC\\/i, '\\\\')
+    .replace(/^\\\\\?\\/, '')
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '')
+  const cleanRel = relativePath.replace(/\\/g, '/').replace(/^\/+/, '')
+  const fullPath = `${strippedRoot}/${cleanRel}`
   const safeLine = Math.max(1, Math.floor(line))
 
   if (preset === 'custom') {
@@ -219,7 +219,10 @@ export function buildExternalEditorUrl(
   }
 
   const scheme = preset === 'zed' ? 'zed://file' : `${preset}://file`
-  const encodedPath = fullPath.split('/').map(encodeURIComponent).join('/')
+  const encodedPath = fullPath
+    .split('/')
+    .map((seg, idx) => (idx === 0 && /^[A-Za-z]:$/.test(seg) ? seg : encodeURIComponent(seg)))
+    .join('/')
   return `${scheme}${encodedPath.startsWith('/') ? '' : '/'}${encodedPath}:${safeLine}`
 }
 
@@ -408,4 +411,36 @@ export async function sendDesktopNotification(title: string, body: string): Prom
     }
   }
   return false
+}
+
+/**
+ * Copy text to the system clipboard, using `navigator.clipboard` with a
+ * `document.execCommand('copy')` fallback for restricted webviews.
+ */
+export async function copyToClipboard(text: string): Promise<boolean> {
+  if (!text) return false
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      // Fall through to execCommand fallback
+    }
+  }
+  if (typeof document === 'undefined') return false
+  try {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.left = '-9999px'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(textarea)
+    return ok
+  } catch {
+    return false
+  }
 }

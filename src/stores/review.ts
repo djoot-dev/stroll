@@ -4,7 +4,9 @@ import {
   MOCK_COMMIT_BODIES,
   MOCK_FILE_COMMIT_OIDS,
   MOCK_PR,
+  MOCK_REPO_LABELS,
   MOCK_REVIEWER_CANDIDATES,
+  MOCK_STACK_CANDIDATES,
 } from '@/data/mockPR'
 import {
   addPRComment,
@@ -19,8 +21,10 @@ import {
   fetchCommitDiffFiles,
   fetchCompareDiffFiles,
   fetchFileCommitHistory,
+  fetchOpenRepoPRsForStack,
   fetchPRHeadPulse,
   fetchPullRequest,
+  fetchRepoLabels,
   fetchReviewerCandidates,
   mergePullRequest,
   mergeReviewerCandidates,
@@ -40,6 +44,7 @@ import {
   updateReviewComment as apiUpdateReviewComment,
 } from '@/services/github'
 import type { PRHeadPulse, ReviewerCandidate } from '@/services/github'
+import { inferPRStack, type InferredPRStack, type PRStackCandidate } from '@/services/prStack'
 import { applySuggestionToContent, hasRepoWriteAccess } from '@/services/suggestions'
 import {
   baselineFromPR,
@@ -1614,6 +1619,74 @@ export const useReviewStore = defineStore('review', () => {
     }
   }
 
+  const prStack = ref<InferredPRStack | null>(null)
+  const repoStackCache = new Map<
+    string,
+    { defaultBranch: string; prs: PRStackCandidate[]; fetchedAt: number }
+  >()
+  let stackLoadSeq = 0
+
+  async function refreshPRStack() {
+    const current = pr.value
+    if (!current) {
+      prStack.value = null
+      return
+    }
+    if (current.isMock) {
+      prStack.value = inferPRStack(current, MOCK_STACK_CANDIDATES, 'main')
+      return
+    }
+    const auth = useAuthStore()
+    if (!auth.pat) {
+      prStack.value = null
+      return
+    }
+    const key = `${current.owner.toLowerCase()}/${current.repo.toLowerCase()}`
+    const cached = repoStackCache.get(key)
+    const now = Date.now()
+    if (cached && now - cached.fetchedAt < 60_000) {
+      prStack.value = inferPRStack(current, cached.prs, cached.defaultBranch)
+      return
+    }
+    const seq = ++stackLoadSeq
+    try {
+      const { defaultBranch, prs } = await fetchOpenRepoPRsForStack(
+        auth.pat,
+        current.owner,
+        current.repo,
+      )
+      repoStackCache.set(key, { defaultBranch, prs, fetchedAt: Date.now() })
+      if (seq === stackLoadSeq && pr.value?.id === current.id) {
+        prStack.value = inferPRStack(pr.value, prs, defaultBranch)
+      }
+    } catch {
+      // Best-effort stack inference
+    }
+  }
+
+  watch(
+    () => (pr.value ? `${pr.value.id}:${pr.value.baseRefName}:${pr.value.headRefName}` : null),
+    () => {
+      void refreshPRStack()
+    },
+    { immediate: true },
+  )
+
+  const repoLabelsCache = new Map<string, import('@/types/pr').PRLabel[]>()
+
+  async function loadRepoLabels(): Promise<import('@/types/pr').PRLabel[]> {
+    if (!pr.value) return []
+    if (pr.value.isMock) return MOCK_REPO_LABELS
+    const key = `${pr.value.owner}/${pr.value.repo}`.toLowerCase()
+    const cached = repoLabelsCache.get(key)
+    if (cached) return cached
+    const auth = useAuthStore()
+    if (!auth.pat) return []
+    const labels = await fetchRepoLabels(auth.pat, pr.value.owner, pr.value.repo)
+    repoLabelsCache.set(key, labels)
+    return labels
+  }
+
   async function addLabels(names: string[]): Promise<void> {
     const cleaned = names.map((n) => n.trim()).filter(Boolean)
     if (!pr.value || cleaned.length === 0) return
@@ -1621,7 +1694,10 @@ export const useReviewStore = defineStore('review', () => {
       const existing = new Set(pr.value.labels.map((l) => l.name))
       const added = cleaned
         .filter((n) => !existing.has(n))
-        .map((name) => ({ name, color: '8b949e' }))
+        .map((name) => {
+          const match = MOCK_REPO_LABELS.find((l) => l.name.toLowerCase() === name.toLowerCase())
+          return match ?? { name, color: '8b949e' }
+        })
       pr.value = { ...pr.value, labels: [...pr.value.labels, ...added] }
       return
     }
@@ -1650,6 +1726,7 @@ export const useReviewStore = defineStore('review', () => {
     screen,
     activeView,
     pr,
+    prStack,
     lastSubmitted,
     tourDirection,
     currentStepIndex,
@@ -1760,6 +1837,7 @@ export const useReviewStore = defineStore('review', () => {
     searchReviewerCandidates,
     removeReviewer,
     addLabels,
+    loadRepoLabels,
     removeLabel,
     submitCompleteReview,
   }
