@@ -15,6 +15,7 @@ import type {
   PRLabel,
   PRMergeableState,
   PRMergeMethod,
+  PRMergeStateStatus,
   PRRequestedReviewer,
   PRReview,
   PRReviewDecision,
@@ -352,6 +353,7 @@ export async function fetchViewerAndRequestedPRs(
             isDraft
             reviewDecision
             totalCommentsCount
+            baseRefName
             headRefName
             isCrossRepository
             commits(last: 1) {
@@ -398,6 +400,7 @@ export async function fetchViewerAndRequestedPRs(
         isDraft: boolean
         reviewDecision: PRReviewDecision
         totalCommentsCount: number | null
+        baseRefName: string
         headRefName: string
         isCrossRepository: boolean | null
         commits: {
@@ -438,6 +441,7 @@ export async function fetchViewerAndRequestedPRs(
       reviewDecision: n.reviewDecision ?? null,
       ciState: n.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state ?? null,
       totalCommentsCount: n.totalCommentsCount ?? 0,
+      baseRefName: n.baseRefName,
       headRefName: n.headRefName,
       isCrossRepository: Boolean(n.isCrossRepository),
     }))
@@ -841,13 +845,15 @@ function mapReactionGroups(groups?: RawReactionGroup[] | null): ReactionGroup[] 
   return mapped.length > 0 ? mapped : undefined
 }
 
-interface RawThreadNode {
+export interface RawThreadNode {
   id: string
   path: string
   subjectType?: 'LINE' | 'FILE' | null
   line: number | null
+  originalLine?: number | null
   diffSide: DiffSide | null
   startLine: number | null
+  originalStartLine?: number | null
   startDiffSide: DiffSide | null
   isResolved: boolean
   isOutdated: boolean
@@ -857,10 +863,38 @@ interface RawThreadNode {
       body: string
       createdAt: string
       state: string
+      diffHunk?: string | null
       author: GitHubUser | null
       reactionGroups?: RawReactionGroup[]
     }>
   }
+}
+
+export function mapReviewThreads(nodes: RawThreadNode[]): ReviewThread[] {
+  return nodes.map((t) => {
+    const isFile = t.subjectType === 'FILE'
+    const isOutdated = Boolean(t.isOutdated || (!isFile && t.line === null))
+    return {
+      id: t.id,
+      path: t.path,
+      subjectType: isFile ? ('FILE' as const) : ('LINE' as const),
+      line: isFile ? 0 : (t.line ?? t.originalLine ?? 1),
+      side: t.diffSide ?? 'RIGHT',
+      startLine: t.startLine ?? t.originalStartLine ?? null,
+      startSide: t.startDiffSide,
+      isResolved: t.isResolved,
+      isOutdated,
+      diffHunk: t.comments.nodes[0]?.diffHunk ?? null,
+      comments: t.comments.nodes.map((c) => ({
+        id: c.id,
+        body: c.body,
+        createdAt: c.createdAt,
+        isPending: c.state === 'PENDING',
+        author: c.author ?? { login: 'ghost', avatarUrl: '' },
+        reactions: mapReactionGroups(c.reactionGroups),
+      })),
+    }
+  })
 }
 
 interface PageInfo {
@@ -1007,8 +1041,10 @@ async function fetchRemainingReviewThreads(
               id
               path
               line
+              originalLine
               diffSide
               startLine
+              originalStartLine
               startDiffSide
               subjectType
               isResolved
@@ -1019,6 +1055,7 @@ async function fetchRemainingReviewThreads(
                   body
                   createdAt
                   state
+                  diffHunk
                   author {
                     login
                     avatarUrl
@@ -1084,6 +1121,8 @@ export async function fetchPullRequest(
           state
           isDraft
           mergeable
+          mergeStateStatus
+          viewerCanMergeAsAdmin
           reviewDecision
           createdAt
           updatedAt
@@ -1151,6 +1190,7 @@ export async function fetchPullRequest(
                         conclusion
                         detailsUrl
                         title
+                        isRequired(pullRequestNumber: $number)
                       }
                       ... on StatusContext {
                         id
@@ -1158,6 +1198,7 @@ export async function fetchPullRequest(
                         state
                         targetUrl
                         description
+                        isRequired(pullRequestNumber: $number)
                       }
                     }
                   }
@@ -1219,8 +1260,10 @@ export async function fetchPullRequest(
               id
               path
               line
+              originalLine
               diffSide
               startLine
+              originalStartLine
               startDiffSide
               subjectType
               isResolved
@@ -1231,6 +1274,7 @@ export async function fetchPullRequest(
                   body
                   createdAt
                   state
+                  diffHunk
                   author {
                     login
                     avatarUrl
@@ -1269,6 +1313,7 @@ export async function fetchPullRequest(
     conclusion: string | null
     detailsUrl: string | null
     title: string | null
+    isRequired?: boolean | null
   }
 
   interface RawStatusContext {
@@ -1278,6 +1323,7 @@ export async function fetchPullRequest(
     state: string
     targetUrl: string | null
     description: string | null
+    isRequired?: boolean | null
   }
 
   interface RawPRResp {
@@ -1292,6 +1338,8 @@ export async function fetchPullRequest(
         state: 'OPEN' | 'CLOSED' | 'MERGED'
         isDraft: boolean
         mergeable: PRMergeableState
+        mergeStateStatus?: PRMergeStateStatus | null
+        viewerCanMergeAsAdmin?: boolean | null
         reviewDecision: PRReviewDecision
         createdAt: string
         updatedAt: string
@@ -1501,28 +1549,7 @@ export async function fetchPullRequest(
   }))
 
   const allThreadNodes = [...pr.reviewThreads.nodes, ...extraThreads]
-  const threads: ReviewThread[] = allThreadNodes
-    // File-level threads have no line; line threads lose theirs once outdated.
-    .filter((t) => t.subjectType === 'FILE' || t.line !== null)
-    .map((t) => ({
-      id: t.id,
-      path: t.path,
-      subjectType: t.subjectType === 'FILE' ? ('FILE' as const) : ('LINE' as const),
-      line: t.subjectType === 'FILE' ? 0 : (t.line ?? 1),
-      side: t.diffSide ?? 'RIGHT',
-      startLine: t.startLine,
-      startSide: t.startDiffSide,
-      isResolved: t.isResolved,
-      isOutdated: t.isOutdated,
-      comments: t.comments.nodes.map((c) => ({
-        id: c.id,
-        body: c.body,
-        createdAt: c.createdAt,
-        isPending: c.state === 'PENDING',
-        author: c.author ?? { login: 'ghost', avatarUrl: '' },
-        reactions: mapReactionGroups(c.reactionGroups),
-      })),
-    }))
+  const threads: ReviewThread[] = mapReviewThreads(allThreadNodes)
 
   const labels: PRLabel[] = (pr.labels?.nodes ?? [])
     .filter((l): l is PRLabel => Boolean(l && l.name))
@@ -1585,6 +1612,7 @@ export async function fetchPullRequest(
           conclusion: ctx.conclusion,
           url: ctx.detailsUrl,
           description: ctx.title,
+          isRequired: Boolean(ctx.isRequired),
         })
       } else if (ctx.__typename === 'StatusContext' && 'context' in ctx) {
         checks.push({
@@ -1595,6 +1623,7 @@ export async function fetchPullRequest(
           conclusion: ctx.state,
           url: ctx.targetUrl,
           description: ctx.description,
+          isRequired: Boolean(ctx.isRequired),
         })
       }
     }
@@ -1615,6 +1644,8 @@ export async function fetchPullRequest(
     state: pr.state,
     isDraft: Boolean(pr.isDraft),
     mergeable: pr.mergeable ?? 'UNKNOWN',
+    mergeStateStatus: pr.mergeStateStatus ?? undefined,
+    viewerCanMergeAsAdmin: Boolean(pr.viewerCanMergeAsAdmin),
     reviewDecision: pr.reviewDecision ?? null,
     labels,
     createdAt: pr.createdAt,
@@ -2345,6 +2376,40 @@ export async function removePullRequestReviewers(
   )
 }
 
+export async function fetchRepoLabels(
+  pat: string,
+  owner: string,
+  repo: string,
+): Promise<PRLabel[]> {
+  const query = `
+    query RepoLabels($owner: String!, $repo: String!) {
+      repository(owner: $owner, name: $repo) {
+        labels(first: 100, orderBy: { field: NAME, direction: ASC }) {
+          nodes {
+            name
+            color
+            description
+          }
+        }
+      }
+    }
+  `
+  const data = await graphql<{
+    repository: {
+      labels: {
+        nodes: Array<{ name: string; color: string; description?: string | null } | null>
+      }
+    } | null
+  }>(pat, query, { owner, repo })
+  return (data.repository?.labels?.nodes ?? [])
+    .filter((l): l is { name: string; color: string; description?: string | null } => Boolean(l?.name))
+    .map((l) => ({
+      name: l.name,
+      color: l.color,
+      description: l.description ?? null,
+    }))
+}
+
 export async function addPullRequestLabels(
   pat: string,
   owner: string,
@@ -2585,4 +2650,368 @@ export async function commitFileContentToBranch(
   }
   const putJson = (await putRes.json()) as { commit?: { sha?: string } }
   return { commitSha: putJson.commit?.sha ?? '' }
+}
+
+export interface PRReferenceMeta {
+  owner: string
+  repo: string
+  number: number
+  title: string
+  state: 'OPEN' | 'CLOSED' | 'MERGED'
+  isDraft: boolean
+  kind: 'pull' | 'issue'
+  url: string
+}
+
+const mentionableUsersCache = new Map<string, GitHubUser[]>()
+const prRefSearchCache = new Map<string, PRReferenceMeta[]>()
+const prRefMetaCache = new Map<string, PRReferenceMeta>()
+
+export function getCachedPRReferenceMeta(
+  owner: string,
+  repo: string,
+  number: number,
+): PRReferenceMeta | undefined {
+  return prRefMetaCache.get(`${owner.toLowerCase()}/${repo.toLowerCase()}#${number}`)
+}
+
+export function seedPRReferenceMetaCache(items: PRReferenceMeta[]): void {
+  for (const item of items) {
+    prRefMetaCache.set(
+      `${item.owner.toLowerCase()}/${item.repo.toLowerCase()}#${item.number}`,
+      item,
+    )
+  }
+}
+
+export async function fetchMentionableUsers(
+  pat: string,
+  owner: string,
+  repo: string,
+  query: string,
+): Promise<GitHubUser[]> {
+  const key = `${owner.toLowerCase()}/${repo.toLowerCase()}:${query.toLowerCase()}`
+  const cached = mentionableUsersCache.get(key)
+  if (cached) return cached
+
+  const gql = `
+    query MentionableUsers($owner: String!, $repo: String!, $q: String!) {
+      repository(owner: $owner, name: $repo) {
+        mentionableUsers(query: $q, first: 10) {
+          nodes {
+            login
+            name
+            avatarUrl
+          }
+        }
+      }
+    }
+  `
+  const data = await graphql<{
+    repository: {
+      mentionableUsers: {
+        nodes: Array<{ login: string; name?: string | null; avatarUrl: string } | null>
+      }
+    } | null
+  }>(pat, gql, { owner, repo, q: query })
+
+  const users: GitHubUser[] = (data.repository?.mentionableUsers?.nodes ?? [])
+    .filter((u): u is { login: string; name?: string | null; avatarUrl: string } => Boolean(u?.login))
+    .map((u) => ({
+      login: u.login,
+      name: u.name ?? null,
+      avatarUrl: u.avatarUrl,
+    }))
+  mentionableUsersCache.set(key, users)
+  return users
+}
+
+export async function searchRepoPRReferences(
+  pat: string,
+  owner: string,
+  repo: string,
+  query: string,
+): Promise<PRReferenceMeta[]> {
+  const trimmed = query.trim()
+  const key = `${owner.toLowerCase()}/${repo.toLowerCase()}:${trimmed.toLowerCase()}`
+  const cached = prRefSearchCache.get(key)
+  if (cached) return cached
+
+  const searchQ = trimmed
+    ? `repo:${owner}/${repo} ${trimmed} sort:updated-desc`
+    : `repo:${owner}/${repo} is:pr is:open sort:updated-desc`
+  const gql = `
+    query SearchPRRefs($q: String!) {
+      search(query: $q, type: ISSUE, first: 12) {
+        nodes {
+          __typename
+          ... on PullRequest {
+            number
+            title
+            state
+            isDraft
+            url
+          }
+          ... on Issue {
+            number
+            title
+            state
+            url
+          }
+        }
+      }
+    }
+  `
+  const data = await graphql<{
+    search: {
+      nodes: Array<
+        | {
+            __typename: 'PullRequest'
+            number: number
+            title: string
+            state: 'OPEN' | 'CLOSED' | 'MERGED'
+            isDraft: boolean
+            url: string
+          }
+        | {
+            __typename: 'Issue'
+            number: number
+            title: string
+            state: 'OPEN' | 'CLOSED'
+            url: string
+          }
+        | { __typename: string }
+        | null
+      >
+    }
+  }>(pat, gql, { q: searchQ })
+
+  const results: PRReferenceMeta[] = []
+  for (const node of data.search?.nodes ?? []) {
+    if (!node || !('number' in node)) continue
+    const meta: PRReferenceMeta =
+      node.__typename === 'PullRequest'
+        ? {
+            owner,
+            repo,
+            number: node.number,
+            title: node.title,
+            state: node.state,
+            isDraft: Boolean((node as { isDraft?: boolean }).isDraft),
+            kind: 'pull',
+            url: node.url,
+          }
+        : {
+            owner,
+            repo,
+            number: node.number,
+            title: node.title,
+            state: node.state as 'OPEN' | 'CLOSED',
+            isDraft: false,
+            kind: 'issue',
+            url: node.url,
+          }
+    results.push(meta)
+  }
+
+  // Sort PRs before issues
+  results.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'pull' ? -1 : 1))
+  prRefSearchCache.set(key, results)
+  seedPRReferenceMetaCache(results)
+  return results
+}
+
+export async function fetchPRReferenceMetadataBatch(
+  pat: string,
+  refs: Array<{ owner: string; repo: string; number: number }>,
+): Promise<Map<string, PRReferenceMeta>> {
+  const out = new Map<string, PRReferenceMeta>()
+  const missing: Array<{ owner: string; repo: string; number: number; key: string }> = []
+
+  for (const ref of refs) {
+    const key = `${ref.owner.toLowerCase()}/${ref.repo.toLowerCase()}#${ref.number}`
+    const cached = prRefMetaCache.get(key)
+    if (cached) {
+      out.set(key, cached)
+    } else if (!missing.some((m) => m.key === key)) {
+      missing.push({ ...ref, key })
+    }
+  }
+
+  if (missing.length === 0) return out
+
+  // Batch up to 20 refs in one GraphQL query using aliases
+  const batch = missing.slice(0, 20)
+  const fields = batch
+    .map(
+      (r, idx) => `
+        r${idx}: repository(owner: ${JSON.stringify(r.owner)}, name: ${JSON.stringify(r.repo)}) {
+          issueOrPullRequest(number: ${Math.floor(r.number)}) {
+            __typename
+            ... on PullRequest {
+              number
+              title
+              state
+              isDraft
+              url
+            }
+            ... on Issue {
+              number
+              title
+              state
+              url
+            }
+          }
+        }
+      `,
+    )
+    .join('\n')
+
+  try {
+    const data = await graphql<
+      Record<
+        string,
+        {
+          issueOrPullRequest:
+            | {
+                __typename: 'PullRequest'
+                number: number
+                title: string
+                state: 'OPEN' | 'CLOSED' | 'MERGED'
+                isDraft?: boolean
+                url: string
+              }
+            | {
+                __typename: 'Issue'
+                number: number
+                title: string
+                state: 'OPEN' | 'CLOSED'
+                url: string
+              }
+            | null
+        } | null
+      >
+    >(pat, `query BatchRefMeta { ${fields} }`)
+
+    batch.forEach((req, idx) => {
+      const item = data[`r${idx}`]?.issueOrPullRequest
+      if (!item) return
+      const meta: PRReferenceMeta =
+        item.__typename === 'PullRequest'
+          ? {
+              owner: req.owner,
+              repo: req.repo,
+              number: item.number,
+              title: item.title,
+              state: item.state,
+              isDraft: Boolean((item as { isDraft?: boolean }).isDraft),
+              kind: 'pull',
+              url: item.url,
+            }
+          : {
+              owner: req.owner,
+              repo: req.repo,
+              number: item.number,
+              title: item.title,
+              state: item.state,
+              isDraft: false,
+              kind: 'issue',
+              url: item.url,
+            }
+      prRefMetaCache.set(req.key, meta)
+      out.set(req.key, meta)
+    })
+  } catch {
+    // Best-effort metadata enrichment; links still work as plain #123 links
+  }
+
+  return out
+}
+
+export async function fetchOpenRepoPRsForStack(
+  pat: string,
+  owner: string,
+  repo: string,
+): Promise<{
+  defaultBranch: string
+  prs: import('./prStack').PRStackCandidate[]
+}> {
+  const gql = `
+    query RepoOpenPRsForStack($owner: String!, $repo: String!) {
+      repository(owner: $owner, name: $repo) {
+        defaultBranchRef {
+          name
+        }
+        pullRequests(first: 50, states: OPEN, orderBy: { field: UPDATED_AT, direction: DESC }) {
+          nodes {
+            number
+            title
+            url
+            state
+            isDraft
+            baseRefName
+            headRefName
+            isCrossRepository
+            reviewDecision
+            commits(last: 1) {
+              nodes {
+                commit {
+                  statusCheckRollup {
+                    state
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `
+
+  const data = await graphql<{
+    repository: {
+      defaultBranchRef: { name: string } | null
+      pullRequests: {
+        nodes: Array<{
+          number: number
+          title: string
+          url: string
+          state: 'OPEN' | 'CLOSED' | 'MERGED'
+          isDraft: boolean
+          baseRefName: string
+          headRefName: string
+          isCrossRepository: boolean | null
+          reviewDecision: PRReviewDecision
+          commits: {
+            nodes: Array<{
+              commit: {
+                statusCheckRollup: { state: CheckRollupState } | null
+              }
+            }>
+          } | null
+        } | null>
+      }
+    } | null
+  }>(pat, gql, { owner, repo })
+
+  const defaultBranch = data.repository?.defaultBranchRef?.name ?? 'main'
+  const prs: import('./prStack').PRStackCandidate[] = []
+  for (const n of data.repository?.pullRequests?.nodes ?? []) {
+    if (!n) continue
+    prs.push({
+      owner,
+      repo,
+      number: n.number,
+      title: n.title,
+      url: n.url,
+      state: n.state,
+      isDraft: Boolean(n.isDraft),
+      baseRefName: n.baseRefName,
+      headRefName: n.headRefName,
+      isCrossRepository: Boolean(n.isCrossRepository),
+      reviewDecision: n.reviewDecision ?? null,
+      ciState: n.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state ?? null,
+    })
+  }
+  return { defaultBranch, prs }
 }

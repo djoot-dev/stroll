@@ -24,6 +24,16 @@ export type PRInboxSortOption = 'updated-desc' | 'updated-asc' | 'diff-asc' | 'd
 
 export type PRMergeableState = 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN'
 
+export type PRMergeStateStatus =
+  | 'BEHIND'
+  | 'BLOCKED'
+  | 'CLEAN'
+  | 'DIRTY'
+  | 'DRAFT'
+  | 'HAS_HOOKS'
+  | 'UNKNOWN'
+  | 'UNSTABLE'
+
 export type PRReviewDecision = 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | null
 
 export type PRReviewState =
@@ -54,6 +64,7 @@ export interface ReactionGroup {
 export interface PRLabel {
   name: string
   color: string
+  description?: string | null
 }
 
 export interface PRRequestedReviewer {
@@ -88,6 +99,7 @@ export interface PRStatusCheck {
   conclusion: string | null
   url: string | null
   description?: string | null
+  isRequired?: boolean
 }
 
 export interface PRStatusCheckRollup {
@@ -173,6 +185,8 @@ export interface ReviewThread {
   startSide?: DiffSide | null
   isResolved: boolean
   isOutdated: boolean
+  /** Optional diff hunk context from the opening comment (useful for outdated/orphaned threads). */
+  diffHunk?: string | null
   comments: ReviewComment[]
 }
 
@@ -231,6 +245,8 @@ export interface PullRequestData {
   state: 'OPEN' | 'CLOSED' | 'MERGED'
   isDraft: boolean
   mergeable: PRMergeableState
+  mergeStateStatus?: PRMergeStateStatus
+  viewerCanMergeAsAdmin?: boolean
   reviewDecision: PRReviewDecision
   labels: PRLabel[]
   createdAt: string
@@ -270,6 +286,7 @@ export interface PRSummary {
   reviewDecision: PRReviewDecision
   ciState: CheckRollupState | null
   totalCommentsCount: number
+  baseRefName?: string
   headRefName: string
   isCrossRepository: boolean
 }

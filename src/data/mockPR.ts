@@ -313,6 +313,48 @@ function saveLimit() {
   </div>
 </template>`
 
+export const MOCK_REPO_LABELS: import('@/types/pr').PRLabel[] = [
+  { name: 'rate-limiting', color: '0e8a16', description: 'Token bucket & throttling logic' },
+  { name: 'webhooks', color: '1d76db', description: 'Webhook delivery and retries' },
+  { name: 'database', color: 'd93f0b', description: 'Schema changes and migrations' },
+  { name: 'bug', color: 'd73a4a', description: 'Something is not working' },
+  { name: 'enhancement', color: 'a2eeef', description: 'New feature or request' },
+  { name: 'performance', color: 'fbca04', description: 'Latency or throughput improvement' },
+  { name: 'security', color: 'b60205', description: 'Security-sensitive change' },
+  { name: 'documentation', color: '0075ca', description: 'Improvements or additions to docs' },
+]
+
+export const MOCK_STACK_CANDIDATES: import('@/services/prStack').PRStackCandidate[] = [
+  {
+    owner: 'acme-cloud',
+    repo: 'webhook-engine',
+    number: 185,
+    title: 'feat(webhooks): dead-letter queue replay UI',
+    url: 'https://github.com/acme-cloud/webhook-engine/pull/185',
+    state: 'OPEN',
+    isDraft: false,
+    baseRefName: 'feat/webhook-rate-limiter',
+    headRefName: 'feat/webhook-dlq-ui',
+    isCrossRepository: false,
+    reviewDecision: 'REVIEW_REQUIRED',
+    ciState: 'SUCCESS',
+  },
+  {
+    owner: 'acme-cloud',
+    repo: 'webhook-engine',
+    number: 186,
+    title: 'feat(metrics): delivery latency histograms',
+    url: 'https://github.com/acme-cloud/webhook-engine/pull/186',
+    state: 'OPEN',
+    isDraft: true,
+    baseRefName: 'feat/webhook-dlq-ui',
+    headRefName: 'feat/webhook-metrics',
+    isCrossRepository: false,
+    reviewDecision: null,
+    ciState: 'PENDING',
+  },
+]
+
 export const MOCK_PR: PullRequestData = {
   id: 'PR_mock_428',
   owner: 'acme-cloud',
@@ -346,6 +388,8 @@ const delayMs = computeBackoffMs(attempt, {
   state: 'OPEN',
   isDraft: false,
   mergeable: 'MERGEABLE',
+  mergeStateStatus: 'CLEAN',
+  viewerCanMergeAsAdmin: false,
   reviewDecision: 'REVIEW_REQUIRED',
   labels: [
     { name: 'feature', color: '245e48' },
@@ -408,7 +452,7 @@ const delayMs = computeBackoffMs(attempt, {
         login: 'elena-rostova',
         avatarUrl: 'https://avatars.githubusercontent.com/u/1?v=4',
       },
-      body: 'Heads up for reviewers: start with `src/types/webhook.ts` and `db/migrations/004_webhook_deliveries.sql` — Stroll’s bottom-up reading order already puts them first!',
+      body: 'Heads up for reviewers: start with `src/types/webhook.ts` and `db/migrations/004_webhook_deliveries.sql` — Stroll’s bottom-up reading order already puts them first!\n\nHere is a quick recording of the retry backoff in action:\n\nhttps://github.com/user-attachments/assets/1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d',
       createdAt: '2026-11-17T14:25:00Z',
     },
     {
@@ -432,6 +476,7 @@ const delayMs = computeBackoffMs(attempt, {
         conclusion: 'SUCCESS',
         url: 'https://github.com/acme-cloud/webhook-engine/actions/runs/1001',
         description: 'vue-tsc and eslint passed',
+        isRequired: true,
       },
       {
         id: 'chk-2',
@@ -441,6 +486,7 @@ const delayMs = computeBackoffMs(attempt, {
         conclusion: 'SUCCESS',
         url: 'https://github.com/acme-cloud/webhook-engine/actions/runs/1002',
         description: '48 passed in 1.4s',
+        isRequired: true,
       },
       {
         id: 'chk-3',
@@ -504,6 +550,26 @@ const delayMs = computeBackoffMs(attempt, {
           },
           body: 'Should we cap `this.buckets` size or add an LRU eviction if there are thousands of endpoints?',
           createdAt: '2026-11-18T11:15:00Z',
+        },
+      ],
+    },
+    {
+      id: 'thread-mock-outdated',
+      path: 'src/legacy/oldDispatcher.ts',
+      line: 42,
+      side: 'RIGHT',
+      isResolved: false,
+      isOutdated: true,
+      diffHunk: '@@ -39,4 +39,6 @@ export function dispatchLegacy(job: WebhookJob) {\n   return retrySync(job)\n+  // TODO: replace with async queue\n }',
+      comments: [
+        {
+          id: 'comment-mock-outdated-1',
+          author: {
+            login: 'elena-rostova',
+            avatarUrl: 'https://avatars.githubusercontent.com/u/3?v=4',
+          },
+          body: 'Can we remove `oldDispatcher.ts` entirely now that the new queue handles retries?',
+          createdAt: '2026-11-18T10:05:00Z',
         },
       ],
     },

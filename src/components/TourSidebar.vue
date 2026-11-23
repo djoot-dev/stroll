@@ -22,6 +22,7 @@ import {
 } from '@lucide/vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { isLockfile, LAYER_META } from '@/services/readingOrder'
+import { openExternalUrl } from '@/services/native'
 import { computeRemainingReviewEstimate } from '@/services/reviewEstimate'
 import { computeRevealScrollTop } from '@/services/scrollReveal'
 import { useReviewStore } from '@/stores/review'
@@ -426,6 +427,44 @@ function dirOnly(path: string): string {
             <kbd class="rounded border border-border bg-canvas px-1 font-mono text-[9.5px] text-ink-faint">0</kbd>
           </div>
         </button>
+
+        <div
+          v-if="review.prStack"
+          class="mt-1.5 flex items-center justify-between gap-2 rounded-lg border border-border-muted bg-canvas px-2.5 py-1.5 text-[10.5px] text-ink-muted"
+        >
+          <span class="truncate" :title="`PR stack ${review.prStack.currentPosition}/${review.prStack.totalCount} (base: ${review.pr?.baseRefName})`">
+            Stack <strong class="font-mono text-ink">{{ review.prStack.currentPosition }}/{{ review.prStack.totalCount }}</strong>
+            <template v-if="review.prStack.baseIsNotDefault">
+              · vs <code class="font-mono text-ink-secondary">{{ review.pr?.baseRefName }}</code>
+            </template>
+          </span>
+          <div class="flex shrink-0 items-center gap-1">
+            <button
+              v-if="review.prStack.ancestors.length > 0"
+              type="button"
+              :title="`Previous in stack: #${review.prStack.ancestors[review.prStack.ancestors.length - 1].number}`"
+              class="rounded border border-border bg-canvas-subtle px-1.5 py-0.5 font-mono text-[10px] text-ink-secondary hover:border-terra-border hover:text-terra-text"
+              @click="
+                const prev = review.prStack!.ancestors[review.prStack!.ancestors.length - 1];
+                review.pr?.isMock ? openExternalUrl(prev.url) : review.loadPRByRepo(prev.owner, prev.repo, prev.number)
+              "
+            >
+              ↑ #{{ review.prStack.ancestors[review.prStack.ancestors.length - 1].number }}
+            </button>
+            <button
+              v-if="review.prStack.descendants.length > 0"
+              type="button"
+              :title="`Next in stack: #${review.prStack.descendants[0].number}`"
+              class="rounded border border-border bg-canvas-subtle px-1.5 py-0.5 font-mono text-[10px] text-ink-secondary hover:border-terra-border hover:text-terra-text"
+              @click="
+                const next = review.prStack!.descendants[0];
+                review.pr?.isMock ? openExternalUrl(next.url) : review.loadPRByRepo(next.owner, next.repo, next.number)
+              "
+            >
+              ↓ #{{ review.prStack.descendants[0].number }}
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- Status Filters & Grouping Controls -->

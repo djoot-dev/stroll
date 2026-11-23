@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isVideoAttachmentUrl,
   parseChecklistProgress,
   renderSafeMarkdown,
   toggleChecklistItem,
@@ -72,6 +73,52 @@ describe('renderSafeMarkdown', () => {
     expect(html).toContain('const x = &quot;&lt;tag&gt;&quot;')
     expect(html).toContain('<pre ')
     expect(html).toContain('plain')
+    expect(html).toContain('data-copy-code')
+  })
+
+  it('adds copy button to fenced code blocks but not inline code spans', () => {
+    const inlineOnly = renderSafeMarkdown('Use `const a = 1` here')
+    expect(inlineOnly).not.toContain('data-copy-code')
+
+    const withLang = renderSafeMarkdown('```js\nconsole.log("<ok>")\n```')
+    expect(withLang).toContain('data-copy-code')
+    expect(withLang).toContain('console.log(&quot;&lt;ok&gt;&quot;)')
+
+    const withoutLang = renderSafeMarkdown('```\nplain block\n```')
+    expect(withoutLang).toContain('data-copy-code')
+    expect(withoutLang).toContain('plain block')
+  })
+
+  it('renders standalone video attachment URLs as inline <video> with fallback link', () => {
+    const assetHtml = renderSafeMarkdown(
+      'https://github.com/user-attachments/assets/1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d',
+    )
+    expect(assetHtml).toContain('<video controls')
+    expect(assetHtml).toContain('data-video-attachment="https://github.com/user-attachments/assets/1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d"')
+    expect(assetHtml).toContain('Open in browser')
+
+    const mp4Html = renderSafeMarkdown('https://cdn.example.com/demo/clip.mp4')
+    expect(mp4Html).toContain('<video controls')
+
+    const linkHtml = renderSafeMarkdown('https://example.com/docs/guide')
+    expect(linkHtml).not.toContain('<video')
+    expect(linkHtml).toContain('data-external-url="https://example.com/docs/guide"')
+
+    expect(isVideoAttachmentUrl('javascript:alert(1).mp4')).toBe(false)
+    expect(isVideoAttachmentUrl('data:video/mp4;base64,AAAA')).toBe(false)
+  })
+
+  it('renders @mentions and #PR references outside code spans and headings', () => {
+    const html = renderSafeMarkdown(
+      'Thanks @alice! See #42, other/repo#7, and https://github.com/acme/stroll/pull/99. Ignore `@bob` and `#123`.',
+      { repoContext: { owner: 'acme', repo: 'stroll' } },
+    )
+    expect(html).toContain('data-mention="alice"')
+    expect(html).not.toContain('data-mention="bob"')
+    expect(html).toContain('data-pr-ref="acme/stroll#42"')
+    expect(html).toContain('data-pr-ref="other/repo#7"')
+    expect(html).toContain('data-pr-ref="acme/stroll#99"')
+    expect(html).not.toContain('data-pr-ref="acme/stroll#123"')
   })
 
   it('renders GFM tables with column alignments', () => {

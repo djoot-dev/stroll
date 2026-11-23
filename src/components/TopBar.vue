@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   ArrowDownUp,
   ArrowLeft,
+  Check,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
@@ -11,6 +12,7 @@ import {
   GitPullRequestClosed,
   GitPullRequestDraft,
   KeyRound,
+  Link2,
   Maximize2,
   Moon,
   MoreHorizontal,
@@ -24,7 +26,7 @@ import {
   Sun,
 } from '@lucide/vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { openExternalUrl } from '@/services/native'
+import { copyToClipboard, openExternalUrl } from '@/services/native'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore } from '@/stores/settings'
@@ -108,6 +110,21 @@ function toggleDirection() {
   void review.setTourDirection(next)
 }
 
+const copiedPRLink = ref(false)
+let copyLinkTimer: ReturnType<typeof setTimeout> | null = null
+
+async function handleCopyPRLink() {
+  const url = review.pr?.url
+  if (!url || review.pr?.isMock) return
+  const ok = await copyToClipboard(url)
+  if (!ok) return
+  copiedPRLink.value = true
+  if (copyLinkTimer) clearTimeout(copyLinkTimer)
+  copyLinkTimer = setTimeout(() => {
+    copiedPRLink.value = false
+  }, 1500)
+}
+
 function handleOpenOnGitHub() {
   if (!review.pr?.url) return
   void openExternalUrl(review.pr.url)
@@ -174,6 +191,18 @@ function handleRefreshPR() {
               <AlertTriangle class="h-3 w-3" />
               <span class="hidden sm:inline">Conflicts</span>
             </span>
+            <button
+              v-if="!review.pr.isMock && review.pr.url"
+              type="button"
+              class="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-canvas px-1.5 py-0.5 text-[11px] text-ink-muted transition-colors hover:border-border-strong hover:text-ink"
+              :title="copiedPRLink ? 'Copied!' : 'Copy PR link'"
+              :aria-label="copiedPRLink ? 'Copied PR link' : 'Copy PR link'"
+              @click="handleCopyPRLink"
+            >
+              <Check v-if="copiedPRLink" class="h-3 w-3 text-pine-text" />
+              <Link2 v-else class="h-3 w-3" />
+              <span v-if="copiedPRLink" class="text-[10px] font-medium text-pine-text">Copied!</span>
+            </button>
           </div>
         </template>
       </div>
@@ -296,6 +325,20 @@ function handleRefreshPR() {
               >
                 <ExternalLink class="h-3.5 w-3.5 shrink-0 text-ink-muted" />
                 <span>Open PR on GitHub</span>
+              </button>
+
+              <button
+                v-if="review.pr && !review.pr.isMock && review.pr.url"
+                type="button"
+                role="menuitem"
+                class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated hover:text-ink"
+                @click="
+                  handleCopyPRLink();
+                  closeMenu()
+                "
+              >
+                <Link2 class="h-3.5 w-3.5 shrink-0 text-ink-muted" />
+                <span>Copy PR link</span>
               </button>
 
               <button

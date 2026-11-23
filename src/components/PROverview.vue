@@ -22,6 +22,7 @@ import {
   MessageSquare,
   Pencil,
   Plus,
+  Quote,
   RotateCcw,
   RotateCw,
   Send,
@@ -32,13 +33,17 @@ import {
   X,
   XCircle,
 } from '@lucide/vue'
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
+import { useCommentAutocomplete } from '@/composables/useCommentAutocomplete'
 import {
   parseChecklistProgress,
   renderSafeMarkdown,
   toggleChecklistItem,
 } from '@/services/markdown'
 import { openExternalUrl } from '@/services/native'
+import { mergeGate } from '@/services/mergeGate'
+import { appendQuoteToDraft, getCommentQuoteText } from '@/services/quoteReply'
+import { getReviewDecisionDisplay } from '@/services/reviewDecision'
 import { computeRemainingReviewEstimate } from '@/services/reviewEstimate'
 import type { CheckoutTarget } from '@/services/localCheckout'
 import { useAuthStore } from '@/stores/auth'
@@ -52,7 +57,9 @@ import type {
   ReviewComment,
   ReviewSubjectType,
 } from '@/types/pr'
+import CommentAutocompletePopover from './CommentAutocompletePopover.vue'
 import LocalCheckoutPanel from './LocalCheckoutPanel.vue'
+import LabelPicker from './LabelPicker.vue'
 import MarkdownContent from './MarkdownContent.vue'
 import ReactionBar from './ReactionBar.vue'
 import ReviewerPicker from './ReviewerPicker.vue'
@@ -75,7 +82,7 @@ const checkoutTarget = computed<CheckoutTarget | null>(() => {
   }
 })
 
-const commitsExpanded = ref(true)
+const commitsExpanded = ref(false)
 
 const historyNewestFirst = computed(() => settings.historyOrder === 'newest')
 const historyOrderLabel = computed(() =>
@@ -88,6 +95,35 @@ const orderedCommits = computed(() => {
   return historyNewestFirst.value ? [...commits].reverse() : commits
 })
 const commentDraft = ref('')
+const commentDraftRef = ref<HTMLTextAreaElement | null>(null)
+const commentAutocomplete = useCommentAutocomplete(
+  commentDraftRef,
+  () => commentDraft.value,
+  (next) => {
+    commentDraft.value = next
+  },
+)
+const conversationBodyRefs = new Map<string, HTMLElement>()
+function setConversationBodyRef(id: string, el: unknown) {
+  if (el instanceof HTMLElement) conversationBodyRefs.set(id, el)
+  else conversationBodyRefs.delete(id)
+}
+
+function handleQuoteConversationItem(item: ConversationItem) {
+  const quoteText = getCommentQuoteText(item.body, conversationBodyRefs.get(item.id))
+  if (item.kind === 'thread') {
+    threadReplyBody.value = appendQuoteToDraft(threadReplyBody.value, quoteText)
+    replyingThreadId.value = item.rawId
+    return
+  }
+  commentDraft.value = appendQuoteToDraft(commentDraft.value, quoteText)
+  void nextTick(() => {
+    const el = commentDraftRef.value
+    if (!el) return
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+  })
+}
 const isPostingComment = ref(false)
 const commentError = ref<string | null>(null)
 const editingCommentId = ref<string | null>(null)
@@ -95,13 +131,12 @@ const editCommentBody = ref('')
 const isSavingCommentEdit = ref(false)
 const deletingCommentId = ref<string | null>(null)
 const confirmDeleteCommentId = ref<string | null>(null)
-const confirmLifecycleAction = ref<'merge' | 'close' | null>(null)
+const confirmLifecycleAction = ref<'merge' | 'merge-bypass' | 'close' | null>(null)
 const mergeMenuOpen = ref(false)
 const mergeMethod = ref<PRMergeMethod>('SQUASH')
 const isUpdatingLifecycle = ref(false)
 const lifecycleError = ref<string | null>(null)
 const isAddingLabel = ref(false)
-const newLabelInput = ref('')
 const isAddingReviewer = ref(false)
 
 function formatRelativeTime(iso: string | null | undefined): string {
@@ -134,18 +169,47 @@ const stateBadge = computed(() => {
 })
 
 const reviewDecisionBadge = computed(() => {
-  const decision = pr.value?.reviewDecision
-  if (decision === 'APPROVED') {
-    return { label: 'Approved', class: 'border-pine-border bg-pine-soft text-pine-text', icon: ShieldCheck }
-  }
-  if (decision === 'CHANGES_REQUESTED') {
-    return { label: 'Changes requested', class: 'border-crimson-border bg-crimson-soft text-crimson-text', icon: ShieldAlert }
-  }
-  if (decision === 'REVIEW_REQUIRED') {
-    return { label: 'Review required', class: 'border-ochre-border bg-ochre-soft text-ochre-text', icon: Clock }
-  }
-  return null
+  const display = getReviewDecisionDisplay(
+    pr.value?.reviewDecision ?? null,
+    pr.value?.author.login,
+    auth.viewer?.login,
+  )
+  if (!display) return null
+  const icon =
+    display.kind === 'approved'
+      ? ShieldCheck
+      : display.kind === 'changes_requested'
+        ? ShieldAlert
+        : Clock
+  return { label: display.label, class: display.badgeClass, icon }
 })
+
+const mergeGateState = computed(() => (pr.value ? mergeGate(pr.value) : null))
+
+let unknownMergePollTimer: ReturnType<typeof setTimeout> | null = null
+let unknownMergePollCount = 0
+
+watch(
+  () => [pr.value?.id, mergeGateState.value?.pending] as const,
+  ([prId, isPending], prev) => {
+    if (unknownMergePollTimer) {
+      clearTimeout(unknownMergePollTimer)
+      unknownMergePollTimer = null
+    }
+    if (prId !== prev?.[0]) {
+      unknownMergePollCount = 0
+    }
+    if (isPending && pr.value && !pr.value.isMock && pr.value.state === 'OPEN' && unknownMergePollCount < 3) {
+      unknownMergePollTimer = setTimeout(() => {
+        unknownMergePollCount += 1
+        if (!review.isRefreshingPR) {
+          void review.refreshCurrentPR()
+        }
+      }, 2500)
+    }
+  },
+  { immediate: true },
+)
 
 const mergeableBadge = computed(() => {
   const state = pr.value?.mergeable
@@ -323,12 +387,17 @@ interface ConversationItem {
   threadSubjectType?: ReviewSubjectType
   isResolved?: boolean
   isOutdated?: boolean
+  threadDiffHunk?: string | null
+  threadOrphaned?: boolean
   openingCommentId?: string
   replies?: ReviewComment[]
 }
 
 const showUnresolvedOnly = ref(false)
 const togglingThreadId = ref<string | null>(null)
+const replyingThreadId = ref<string | null>(null)
+const threadReplyBody = ref('')
+const isReplyingThread = ref(false)
 
 const conversationItems = computed<ConversationItem[]>(() => {
   if (!pr.value) return []
@@ -361,6 +430,7 @@ const conversationItems = computed<ConversationItem[]>(() => {
     })
   }
 
+  const currentPaths = new Set(pr.value.files.map((f) => f.path))
   for (const t of pr.value.threads) {
     const first = t.comments[0]
     if (!first) continue
@@ -377,6 +447,8 @@ const conversationItems = computed<ConversationItem[]>(() => {
       threadSubjectType: t.subjectType,
       isResolved: t.isResolved,
       isOutdated: t.isOutdated,
+      threadDiffHunk: t.diffHunk ?? null,
+      threadOrphaned: !currentPaths.has(t.path),
       openingCommentId: first.id,
       replies: t.comments.slice(1),
     })
@@ -409,6 +481,21 @@ async function handleToggleThreadResolved(threadId: string) {
     commentError.value = err instanceof Error ? err.message : 'Failed to update thread state'
   } finally {
     togglingThreadId.value = null
+  }
+}
+
+async function handleReplyToThread(threadId: string) {
+  if (!threadReplyBody.value.trim() || isReplyingThread.value) return
+  isReplyingThread.value = true
+  commentError.value = null
+  try {
+    await review.replyToThread(threadId, threadReplyBody.value)
+    threadReplyBody.value = ''
+    replyingThreadId.value = null
+  } catch (err) {
+    commentError.value = err instanceof Error ? err.message : 'Failed to post reply'
+  } finally {
+    isReplyingThread.value = false
   }
 }
 
@@ -617,19 +704,13 @@ async function handleToggleDraft() {
   }
 }
 
-async function handleAddLabels() {
-  const names = newLabelInput.value
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-  if (names.length === 0) return
+async function handleAddSingleLabel(name: string) {
+  if (!name.trim()) return
   lifecycleError.value = null
   try {
-    await review.addLabels(names)
-    newLabelInput.value = ''
-    isAddingLabel.value = false
+    await review.addLabels([name.trim()])
   } catch (err) {
-    lifecycleError.value = err instanceof Error ? err.message : 'Failed to add labels'
+    lifecycleError.value = err instanceof Error ? err.message : 'Failed to add label'
   }
 }
 
@@ -792,25 +873,13 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
               </button>
             </span>
 
-            <form
+            <LabelPicker
               v-if="isAddingLabel"
-              class="inline-flex items-center gap-1"
-              @submit.prevent="handleAddLabels"
-            >
-              <input
-                v-model="newLabelInput"
-                type="text"
-                placeholder="label1, label2…"
-                class="w-32 rounded-full border border-terra-border bg-canvas-inset px-2.5 py-0.5 text-[11px] text-ink focus:outline-none"
-                @keydown.esc.prevent="isAddingLabel = false"
-              />
-              <button
-                type="submit"
-                class="rounded-full bg-terra px-2 py-0.5 text-[10.5px] font-semibold text-white hover:bg-terra-hover"
-              >
-                Add
-              </button>
-            </form>
+              :applied-labels="pr.labels"
+              :load-labels="review.loadRepoLabels"
+              @pick="handleAddSingleLabel"
+              @close="isAddingLabel = false"
+            />
             <button
               v-else
               type="button"
@@ -861,13 +930,21 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
                   {{
                     confirmLifecycleAction === 'close'
                       ? 'Close this PR?'
-                      : `Confirm ${mergeMethod.toLowerCase()} merge?`
+                      : confirmLifecycleAction === 'merge-bypass'
+                        ? `Bypass rules and ${mergeMethod.toLowerCase()} merge?`
+                        : `Confirm ${mergeMethod.toLowerCase()} merge?`
                   }}
                 </span>
                 <button
                   type="button"
                   class="rounded px-2 py-0.5 font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
-                  :class="confirmLifecycleAction === 'close' ? 'bg-crimson' : 'bg-pine'"
+                  :class="
+                    confirmLifecycleAction === 'close'
+                      ? 'bg-crimson'
+                      : confirmLifecycleAction === 'merge-bypass'
+                        ? 'bg-ochre-text'
+                        : 'bg-pine'
+                  "
                   :disabled="isUpdatingLifecycle"
                   @click="
                     const action = confirmLifecycleAction;
@@ -891,12 +968,12 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
                   <button
                     type="button"
                     class="inline-flex items-center gap-1.5 rounded-l-lg border border-pine-border bg-pine-soft px-2.5 py-1 text-[11px] font-semibold text-pine-text transition-colors hover:bg-pine/20 disabled:opacity-40"
-                    :disabled="isUpdatingLifecycle || pr.isDraft || pr.mergeable === 'CONFLICTING'"
+                    :disabled="isUpdatingLifecycle || !mergeGateState?.enabled"
                     :aria-busy="isUpdatingLifecycle"
-                    :title="pr.isDraft ? 'Mark ready for review before merging' : pr.mergeable === 'CONFLICTING' ? 'Resolve merge conflicts before merging' : `Merge using ${mergeMethod}`"
+                    :title="mergeGateState && !mergeGateState.enabled ? mergeGateState.tooltip : `Merge using ${mergeMethod}`"
                     @click="confirmLifecycleAction = 'merge'; mergeMenuOpen = false"
                   >
-                    <Loader2 v-if="isUpdatingLifecycle" class="h-3 w-3 animate-spin" />
+                    <Loader2 v-if="isUpdatingLifecycle || mergeGateState?.pending" class="h-3 w-3 animate-spin" />
                     <GitMerge v-else class="h-3 w-3" />
                     <span>{{ mergeMethod === 'SQUASH' ? 'Squash & merge' : mergeMethod === 'REBASE' ? 'Rebase & merge' : 'Merge PR' }}</span>
                   </button>
@@ -934,6 +1011,18 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
                       <span>{{ opt.label }}</span>
                       <CheckCircle2 v-if="mergeMethod === opt.value" class="h-3 w-3" />
                     </button>
+                    <template v-if="mergeGateState && !mergeGateState.enabled && mergeGateState.canBypassAsAdmin">
+                      <div class="my-1 border-t border-border-muted" />
+                      <button
+                        type="button"
+                        role="menuitem"
+                        class="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left text-[11px] font-medium text-ochre-text transition-colors hover:bg-ochre-soft"
+                        @click="confirmLifecycleAction = 'merge-bypass'; mergeMenuOpen = false"
+                      >
+                        <ShieldAlert class="h-3 w-3 shrink-0" />
+                        <span>Merge without waiting for requirements (bypass rules)</span>
+                      </button>
+                    </template>
                   </div>
                 </div>
 
@@ -975,6 +1064,71 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
             {{ lifecycleError }}
           </p>
         </div>
+      </div>
+    </section>
+
+    <!-- Inferred PR Stack Card -->
+    <section
+      v-if="review.prStack"
+      class="stroll-card overflow-hidden rounded-2xl border border-border bg-canvas-subtle px-5 py-3.5"
+    >
+      <div class="flex flex-wrap items-center justify-between gap-2 pb-2.5">
+        <div class="flex items-center gap-2">
+          <GitBranch class="h-4 w-4 text-terra" />
+          <h2 class="text-xs font-semibold uppercase tracking-wider text-ink-muted">
+            PR Stack
+          </h2>
+          <span class="rounded-full border border-border bg-canvas-elevated px-2 py-0.5 font-mono text-[10px] font-medium text-ink-secondary">
+            {{ review.prStack.currentPosition }} / {{ review.prStack.totalCount }}
+          </span>
+        </div>
+        <span
+          v-if="review.prStack.baseIsNotDefault"
+          class="text-[11px] text-ink-faint"
+        >
+          Diff targets <code class="font-mono text-ink-secondary">{{ pr.baseRefName }}</code>
+        </span>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-1.5 text-xs">
+        <span class="rounded-lg border border-border bg-canvas-inset px-2 py-1 font-mono text-[11px] text-ink-muted">
+          {{ review.prStack.rootBaseRef }}
+        </span>
+        <template v-for="node in review.prStack.flatChain" :key="node.number">
+          <ArrowRight class="h-3 w-3 shrink-0 rotate-180 text-ink-faint" />
+          <button
+            type="button"
+            :disabled="node.isCurrent"
+            :title="node.isCurrent ? 'Current PR' : `Open #${node.number}: ${node.title}`"
+            class="inline-flex max-w-64 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-left text-[11px] transition-colors"
+            :class="
+              node.isCurrent
+                ? 'border-terra-border bg-terra-soft font-semibold text-terra-text'
+                : 'border-border bg-canvas text-ink-secondary hover:border-terra-border hover:text-ink'
+            "
+            @click="
+              pr.isMock
+                ? openExternalUrl(node.url)
+                : review.loadPRByRepo(node.owner, node.repo, node.number)
+            "
+          >
+            <span
+              class="h-1.5 w-1.5 shrink-0 rounded-full"
+              :class="
+                node.ciState === 'SUCCESS'
+                  ? 'bg-pine'
+                  : node.ciState === 'FAILURE' || node.ciState === 'ERROR'
+                    ? 'bg-crimson'
+                    : node.ciState === 'PENDING'
+                      ? 'bg-ochre'
+                      : 'bg-ink-faint'
+              "
+            />
+            <span class="shrink-0 font-mono">#{{ node.number }}</span>
+            <span class="truncate">{{ node.title }}</span>
+            <span v-if="node.isCurrent" class="shrink-0 text-[9.5px] uppercase tracking-wide opacity-80">(this)</span>
+          </button>
+        </template>
       </div>
     </section>
 
@@ -1126,7 +1280,16 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
               />
 
               <div class="min-w-0">
-                <div class="truncate font-medium text-ink">{{ check.name }}</div>
+                <div class="flex items-center gap-1.5">
+                  <span class="truncate font-medium text-ink">{{ check.name }}</span>
+                  <span
+                    v-if="check.isRequired"
+                    class="shrink-0 rounded border border-ochre-border bg-ochre-soft px-1.5 py-0 text-[9.5px] font-semibold uppercase tracking-wide text-ochre-text"
+                    title="Required by branch protection"
+                  >
+                    Required
+                  </span>
+                </div>
                 <div class="truncate text-[11px] text-ink-faint">
                   {{ check.description || checkStatusLabel(check) }}
                 </div>
@@ -1410,7 +1573,19 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
                 {{ reviewStatusMeta(item.reviewState).label }}
               </span>
               <template v-if="item.kind === 'thread' && item.threadPath">
+                <span
+                  v-if="item.threadOrphaned"
+                  title="This file is no longer in the PR"
+                  class="inline-flex items-center gap-1 rounded-md border border-border bg-canvas-inset px-1.5 py-0.5 font-mono text-[10.5px] text-ink-muted"
+                >
+                  <FileCode class="h-3 w-3 text-ink-faint" />
+                  <span class="line-through opacity-80">
+                    {{ item.threadPath }}{{ item.threadSubjectType === 'FILE' ? ' · file' : `:${item.threadLine}` }}
+                  </span>
+                  <span class="font-sans text-[9.5px] text-ink-faint">(removed)</span>
+                </span>
                 <button
+                  v-else
                   type="button"
                   title="Jump to thread in tour"
                   class="inline-flex items-center gap-1 rounded-md border border-border bg-canvas px-1.5 py-0.5 font-mono text-[10.5px] text-ink-secondary transition-colors hover:border-terra-border hover:text-terra-text"
@@ -1447,6 +1622,15 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
               <span class="text-[11px] text-ink-faint">
                 {{ formatRelativeTime(item.createdAt) }}
               </span>
+              <button
+                type="button"
+                title="Quote reply"
+                aria-label="Quote reply"
+                class="rounded p-0.5 text-ink-faint transition-colors hover:bg-canvas-elevated hover:text-ink"
+                @click="handleQuoteConversationItem(item)"
+              >
+                <Quote class="h-3 w-3" />
+              </button>
               <button
                 v-if="item.kind === 'thread'"
                 type="button"
@@ -1513,8 +1697,8 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
           <div v-if="editingCommentId === item.rawId" class="space-y-2 pt-1">
             <textarea
               v-model="editCommentBody"
-              rows="3"
-              class="w-full resize-y rounded-xl border border-border bg-canvas-inset px-3 py-2 text-xs text-ink focus:border-terra-border focus:outline-none"
+              rows="5"
+              class="min-h-28 w-full resize-y rounded-xl border border-border bg-canvas-inset px-3 py-2 text-xs text-ink focus:border-terra-border focus:outline-none"
               @keydown.meta.enter.prevent="handleSaveIssueCommentEdit(item.rawId)"
               @keydown.ctrl.enter.prevent="handleSaveIssueCommentEdit(item.rawId)"
               @keydown.esc.prevent="editingCommentId = null"
@@ -1540,10 +1724,16 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
             </div>
           </div>
           <template v-else>
-            <MarkdownContent
-              :content="item.body"
-              class="text-xs leading-relaxed text-ink-secondary"
-            />
+            <pre
+              v-if="item.kind === 'thread' && item.isOutdated && item.threadDiffHunk"
+              class="max-h-28 overflow-x-auto rounded-lg border border-border-muted bg-canvas-inset px-2.5 py-1.5 font-mono text-[10.5px] leading-snug text-ink-muted"
+            >{{ item.threadDiffHunk }}</pre>
+            <div :ref="(el) => setConversationBodyRef(item.id, el)">
+              <MarkdownContent
+                :content="item.body"
+                class="text-xs leading-relaxed text-ink-secondary"
+              />
+            </div>
             <ReactionBar
               :subject-id="item.openingCommentId ?? item.rawId"
               :reactions="item.reactions"
@@ -1575,6 +1765,46 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
                 />
               </div>
             </div>
+            <div v-if="item.kind === 'thread'" class="pt-1">
+              <div v-if="replyingThreadId === item.rawId" class="space-y-2 pt-1">
+                <textarea
+                  v-model="threadReplyBody"
+                  rows="3"
+                  placeholder="Write a reply…"
+                  class="w-full resize-y rounded-xl border border-border bg-canvas-inset px-3 py-2 text-xs text-ink placeholder:text-ink-faint focus:border-terra-border focus:outline-none"
+                  @keydown.meta.enter.prevent="handleReplyToThread(item.rawId)"
+                  @keydown.ctrl.enter.prevent="handleReplyToThread(item.rawId)"
+                  @keydown.esc.prevent="replyingThreadId = null"
+                />
+                <div class="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-canvas-elevated"
+                    @click="replyingThreadId = null"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 rounded-lg bg-pine px-3 py-1 text-[11px] font-semibold text-white hover:bg-pine-hover disabled:opacity-40"
+                    :disabled="isReplyingThread || !threadReplyBody.trim()"
+                    :aria-busy="isReplyingThread"
+                    @click="handleReplyToThread(item.rawId)"
+                  >
+                    <Loader2 v-if="isReplyingThread" class="h-3 w-3 animate-spin" />
+                    <span>Reply</span>
+                  </button>
+                </div>
+              </div>
+              <button
+                v-else
+                type="button"
+                class="text-[11px] font-medium text-ink-muted transition-colors hover:text-terra-text"
+                @click="replyingThreadId = item.rawId; threadReplyBody = ''"
+              >
+                Reply
+              </button>
+            </div>
           </template>
         </article>
       </div>
@@ -1582,12 +1812,27 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
       <!-- Reply Composer -->
       <div class="border-t border-border-muted bg-canvas/50 p-4">
         <textarea
+          ref="commentDraftRef"
           v-model="commentDraft"
-          rows="3"
+          rows="6"
           placeholder="Leave a general comment on this pull request…"
-          class="w-full resize-y rounded-xl border border-border bg-canvas-subtle px-3 py-2 text-xs text-ink placeholder:text-ink-faint focus:border-terra-border focus:outline-none"
-          @keydown.meta.enter.prevent="handlePostComment"
-          @keydown.ctrl.enter.prevent="handlePostComment"
+          class="min-h-32 w-full resize-y rounded-xl border border-border bg-canvas-subtle px-3 py-2 text-xs text-ink placeholder:text-ink-faint focus:border-terra-border focus:outline-none"
+          @input="commentAutocomplete.onInputOrCursor()"
+          @click="commentAutocomplete.onInputOrCursor()"
+          @keydown="commentAutocomplete.handleKeydown($event) && $event.stopPropagation()"
+          @keydown.meta.enter.prevent="!commentAutocomplete.isOpen.value && handlePostComment()"
+          @keydown.ctrl.enter.prevent="!commentAutocomplete.isOpen.value && handlePostComment()"
+          @blur="commentAutocomplete.close()"
+        />
+        <CommentAutocompletePopover
+          :open="commentAutocomplete.isOpen.value"
+          :trigger="commentAutocomplete.trigger.value"
+          :options="commentAutocomplete.options.value"
+          :active-index="commentAutocomplete.activeIndex.value"
+          :is-loading="commentAutocomplete.isLoading.value"
+          :coords="commentAutocomplete.coords.value"
+          @select="commentAutocomplete.selectOption"
+          @hover="commentAutocomplete.activeIndex.value = $event"
         />
 
         <div class="mt-2.5 flex items-center justify-between gap-3">

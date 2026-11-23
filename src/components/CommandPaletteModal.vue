@@ -253,12 +253,17 @@ const items = computed<PaletteItem[]>(() => {
       for (const thread of review.pr.threads) {
         const body = thread.comments[0]?.body ?? ''
         if (thread.path.toLowerCase().includes(q) || body.toLowerCase().includes(q)) {
-          const statusPrefix = thread.isResolved ? '[Resolved] ' : ''
+          const statusPrefix = [
+            thread.isResolved ? '[Resolved]' : '',
+            thread.isOutdated ? '[Outdated]' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')
           results.push({
             id: `thread:${thread.id}`,
             kind: 'thread',
             title: thread.subjectType === 'FILE' ? `${thread.path} (file)` : `${thread.path}:${thread.line}`,
-            subtitle: `${statusPrefix}${body.slice(0, 90)}`,
+            subtitle: `${statusPrefix ? `${statusPrefix} ` : ''}${body.slice(0, 90)}`,
             path: thread.path,
             line: thread.subjectType === 'FILE' ? undefined : thread.line,
           })

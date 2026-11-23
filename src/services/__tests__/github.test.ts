@@ -8,6 +8,7 @@ import {
   getGitHubEndpoints,
   isBinaryFilePath,
   isImageFilePath,
+  mapReviewThreads,
   normalizeGitHubHost,
   parsePRUrl,
   setFileViewedState,
@@ -388,5 +389,45 @@ describe('fetchFileCommitHistory', () => {
       authorName: 'Ada',
     })
     expect(result.get('src/new.ts')?.map((c) => c.oid)).toEqual(['bbb2222', 'aaa1111'])
+  })
+
+  it('preserves outdated review threads with line: null using originalLine and diffHunk', () => {
+    const mapped = mapReviewThreads([
+      {
+        id: 't-outdated',
+        path: 'src/removed.ts',
+        subjectType: 'LINE',
+        line: null,
+        originalLine: 42,
+        diffSide: 'RIGHT',
+        startLine: null,
+        originalStartLine: 40,
+        startDiffSide: null,
+        isResolved: false,
+        isOutdated: true,
+        comments: {
+          nodes: [
+            {
+              id: 'c-1',
+              body: 'Outdated comment on removed file',
+              createdAt: '2026-11-18T10:00:00Z',
+              state: 'SUBMITTED',
+              diffHunk: '@@ -40,3 +40,3 @@\n-old\n+new',
+              author: { login: 'alice', avatarUrl: '' },
+            },
+          ],
+        },
+      },
+    ])
+
+    expect(mapped).toHaveLength(1)
+    expect(mapped[0]).toMatchObject({
+      id: 't-outdated',
+      path: 'src/removed.ts',
+      line: 42,
+      startLine: 40,
+      isOutdated: true,
+      diffHunk: '@@ -40,3 +40,3 @@\n-old\n+new',
+    })
   })
 })

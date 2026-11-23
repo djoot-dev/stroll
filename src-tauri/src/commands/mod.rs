@@ -44,6 +44,53 @@ pub fn get_runtime_info() -> RuntimeInfo {
     }
 }
 
+fn percent_encode_segment(segment: &str) -> String {
+    let mut out = String::with_capacity(segment.len());
+    for byte in segment.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+fn is_windows_drive(segment: &str) -> bool {
+    let bytes = segment.as_bytes();
+    bytes.len() == 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+}
+
+pub fn build_editor_url(scheme: &str, raw_path: &str, line: u32) -> String {
+    let stripped = if let Some(rest) = raw_path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = raw_path.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        raw_path.to_string()
+    };
+
+    let normalized = stripped.replace('\\', "/");
+    let encoded_segments: Vec<String> = normalized
+        .split('/')
+        .enumerate()
+        .map(|(idx, seg)| {
+            if seg.is_empty() || (idx == 0 && is_windows_drive(seg)) {
+                seg.to_string()
+            } else {
+                percent_encode_segment(seg)
+            }
+        })
+        .collect();
+    let encoded_path = encoded_segments.join("/");
+    let line_num = line.max(1);
+    if encoded_path.starts_with('/') {
+        format!("{scheme}://file{encoded_path}:{line_num}:1")
+    } else {
+        format!("{scheme}://file/{encoded_path}:{line_num}:1")
+    }
+}
+
 /// Opens a file at a 1-based line number in the user's configured local editor.
 #[tauri::command]
 pub fn open_in_local_editor(
@@ -88,13 +135,7 @@ pub fn open_in_local_editor(
         _ => "vscode",
     };
 
-    let line_num = line.max(1);
-    let normalized_path = target.to_string_lossy().replace('\\', "/");
-    let url = if normalized_path.starts_with('/') {
-        format!("{scheme}://file{normalized_path}:{line_num}:1")
-    } else {
-        format!("{scheme}://file/{normalized_path}:{line_num}:1")
-    };
+    let url = build_editor_url(scheme, &target.to_string_lossy(), line);
 
     #[cfg(target_os = "macos")]
     let mut cmd = std::process::Command::new("open");
@@ -112,4 +153,33 @@ pub fn open_in_local_editor(
         .map_err(|e| format!("Failed to launch editor ({scheme}): {e}"))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_editor_url;
+
+    #[test]
+    fn builds_unix_editor_url_and_encodes_spaces() {
+        assert_eq!(
+            build_editor_url("vscode", "/Users/dev/my repo/src/file #1.ts", 42),
+            "vscode://file/Users/dev/my%20repo/src/file%20%231.ts:42:1"
+        );
+    }
+
+    #[test]
+    fn strips_windows_verbatim_prefix_and_preserves_drive_letter() {
+        assert_eq!(
+            build_editor_url("vscode", r"\\?\C:\Users\dev\my repo\src\app.ts", 12),
+            "vscode://file/C:/Users/dev/my%20repo/src/app.ts:12:1"
+        );
+    }
+
+    #[test]
+    fn clamps_zero_line_to_one() {
+        assert_eq!(
+            build_editor_url("cursor", "/repo/main.rs", 0),
+            "cursor://file/repo/main.rs:1:1"
+        );
+    }
 }

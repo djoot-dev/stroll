@@ -23,6 +23,8 @@ import {
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore } from '@/stores/settings'
 import type { ReviewEvent } from '@/types/pr'
+import { useCommentAutocomplete } from '@/composables/useCommentAutocomplete'
+import CommentAutocompletePopover from './CommentAutocompletePopover.vue'
 import MarkdownContent from './MarkdownContent.vue'
 
 const DEFAULT_TEMPLATES: ReviewTemplate[] = [
@@ -52,6 +54,14 @@ const review = useReviewStore()
 const settings = useSettingsStore()
 
 const summary = ref('')
+const summaryTextareaRef = ref<HTMLTextAreaElement | null>(null)
+const summaryAutocomplete = useCommentAutocomplete(
+  summaryTextareaRef,
+  () => summary.value,
+  (next) => {
+    summary.value = next
+  },
+)
 const selectedEvent = ref<ReviewEvent>('COMMENT')
 const summaryPreviewMode = ref(false)
 const customTemplates = ref<ReviewTemplate[]>([])
@@ -477,10 +487,25 @@ onBeforeUnmount(() => {
             </div>
             <textarea
               v-else
+              ref="summaryTextareaRef"
               v-model="summary"
               rows="4"
               placeholder="Leave an overall summary of your review..."
               class="w-full rounded-xl border border-border bg-canvas-inset px-3 py-2 text-xs text-ink placeholder-ink-faint focus:border-terra focus:outline-none"
+              @input="summaryAutocomplete.onInputOrCursor()"
+              @click="summaryAutocomplete.onInputOrCursor()"
+              @keydown="summaryAutocomplete.handleKeydown($event) && $event.stopPropagation()"
+              @blur="summaryAutocomplete.close()"
+            />
+            <CommentAutocompletePopover
+              :open="summaryAutocomplete.isOpen.value"
+              :trigger="summaryAutocomplete.trigger.value"
+              :options="summaryAutocomplete.options.value"
+              :active-index="summaryAutocomplete.activeIndex.value"
+              :is-loading="summaryAutocomplete.isLoading.value"
+              :coords="summaryAutocomplete.coords.value"
+              @select="summaryAutocomplete.selectOption"
+              @hover="summaryAutocomplete.activeIndex.value = $event"
             />
           </div>
 
