@@ -12,6 +12,16 @@ Dependency-ordered tour sidebar (`CONFIG` → `TYPES` → `CORE` → `TEST` → 
 
 ![Guided Diff Tour in Paper Light theme](docs/screenshots/guided-diff-tour.png)
 
+### Contextual Hover Popovers
+Hover any symbol to inspect its definition, docstrings, PR-modified status, and cross-file references in the current PR without leaving the diff.
+
+![Contextual Hover Popover](docs/screenshots/contextual-hover-popover.png)
+
+### Moved Code Detection
+Automatically detects relocated code blocks within and across files, distinguishing moved lines from pure deletions/additions with one-click jump badges.
+
+![Moved Code Detection](docs/screenshots/moved-code-detection.png)
+
 ### PR Overview
 PR summary, stack chain, description, checks, commits, and review progress at a glance.
 
