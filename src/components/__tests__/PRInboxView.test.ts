@@ -10,14 +10,21 @@ import { useReviewStore } from '@/stores/review'
 import type { PRSummary } from '@/types/pr'
 import PRInboxView from '../PRInboxView.vue'
 import prInboxSource from '../PRInboxView.vue?raw'
+import SelectDropdown from '../SelectDropdown.vue'
+import selectDropdownSource from '../SelectDropdown.vue?raw'
 
-function buildClientPRInboxView() {
-  const { descriptor } = parse(prInboxSource, { filename: 'PRInboxView.vue' })
-  const script = compileScript(descriptor, { id: 'PRInboxView.vue' })
+function compileClientSFC(
+  sfc: Vue.ComponentOptions,
+  source: string,
+  filename: string,
+  extraBindings: Record<string, unknown> = {},
+) {
+  const { descriptor } = parse(source, { filename })
+  const script = compileScript(descriptor, { id: filename })
   const tpl = compileTemplate({
     source: descriptor.template!.content,
-    filename: 'PRInboxView.vue',
-    id: 'PRInboxView.vue',
+    filename,
+    id: filename,
     compilerOptions: {
       mode: 'function',
       hoistStatic: false,
@@ -29,18 +36,36 @@ function buildClientPRInboxView() {
     compilerOptions: { target: ts.ScriptTarget.ES2022 },
   }).outputText
   const renderFn = new Function('Vue', jsCode)(Vue) as Vue.RenderFunction
-  const ssrSetup = (PRInboxView as { setup?: (...args: unknown[]) => unknown }).setup!
+  const ssrSetup = sfc.setup!
   return defineComponent({
-    name: 'PRInboxView',
-    setup(props, ctx) {
+    name: filename.replace('.vue', ''),
+    props: sfc.props,
+    emits: sfc.emits,
+    setup(props: Record<string, unknown>, ctx: Vue.SetupContext) {
       const bindings = ssrSetup(props, ctx) as Record<string, unknown>
       return {
         ...LucideIcons,
         ...bindings,
+        ...extraBindings,
       }
     },
     render: renderFn,
   })
+}
+
+const ClientSelectDropdown = compileClientSFC(
+  SelectDropdown as Vue.ComponentOptions,
+  selectDropdownSource,
+  'SelectDropdown.vue',
+)
+
+function buildClientPRInboxView() {
+  return compileClientSFC(
+    PRInboxView as Vue.ComponentOptions,
+    prInboxSource,
+    'PRInboxView.vue',
+    { SelectDropdown: ClientSelectDropdown },
+  )
 }
 
 interface MockNode {
@@ -178,7 +203,7 @@ function makeSummary(overrides: Partial<PRSummary> = {}): PRSummary {
 const ClientPRInboxView = buildClientPRInboxView()
 
 describe('PRInboxView toolbar filter and sort dropdowns', () => {
-  const listeners = new Map<string, Set<(e: unknown) => void>>()
+  const listeners = new Map<string, Set<{ fn: (e: unknown) => void; capture: boolean }>>()
   let unmountApp: (() => void) | null = null
 
   beforeEach(() => {
@@ -186,12 +211,18 @@ describe('PRInboxView toolbar filter and sort dropdowns', () => {
     vi.stubGlobal('HTMLElement', class MockHTMLElement {})
     vi.stubGlobal('localStorage', createMemoryStorage())
     vi.stubGlobal('window', {
-      addEventListener: (event: string, fn: (e: unknown) => void) => {
+      addEventListener: (event: string, fn: (e: unknown) => void, capture = false) => {
         if (!listeners.has(event)) listeners.set(event, new Set())
-        listeners.get(event)!.add(fn)
+        listeners.get(event)!.add({ fn, capture: Boolean(capture) })
       },
-      removeEventListener: (event: string, fn: (e: unknown) => void) => {
-        listeners.get(event)?.delete(fn)
+      removeEventListener: (event: string, fn: (e: unknown) => void, capture = false) => {
+        const set = listeners.get(event)
+        if (!set) return
+        for (const entry of set) {
+          if (entry.fn === fn && entry.capture === Boolean(capture)) {
+            set.delete(entry)
+          }
+        }
       },
       setInterval: () => 1,
       clearInterval: () => {},
@@ -289,13 +320,25 @@ describe('PRInboxView toolbar filter and sort dropdowns', () => {
 
     expect(repoBtn.props['aria-expanded']).toBe(true)
 
+    let stopped = false
     const preventDefault = vi.fn()
-    for (const fn of listeners.get('keydown') ?? []) {
-      fn({ key: 'Escape', preventDefault })
+    const stopPropagation = vi.fn(() => {
+      stopped = true
+    })
+    // Dispatch capture-phase listeners before bubble-phase listeners, matching DOM propagation.
+    const entries = [...(listeners.get('keydown') ?? [])]
+    const ordered = [
+      ...entries.filter((e) => e.capture),
+      ...entries.filter((e) => !e.capture),
+    ]
+    for (const entry of ordered) {
+      if (stopped) break
+      entry.fn({ key: 'Escape', preventDefault, stopPropagation })
     }
     await nextTick()
 
     expect(preventDefault).toHaveBeenCalled()
+    expect(stopPropagation).toHaveBeenCalled()
     expect(repoBtn.props['aria-expanded']).toBe(false)
   })
 })
