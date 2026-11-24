@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Stroll — Guided Code Review</title>
+    <meta
+      name="description"
+      content="Review GitHub Pull Requests as a guided, dependency-aware tour instead of a flat alphabetical file list. Built for macOS, Windows, and Linux."
+    />
+    <meta property="og:title" content="Stroll — Guided Code Review" />
+    <meta
+      property="og:description"
+      content="Review GitHub Pull Requests as a guided, dependency-aware tour instead of a flat alphabetical file list."
+    />
+    <meta property="og:type" content="website" />
+    <link rel="icon" type="image/svg+xml" href="./logo.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      ;(function () {
+        try {
+          var saved = localStorage.getItem('stroll-site-theme')
+          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+          if (saved === 'dark' || (!saved && prefersDark)) {
+            document.documentElement.classList.add('dark')
+          }
+        } catch (e) {}
+      })()
+    </script>
+  </head>
+  <body class="bg-canvas text-ink antialiased selection:bg-terra-soft selection:text-ink">
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
