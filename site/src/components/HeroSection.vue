@@ -113,8 +113,10 @@ const base = import.meta.env.BASE_URL
           </div>
           <img
             :src="isDark ? `${base}screenshots/hero-dark.png` : `${base}screenshots/hero-light.png`"
+            :width="1024"
+            :height="isDark ? 633 : 934"
             alt="Stroll desktop application showing the guided tour sidebar on the left and a syntax-highlighted diff with Referenced PR Context and inline comments on the right"
-            class="block w-full object-cover"
+            class="block h-auto w-full object-cover"
             loading="eager"
           />
         </div>

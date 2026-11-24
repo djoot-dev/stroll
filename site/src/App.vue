@@ -27,7 +27,7 @@ onMounted(() => {
         }
       }
     },
-    { threshold: 0.08 },
+    { threshold: 0.02 },
   )
 
   sections.forEach((el) => observer.observe(el))
