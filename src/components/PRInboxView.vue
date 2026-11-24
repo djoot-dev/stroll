@@ -37,6 +37,7 @@ import { checkoutKey, localBranchForPR, type CheckoutTarget } from '@/services/l
 import { copyToClipboard } from '@/services/native'
 import { annotateInboxStacks } from '@/services/prStack'
 import { getReviewDecisionDisplay } from '@/services/reviewDecision'
+import { formatShortcut, isModKey } from '@/services/shortcuts'
 import { loadAllPRProgress } from '@/services/storage'
 import { PR_FILTER_OPTIONS, useAuthStore } from '@/stores/auth'
 import { useCheckoutStore } from '@/stores/checkout'
@@ -53,6 +54,8 @@ import type {
 const auth = useAuthStore()
 const review = useReviewStore()
 const settings = useSettingsStore()
+const modK = formatShortcut('Mod+K')
+const modComma = formatShortcut('Mod+,')
 const checkout = useCheckoutStore()
 
 const activeFilterOption = computed(
@@ -166,7 +169,7 @@ function handleInboxKeydown(e: KeyboardEvent) {
     return
   }
 
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+  if (isModKey(e) && !e.altKey && e.key.toLowerCase() === 'k') {
     e.preventDefault()
     focusSearchBar()
     return
@@ -468,7 +471,7 @@ onBeforeUnmount(() => {
 
           <button
             class="rounded-lg border border-border bg-canvas p-1.5 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
-            title="Settings (⌘,)"
+            :title="`Settings (${modComma})`"
             @click="settings.openSettings('general')"
           >
             <Settings class="h-4 w-4" />
@@ -772,7 +775,7 @@ onBeforeUnmount(() => {
                   class="pointer-events-none absolute top-1/2 right-2.5 flex -translate-y-1/2 items-center gap-1 text-[10px] text-ink-faint"
                 >
                   <kbd class="rounded border border-border bg-canvas-inset px-1 font-mono">/</kbd>
-                  <kbd class="rounded border border-border bg-canvas-inset px-1 font-mono">⌘K</kbd>
+                  <kbd class="rounded border border-border bg-canvas-inset px-1 font-mono">{{ modK }}</kbd>
                 </div>
                 <button
                   v-if="searchQuery"
@@ -1099,7 +1102,7 @@ onBeforeUnmount(() => {
                   <span>·</span>
                   <span><kbd class="rounded border border-border bg-canvas-subtle px-1 font-mono text-ink-secondary">Enter</kbd> Open</span>
                   <span>·</span>
-                  <span><kbd class="rounded border border-border bg-canvas-subtle px-1 font-mono text-ink-secondary">/</kbd> or <kbd class="rounded border border-border bg-canvas-subtle px-1 font-mono text-ink-secondary">⌘K</kbd> Search</span>
+                  <span><kbd class="rounded border border-border bg-canvas-subtle px-1 font-mono text-ink-secondary">/</kbd> or <kbd class="rounded border border-border bg-canvas-subtle px-1 font-mono text-ink-secondary">{{ modK }}</kbd> Search</span>
                 </span>
                 <button
                   class="inline-flex items-center gap-1.5 text-xs text-ink-muted transition-colors hover:text-terra-text"

@@ -74,6 +74,7 @@ import {
   type GitBlameInfo,
 } from '@/services/native'
 import { isLockfile, LAYER_META } from '@/services/readingOrder'
+import { altKeyLabel, altKeyName, formatShortcut, isModKey } from '@/services/shortcuts'
 import { buildSplitDiffRows, type SplitDiffRow } from '@/services/splitDiff'
 import { buildGitHubPermalink } from '@/services/suggestions'
 import { useAuthStore } from '@/stores/auth'
@@ -97,7 +98,9 @@ const props = defineProps<{
 const auth = useAuthStore()
 const review = useReviewStore()
 const settings = useSettingsStore()
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
+const modF = formatShortcut('Mod+F')
+const altLabel = altKeyLabel()
+const altName = altKeyName()
 
 const expandedGaps = ref<Set<string>>(new Set())
 const isGeneratedExpanded = ref(false)
@@ -775,7 +778,7 @@ async function closeDiffSearch(mode: 'confirm' | 'dismiss' | 'cancel') {
 }
 
 function handleDiffKeydown(e: KeyboardEvent) {
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+  if (isModKey(e) && !e.altKey && e.key.toLowerCase() === 'f') {
     e.preventDefault()
     openDiffSearch()
   }
@@ -1837,7 +1840,7 @@ function statusBadgeClass(status: string): string {
 
           <button
             type="button"
-            :title="isMac ? 'Find in file (⌘F)' : 'Find in file (Ctrl+F)'"
+            :title="`Find in file (${modF})`"
             data-diff-search-toggle
             class="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors"
             :class="
@@ -2356,11 +2359,11 @@ function statusBadgeClass(status: string): string {
                   : 'border-border bg-canvas text-ink-secondary hover:bg-canvas-elevated'
               "
               :aria-pressed="!settings.requireAltForHover"
-              title="Toggle whether symbol hover popovers open automatically (250ms delay) or only when holding Option/Alt"
+              :title="`Toggle whether symbol hover popovers open automatically (250ms delay) or only when holding ${altName}`"
               @click="settings.setRequireAltForHover(!settings.requireAltForHover)"
             >
               <Sparkles class="h-3 w-3" />
-              <span>{{ settings.requireAltForHover ? 'Hover: ⌥ + Hover' : 'Hover: Auto' }}</span>
+              <span>{{ settings.requireAltForHover ? `Hover: ${altLabel} + Hover` : 'Hover: Auto' }}</span>
             </button>
 
             <button

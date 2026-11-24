@@ -45,6 +45,7 @@ import type { PRStackCandidate } from '@/services/prStack'
 import { appendQuoteToDraft, getCommentQuoteText } from '@/services/quoteReply'
 import { getReviewDecisionDisplay } from '@/services/reviewDecision'
 import { computeRemainingReviewEstimate } from '@/services/reviewEstimate'
+import { formatShortcut } from '@/services/shortcuts'
 import type { CheckoutTarget } from '@/services/localCheckout'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
@@ -70,6 +71,8 @@ function isOpeningStackNode(node: PRStackCandidate): boolean {
   )
 }
 import ReviewerPicker from './ReviewerPicker.vue'
+
+const modEnter = formatShortcut('Mod+Enter')
 
 const auth = useAuthStore()
 const review = useReviewStore()
@@ -1200,7 +1203,7 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
           <template #footer>
             <div class="flex items-center justify-between gap-2">
               <span class="text-[11px] text-ink-faint">
-                {{ pr?.isMock ? 'Demo mode: description will be updated locally.' : 'Markdown supported · ⌘↵ to save · Esc to cancel' }}
+                {{ pr?.isMock ? 'Demo mode: description will be updated locally.' : `Markdown supported · ${modEnter} to save · Esc to cancel` }}
               </span>
               <div class="flex items-center gap-2">
                 <button
@@ -1863,7 +1866,7 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
                 {{ commentError }}
               </p>
               <span v-else class="text-[11px] text-ink-faint">
-                {{ pr.isMock ? 'Demo mode: comment will be added locally.' : 'Markdown supported · ⌘↵ to post' }}
+                {{ pr.isMock ? 'Demo mode: comment will be added locally.' : `Markdown supported · ${modEnter} to post` }}
               </span>
 
               <button

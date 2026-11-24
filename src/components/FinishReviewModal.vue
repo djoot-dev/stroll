@@ -13,6 +13,7 @@ import {
   X,
 } from '@lucide/vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { formatShortcut, isModKey } from '@/services/shortcuts'
 import {
   loadReviewSummaryDraft,
   loadReviewTemplates,
@@ -233,11 +234,13 @@ async function handleSubmit() {
   }
 }
 
+const modEnter = formatShortcut('Mod+Enter')
+
 function handleKeydown(e: KeyboardEvent) {
   if (!review.showFinishModal || !review.pr || settings.isOpen) return
   if (editingDraftId.value) return
   if (approveCompletenessWarning.value) return
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !e.altKey) {
+  if (isModKey(e) && e.key === 'Enter' && !e.altKey) {
     e.preventDefault()
     void handleSubmit()
   }
@@ -531,7 +534,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="flex shrink-0 items-center justify-between gap-2 border-t border-border px-5 py-3">
-          <span class="text-[11px] text-ink-faint">Ctrl+↵ / ⌘↵ to submit</span>
+          <span class="text-[11px] text-ink-faint">{{ modEnter }} to submit</span>
           <div class="flex items-center gap-2">
             <button
               v-if="summary.trim() || selectedEvent !== 'COMMENT'"

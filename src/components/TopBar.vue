@@ -27,11 +27,13 @@ import {
 } from '@lucide/vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { copyToClipboard, openExternalUrl } from '@/services/native'
+import { formatShortcut } from '@/services/shortcuts'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 import { useSettingsStore } from '@/stores/settings'
 
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
+const modK = formatShortcut('Mod+K')
+const modComma = formatShortcut('Mod+,')
 
 const emit = defineEmits<{
   (e: 'openCommandPalette'): void
@@ -259,13 +261,13 @@ function handleRefreshPR() {
           v-if="review.pr"
           type="button"
           class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border bg-canvas px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-terra-border hover:bg-canvas-elevated hover:text-ink"
-          :title="isMac ? 'Jump to file, symbol, or thread (⌘K)' : 'Jump to file, symbol, or thread (Ctrl+K)'"
+          :title="`Jump to file, symbol, or thread (${modK})`"
           @click="emit('openCommandPalette')"
         >
           <Search class="h-3 w-3 shrink-0" />
           <span class="hidden md:inline text-[11px]">Jump…</span>
           <kbd class="rounded border border-border-muted bg-canvas-subtle px-1 font-mono text-[10px] text-ink-faint">
-            {{ isMac ? '⌘K' : 'Ctrl+K' }}
+            {{ modK }}
           </kbd>
         </button>
 
@@ -418,7 +420,7 @@ function handleRefreshPR() {
                 <span>Settings…</span>
               </span>
               <kbd class="rounded border border-border-muted bg-canvas px-1 font-mono text-[10px] text-ink-faint">
-                {{ isMac ? '⌘,' : 'Ctrl+,' }}
+                {{ modComma }}
               </kbd>
             </button>
           </div>

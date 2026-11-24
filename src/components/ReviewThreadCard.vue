@@ -13,6 +13,7 @@ import {
 } from '@lucide/vue'
 import { computed, nextTick, ref } from 'vue'
 import { appendQuoteToDraft, getCommentQuoteText } from '@/services/quoteReply'
+import { formatShortcut } from '@/services/shortcuts'
 import { extractSuggestionBlocks } from '@/services/suggestions'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
@@ -70,7 +71,7 @@ const error = ref<string | null>(null)
 const collapsed = ref(props.thread.isResolved || props.thread.isOutdated)
 const applyingSuggestionKey = ref<string | null>(null)
 const appliedSuggestionKeys = ref<Set<string>>(new Set())
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
+const modEnter = formatShortcut('Mod+Enter')
 
 const canApplyThreadSuggestions = computed(
   () =>
@@ -330,7 +331,7 @@ async function handleToggleResolve() {
           >
             <template #footer>
               <div class="flex items-center justify-between gap-2">
-                <span class="text-[10.5px] text-ink-faint">{{ isMac ? '⌘↵' : 'Ctrl+↵' }} to save · Esc to cancel</span>
+                <span class="text-[10.5px] text-ink-faint">{{ modEnter }} to save · Esc to cancel</span>
                 <div class="flex items-center gap-2">
                   <button
                     type="button"
@@ -426,7 +427,7 @@ async function handleToggleResolve() {
           >
             <template #footer>
               <div class="flex items-center justify-between gap-2">
-                <span class="text-[10.5px] text-ink-faint">{{ isMac ? '⌘↵' : 'Ctrl+↵' }} to reply · Esc to cancel</span>
+                <span class="text-[10.5px] text-ink-faint">{{ modEnter }} to reply · Esc to cancel</span>
                 <div class="flex items-center gap-2">
                   <button
                     class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-canvas-elevated"

@@ -16,6 +16,7 @@ import SplashScreen from '@/components/SplashScreen.vue'
 import TopBar from '@/components/TopBar.vue'
 import TourSidebar from '@/components/TourSidebar.vue'
 import UpdateIndicator from '@/components/UpdateIndicator.vue'
+import { isModKey } from '@/services/shortcuts'
 import { runAppStartup } from '@/services/startup'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
@@ -139,7 +140,7 @@ function isEditableElement(target: EventTarget | null): boolean {
 }
 
 function handleKeydown(e: KeyboardEvent) {
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+  if (isModKey(e) && !e.altKey && e.key.toLowerCase() === 'k') {
     if (review.screen === 'review' && review.pr) {
       e.preventDefault()
       showCommandPalette.value = !showCommandPalette.value
@@ -147,7 +148,7 @@ function handleKeydown(e: KeyboardEvent) {
     return
   }
 
-  if ((e.metaKey || e.ctrlKey) && e.key === ',') {
+  if (isModKey(e) && !e.altKey && e.key === ',') {
     e.preventDefault()
     if (settings.isOpen) {
       settings.closeSettings()

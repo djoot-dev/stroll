@@ -25,12 +25,12 @@ describe('getContextualShortcutHints', () => {
     expect(hints.get('next-unreviewed')?.enabled).toBe(true)
     expect(hints.get('finish-review')?.enabled).toBe(true)
     expect(hints.get('jump')?.enabled).toBe(true)
-    expect(hints.get('jump')?.keys).toEqual(['⌘K'])
+    expect(hints.get('jump')?.keys).toEqual(['⌘+K'])
 
     expect(hints.get('prev')?.enabled).toBe(false)
     expect(hints.get('mark-reviewed')?.enabled).toBe(false)
     expect(hints.get('find')?.enabled).toBe(false)
-    expect(hints.get('find')?.keys).toEqual(['⌘F'])
+    expect(hints.get('find')?.keys).toEqual(['⌘+F'])
   })
 
   it('enables diff shortcuts on a middle step and reflects reviewed state', () => {
