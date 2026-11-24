@@ -1,3 +1,4 @@
+import { formatShortcut, isMacPlatform } from '@/services/shortcuts'
 import type { ReviewViewMode } from '@/stores/review'
 
 export interface ShortcutBarContext {
@@ -7,7 +8,7 @@ export interface ShortcutBarContext {
   currentStepIndex: number
   hasUnreviewedSteps: boolean
   currentStepReviewed: boolean
-  isMac: boolean
+  isMac?: boolean
 }
 
 export interface ShortcutBarHint {
@@ -31,7 +32,7 @@ export function getContextualShortcutHints(ctx: ShortcutBarContext): ShortcutBar
     currentStepIndex,
     hasUnreviewedSteps,
     currentStepReviewed,
-    isMac,
+    isMac = isMacPlatform(),
   } = ctx
 
   const hasSteps = hasPR && stepCount > 0
@@ -114,14 +115,14 @@ export function getContextualShortcutHints(ctx: ShortcutBarContext): ShortcutBar
     },
     {
       id: 'jump',
-      keys: [isMac ? '⌘K' : 'Ctrl+K'],
+      keys: [formatShortcut('Mod+K', isMac)],
       label: 'Jump',
       enabled: hasPR,
       disabledReason: hasPR ? undefined : 'Load a Pull Request first',
     },
     {
       id: 'find',
-      keys: [isMac ? '⌘F' : 'Ctrl+F'],
+      keys: [formatShortcut('Mod+F', isMac)],
       label: 'Find',
       enabled: findEnabled,
       disabledReason: findEnabled ? undefined : diffOnlyReason,

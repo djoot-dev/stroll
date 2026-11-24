@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Keyboard, X } from '@lucide/vue'
+import { getShortcutGroups } from '@/services/shortcuts'
 
 defineProps<{
   open: boolean
@@ -9,58 +10,7 @@ const emit = defineEmits<{
   (e: 'close'): void
 }>()
 
-interface ShortcutEntry {
-  keys: string[]
-  description: string
-}
-
-interface ShortcutGroup {
-  title: string
-  items: ShortcutEntry[]
-}
-
-const groups: ShortcutGroup[] = [
-  {
-    title: 'Tour Navigation',
-    items: [
-      { keys: ['O', '0'], description: 'Open or toggle PR Overview' },
-      { keys: ['L', '→'], description: 'Next tour step' },
-      { keys: ['H', '←'], description: 'Previous tour step' },
-      { keys: ['N'], description: 'Jump to next unreviewed step' },
-      { keys: ['J / ↓', 'K / ↑'], description: 'Smooth scroll down / up' },
-      { keys: ['['], description: 'Toggle tour sidebar' },
-    ],
-  },
-  {
-    title: 'Diff, Search & Comments',
-    items: [
-      { keys: ['⌘F', 'Ctrl+F'], description: 'Search within current file diff' },
-      { keys: ['Shift+Enter'], description: 'Previous match in diff search' },
-      { keys: ['⌘K', 'Ctrl+K'], description: 'Jump to file, symbol, or unresolved thread' },
-      { keys: ['⌘Enter', 'Ctrl+Enter'], description: 'Submit comment or thread reply' },
-      { keys: ['Esc'], description: 'Cancel composer, diff search, or modal' },
-    ],
-  },
-  {
-    title: 'PR Inbox',
-    items: [
-      { keys: ['/', '⌘K', 'Ctrl+K'], description: 'Focus inbox search' },
-      { keys: ['J / ↓', 'K / ↑'], description: 'Move PR selection down / up' },
-      { keys: ['Enter'], description: 'Open selected PR' },
-      { keys: ['Esc'], description: 'Clear or exit inbox search' },
-    ],
-  },
-  {
-    title: 'Review & App',
-    items: [
-      { keys: ['M'], description: 'Mark current step reviewed' },
-      { keys: ['Z'], description: 'Toggle Zen / Focus mode' },
-      { keys: ['R'], description: 'Finish & submit review' },
-      { keys: ['⌘,', 'Ctrl+,'], description: 'Open settings' },
-      { keys: ['?'], description: 'Toggle keyboard shortcuts cheatsheet' },
-    ],
-  },
-]
+const groups = getShortcutGroups()
 </script>
 
 <template>

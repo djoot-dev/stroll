@@ -38,6 +38,7 @@ import {
   requestNotificationPermission,
 } from '@/services/native'
 import { RELEASES_PAGE_URL } from '@/services/releaseNotes'
+import { altKeyLabel, altKeyName, getShortcutGroups } from '@/services/shortcuts'
 import { useAuthStore } from '@/stores/auth'
 import MarkdownContent from './MarkdownContent.vue'
 import { useReviewStore } from '@/stores/review'
@@ -332,22 +333,9 @@ const diffPaletteOptions: Array<{
   },
 ]
 
-const shortcutRows = [
-  { keys: ['⌘K', 'Ctrl+K'], description: 'Open command palette (files, symbols, threads)' },
-  { keys: ['0'], description: 'Open PR overview' },
-  { keys: ['O'], description: 'Toggle between PR overview and current step' },
-  { keys: ['L', '→'], description: 'Next tour step' },
-  { keys: ['H', '←'], description: 'Previous tour step' },
-  { keys: ['N'], description: 'Jump to next unreviewed step' },
-  { keys: ['J', '↓'], description: 'Smooth scroll down' },
-  { keys: ['K', '↑'], description: 'Smooth scroll up' },
-  { keys: ['M'], description: 'Mark current step reviewed / unreviewed' },
-  { keys: ['['], description: 'Toggle tour outline sidebar' },
-  { keys: ['R'], description: 'Open Finish & Submit Review modal' },
-  { keys: ['?'], description: 'Show keyboard shortcuts cheatsheet' },
-  { keys: ['⌘,', 'Ctrl+,'], description: 'Open or close Settings' },
-  { keys: ['Esc'], description: 'Close active modal or popover' },
-]
+const shortcutGroups = getShortcutGroups()
+const altLabel = altKeyLabel()
+const altName = altKeyName()
 
 const activeSectionTitle = computed(
   () => navItems.find((item) => item.id === settings.activeSection)?.label ?? 'Settings',
@@ -1062,9 +1050,9 @@ async function handleResetDefaults() {
                       "
                       @click="settings.setRequireAltForHover(true)"
                     >
-                      <p class="text-xs font-semibold text-ink">⌥ / Alt + Hover</p>
+                      <p class="text-xs font-semibold text-ink">{{ altLabel }} + Hover</p>
                       <p class="mt-1 text-[11px] text-ink-muted">
-                        Only opens while holding Option / Alt to avoid accidental popovers.
+                        Only opens while holding {{ altName }} to avoid accidental popovers.
                       </p>
                     </button>
                   </div>
@@ -1646,23 +1634,31 @@ async function handleResetDefaults() {
 
             <!-- SHORTCUTS -->
             <template v-else-if="settings.activeSection === 'shortcuts'">
-              <div class="divide-y divide-border-muted rounded-xl border border-border bg-canvas/60">
-                <div
-                  v-for="row in shortcutRows"
-                  :key="row.description"
-                  class="flex items-center justify-between gap-4 px-4 py-2.5 text-xs"
-                >
-                  <span class="text-ink-secondary">{{ row.description }}</span>
-                  <div class="flex shrink-0 items-center gap-1.5">
-                    <kbd
-                      v-for="k in row.keys"
-                      :key="k"
-                      class="rounded-md border border-border bg-canvas-subtle px-1.5 py-0.5 font-mono text-[11px] text-ink"
+              <div class="space-y-4">
+                <section v-for="group in shortcutGroups" :key="group.title" class="space-y-2">
+                  <h3 class="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
+                    {{ group.title }}
+                  </h3>
+                  <div class="divide-y divide-border-muted rounded-xl border border-border bg-canvas/60">
+                    <div
+                      v-for="row in group.items"
+                      :key="row.description"
+                      class="flex items-center justify-between gap-4 px-4 py-2.5 text-xs"
                     >
-                      {{ k }}
-                    </kbd>
+                      <span class="text-ink-secondary">{{ row.description }}</span>
+                      <div class="flex shrink-0 items-center gap-1">
+                        <template v-for="(k, idx) in row.keys" :key="k">
+                          <span v-if="idx > 0" class="text-[10px] text-ink-faint">/</span>
+                          <kbd
+                            class="rounded-md border border-border bg-canvas-subtle px-1.5 py-0.5 font-mono text-[11px] text-ink"
+                          >
+                            {{ k }}
+                          </kbd>
+                        </template>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                </section>
               </div>
             </template>
           </div>

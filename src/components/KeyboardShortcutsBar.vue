@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { isMacPlatform } from '@/services/shortcuts'
 import { getContextualShortcutHints } from '@/services/shortcutsBar'
 import { useReviewStore } from '@/stores/review'
 import UpdateIndicator from './UpdateIndicator.vue'
@@ -9,7 +10,7 @@ const emit = defineEmits<{
 }>()
 
 const review = useReviewStore()
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
+const isMac = isMacPlatform()
 
 const hints = computed(() =>
   getContextualShortcutHints({

@@ -10,6 +10,7 @@ import {
   useCommentSnippets,
   type ConventionalPrefix,
 } from '@/services/commentSnippets'
+import { formatShortcut } from '@/services/shortcuts'
 import MarkdownEditor from './MarkdownEditor.vue'
 
 const props = defineProps<{
@@ -34,7 +35,7 @@ const isEditing = computed(() => props.initialBody !== undefined)
 const verb = computed(() => (isEditing.value ? 'Edit' : 'Add'))
 const confirmDiscard = ref(false)
 const editorRef = ref<InstanceType<typeof MarkdownEditor> | null>(null)
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
+const modEnter = formatShortcut('Mod+Enter')
 const hasUnsavedChanges = computed(
   () => body.value.trim().length > 0 && body.value.trim() !== (props.initialBody ?? '').trim(),
 )
@@ -156,7 +157,7 @@ function handleSubmit() {
       </template>
 
       <template #header-right>
-        <span class="text-[11px] text-ink-faint">{{ isMac ? '⌘↵' : 'Ctrl+↵' }} to save · Pending until Finish Review</span>
+        <span class="text-[11px] text-ink-faint">{{ modEnter }} to save · Pending until Finish Review</span>
       </template>
 
       <template #toolbar>
