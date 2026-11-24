@@ -22,6 +22,7 @@ import {
   X,
 } from '@lucide/vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import SelectDropdown from '@/components/SelectDropdown.vue'
 import { isLockfile, LAYER_META } from '@/services/readingOrder'
 import type { PRStackCandidate } from '@/services/prStack'
 import { computeRemainingReviewEstimate } from '@/services/reviewEstimate'
@@ -50,6 +51,25 @@ const prevStackNode = computed(() => {
   return ancestors?.length ? ancestors[ancestors.length - 1] : null
 })
 const nextStackNode = computed(() => review.prStack?.descendants[0] ?? null)
+
+const commitFilterOptions = computed(() => {
+  const pr = review.pr
+  if (!pr) return []
+  const opts = [{ value: 'all', label: `All commits (${pr.commits.length})` }]
+  if (review.lastReviewedCommitOid) {
+    opts.push({
+      value: 'since-last-review',
+      label: `Since last review (${review.lastReviewedCommitOid.slice(0, 7)}..${pr.headRefOid.slice(0, 7)})`,
+    })
+  }
+  for (const commit of pr.commits) {
+    opts.push({
+      value: commit.oid,
+      label: `${commit.shortOid} · ${commit.messageHeadline}`,
+    })
+  }
+  return opts
+})
 
 function isOpeningStackNode(node: PRStackCandidate): boolean {
   return (
@@ -367,26 +387,20 @@ function dirOnly(path: string): string {
         <!-- Commit / Scope Filter -->
         <div v-if="review.pr.commits.length > 0" class="mt-2.5 flex items-center gap-1.5">
           <GitCommitHorizontal class="h-3.5 w-3.5 shrink-0 text-ink-faint" />
-          <select
-            aria-label="Filter tour by commit"
-            :value="review.commitFilter"
+          <SelectDropdown
+            :model-value="review.commitFilter"
+            :options="commitFilterOptions"
+            ariaLabel="Filter tour by commit"
+            size="xs"
+            surface="canvas"
+            align="left"
+            full-width
             :disabled="review.isLoadingCommitFilter"
-            :aria-busy="review.isLoadingCommitFilter"
-            class="min-w-0 flex-1 rounded-lg border border-border bg-canvas px-2 py-1 text-[11px] text-ink-secondary focus:border-terra-border focus:outline-none disabled:opacity-50"
-            @change="review.setCommitFilter(($event.target as HTMLSelectElement).value)"
-          >
-            <option value="all">All commits ({{ review.pr.commits.length }})</option>
-            <option v-if="review.lastReviewedCommitOid" value="since-last-review">
-              Since last review ({{ review.lastReviewedCommitOid.slice(0, 7) }}..{{ review.pr.headRefOid.slice(0, 7) }})
-            </option>
-            <option
-              v-for="commit in review.pr.commits"
-              :key="commit.oid"
-              :value="commit.oid"
-            >
-              {{ commit.shortOid }} · {{ commit.messageHeadline }}
-            </option>
-          </select>
+            :busy="review.isLoadingCommitFilter"
+            menu-class="min-w-full max-w-80"
+            class="min-w-0 flex-1"
+            @update:model-value="review.setCommitFilter($event)"
+          />
           <Loader2
             v-if="review.isLoadingCommitFilter"
             class="h-3.5 w-3.5 shrink-0 animate-spin text-terra-text"
