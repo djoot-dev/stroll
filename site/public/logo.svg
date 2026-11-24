@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fdf9f1"/>
+      <stop offset="100%" stop-color="#f0e7d6"/>
+    </linearGradient>
+
+    <linearGradient id="pine3" x1="0" y1="220" x2="0" y2="820" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#27634d"/>
+      <stop offset="100%" stop-color="#173e2f"/>
+    </linearGradient>
+
+    <linearGradient id="terra3" x1="720" y1="740" x2="320" y2="280" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#c86130"/>
+      <stop offset="55%" stop-color="#de7b47"/>
+      <stop offset="100%" stop-color="#eb9663"/>
+    </linearGradient>
+
+    <linearGradient id="sageSoft3" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#dce8da"/>
+      <stop offset="100%" stop-color="#c6dbc4"/>
+    </linearGradient>
+
+    <linearGradient id="stoneTop3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fffdf9"/>
+      <stop offset="100%" stop-color="#f6ebd8"/>
+    </linearGradient>
+    <linearGradient id="stoneSide3" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ce8c60"/>
+      <stop offset="50%" stop-color="#e7b992"/>
+      <stop offset="100%" stop-color="#c47e50"/>
+    </linearGradient>
+
+    <g id="shoeprint3">
+      <path d="M -21 -12 C -23 -32, -11 -44, 3 -43 C 17 -42, 23 -28, 21 -12 C 19 -1, 14 5, 13 11 L -13 11 C -15 4, -19 -1, -21 -12 Z" fill="#ce6835"/>
+      <path d="M -13 18 L 13 18 C 14 29, 9 39, 0 39 C -9 39, -14 29, -13 18 Z" fill="#ce6835"/>
+    </g>
+
+    <filter id="elemShadow3" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#173e2f" flood-opacity="0.18"/>
+    </filter>
+    <filter id="stoneShadow3" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="10" stdDeviation="8" flood-color="#7c3817" flood-opacity="0.25"/>
+    </filter>
+
+    <clipPath id="squircle3">
+      <rect x="32" y="32" width="960" height="960" rx="216" ry="216"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#squircle3)">
+    <!-- Cream Background -->
+    <rect x="32" y="32" width="960" height="960" fill="url(#bg3)"/>
+
+    <!-- Soft sage organic backdrop circle -->
+    <circle cx="512" cy="518" r="376" fill="url(#sageSoft3)" opacity="0.58"/>
+
+    <!-- Main vertical PR Base Branch (Left side, crisp forest green bar) -->
+    <rect x="278" y="268" width="58" height="484" rx="29" fill="url(#pine3)"/>
+
+    <!-- Curved Terracotta Footpath Branch merging into top-left base branch -->
+    <path
+      d="M 716 728 C 716 510, 564 458, 458 352 C 416 310, 374 284, 328 284"
+      fill="none"
+      stroke="url(#terra3)"
+      stroke-width="122"
+      stroke-linecap="round"
+    />
+
+    <!-- Base Branch Bottom Node -->
+    <g filter="url(#elemShadow3)">
+      <circle cx="307" cy="752" r="68" fill="url(#pine3)"/>
+      <circle cx="307" cy="752" r="32" fill="#fdf9f1"/>
+    </g>
+
+    <!-- Base Branch Top Merge Node -->
+    <g filter="url(#elemShadow3)">
+      <circle cx="307" cy="278" r="78" fill="url(#pine3)"/>
+      <circle cx="307" cy="278" r="36" fill="#fdf9f1"/>
+    </g>
+
+    <!-- PR Feature Branch Start Node (Bottom-Right) -->
+    <g filter="url(#elemShadow3)">
+      <circle cx="716" cy="752" r="68" fill="url(#pine3)"/>
+      <circle cx="716" cy="752" r="32" fill="#fdf9f1"/>
+    </g>
+
+    <!-- Stepping Stone 1 (Lower-right along the curved PR footpath) -->
+    <g transform="translate(660, 582)" filter="url(#stoneShadow3)">
+      <ellipse cx="0" cy="14" rx="82" ry="58" fill="url(#stoneSide3)"/>
+      <ellipse cx="0" cy="0" rx="82" ry="58" fill="url(#stoneTop3)"/>
+      <use href="#shoeprint3" transform="rotate(-24) scale(0.96)"/>
+    </g>
+
+    <!-- Stepping Stone 2 (Mid-upper along the curved PR footpath) -->
+    <g transform="translate(504, 404)" filter="url(#stoneShadow3)">
+      <ellipse cx="0" cy="14" rx="82" ry="58" fill="url(#stoneSide3)"/>
+      <ellipse cx="0" cy="0" rx="82" ry="58" fill="url(#stoneTop3)"/>
+      <use href="#shoeprint3" transform="rotate(-48) scale(-0.96, 0.96)"/>
+    </g>
+  </g>
+</svg>

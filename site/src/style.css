@@ -1,0 +1,71 @@
+@import "tailwindcss";
+@import "../../src/tokens.css";
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    background-color: var(--stroll-canvas);
+    color: var(--stroll-ink);
+    font-family: var(--font-sans);
+  }
+
+  body {
+    overflow-x: hidden;
+  }
+
+  :where(button, [role="button"], a[href]) {
+    cursor: pointer;
+  }
+}
+
+.shadow-card {
+  box-shadow: var(--stroll-shadow-card);
+}
+
+.shadow-elevated {
+  box-shadow: var(--stroll-shadow-elevated);
+}
+
+/* Winding terracotta footpath animation */
+@keyframes footpath-flow {
+  from {
+    stroke-dashoffset: 32;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.footpath-dash {
+  stroke-dasharray: 8 8;
+  animation: footpath-flow 2.8s linear infinite;
+}
+
+/* Scroll-triggered reveal */
+.reveal-section {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 500ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 500ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.reveal-section.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .footpath-dash {
+    animation: none;
+  }
+
+  .reveal-section {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
