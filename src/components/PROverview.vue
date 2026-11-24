@@ -33,8 +33,7 @@ import {
   X,
   XCircle,
 } from '@lucide/vue'
-import { computed, nextTick, ref, watch } from 'vue'
-import { useCommentAutocomplete } from '@/composables/useCommentAutocomplete'
+import { computed, ref, watch } from 'vue'
 import {
   parseChecklistProgress,
   renderSafeMarkdown,
@@ -57,10 +56,10 @@ import type {
   ReviewComment,
   ReviewSubjectType,
 } from '@/types/pr'
-import CommentAutocompletePopover from './CommentAutocompletePopover.vue'
 import LocalCheckoutPanel from './LocalCheckoutPanel.vue'
 import LabelPicker from './LabelPicker.vue'
 import MarkdownContent from './MarkdownContent.vue'
+import MarkdownEditor from './MarkdownEditor.vue'
 import ReactionBar from './ReactionBar.vue'
 import ReviewerPicker from './ReviewerPicker.vue'
 
@@ -95,14 +94,8 @@ const orderedCommits = computed(() => {
   return historyNewestFirst.value ? [...commits].reverse() : commits
 })
 const commentDraft = ref('')
-const commentDraftRef = ref<HTMLTextAreaElement | null>(null)
-const commentAutocomplete = useCommentAutocomplete(
-  commentDraftRef,
-  () => commentDraft.value,
-  (next) => {
-    commentDraft.value = next
-  },
-)
+const commentPreviewMode = ref(false)
+const commentEditorRef = ref<InstanceType<typeof MarkdownEditor> | null>(null)
 const conversationBodyRefs = new Map<string, HTMLElement>()
 function setConversationBodyRef(id: string, el: unknown) {
   if (el instanceof HTMLElement) conversationBodyRefs.set(id, el)
@@ -117,12 +110,7 @@ function handleQuoteConversationItem(item: ConversationItem) {
     return
   }
   commentDraft.value = appendQuoteToDraft(commentDraft.value, quoteText)
-  void nextTick(() => {
-    const el = commentDraftRef.value
-    if (!el) return
-    el.focus()
-    el.setSelectionRange(el.value.length, el.value.length)
-  })
+  void commentEditorRef.value?.focusWrite(commentDraft.value.length, true)
 }
 const isPostingComment = ref(false)
 const commentError = ref<string | null>(null)
@@ -643,6 +631,7 @@ async function handlePostComment() {
   try {
     await review.postPRComment(commentDraft.value)
     commentDraft.value = ''
+    commentPreviewMode.value = false
   } catch (err) {
     commentError.value = err instanceof Error ? err.message : 'Failed to post comment'
   } finally {
@@ -1171,40 +1160,43 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
         </button>
       </div>
       <div v-if="isEditingDescription" class="space-y-2">
-        <textarea
+        <MarkdownEditor
           v-model="descriptionDraft"
-          rows="10"
+          :rows="10"
+          autofocus
+          textarea-class="font-mono leading-relaxed"
           placeholder="Describe this Pull Request…"
-          class="w-full resize-y rounded-xl border border-border bg-canvas-inset px-3 py-2 font-mono text-xs leading-relaxed text-ink focus:border-terra-border focus:outline-none"
-          @keydown.meta.enter.prevent="handleSaveDescription"
-          @keydown.ctrl.enter.prevent="handleSaveDescription"
-          @keydown.esc.prevent="cancelEditDescription"
-        />
-        <div class="flex items-center justify-between gap-2">
-          <span class="text-[11px] text-ink-faint">
-            {{ pr?.isMock ? 'Demo mode: description will be updated locally.' : 'Markdown supported · ⌘↵ to save · Esc to cancel' }}
-          </span>
-          <div class="flex items-center gap-2">
-            <button
-              type="button"
-              class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-canvas-elevated disabled:opacity-40"
-              :disabled="isSavingDescription"
-              @click="cancelEditDescription"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              class="inline-flex items-center gap-1 rounded-lg bg-terra px-3 py-1 text-[11px] font-semibold text-white hover:bg-terra-hover disabled:opacity-40"
-              :disabled="isSavingDescription"
-              :aria-busy="isSavingDescription"
-              @click="handleSaveDescription"
-            >
-              <Loader2 v-if="isSavingDescription" class="h-3 w-3 animate-spin" />
-              <span>Save</span>
-            </button>
-          </div>
-        </div>
+          @submit="handleSaveDescription"
+          @cancel="cancelEditDescription"
+        >
+          <template #footer>
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-[11px] text-ink-faint">
+                {{ pr?.isMock ? 'Demo mode: description will be updated locally.' : 'Markdown supported · ⌘↵ to save · Esc to cancel' }}
+              </span>
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-canvas-elevated disabled:opacity-40"
+                  :disabled="isSavingDescription"
+                  @click="cancelEditDescription"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1 rounded-lg bg-terra px-3 py-1 text-[11px] font-semibold text-white hover:bg-terra-hover disabled:opacity-40"
+                  :disabled="isSavingDescription"
+                  :aria-busy="isSavingDescription"
+                  @click="handleSaveDescription"
+                >
+                  <Loader2 v-if="isSavingDescription" class="h-3 w-3 animate-spin" />
+                  <span>Save</span>
+                </button>
+              </div>
+            </div>
+          </template>
+        </MarkdownEditor>
         <p v-if="descriptionError" class="text-[11px] text-crimson-text">
           {{ descriptionError }}
         </p>
@@ -1542,15 +1534,24 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
         </div>
       </div>
 
-      <div v-if="filteredConversationItems.length === 0" class="px-5 py-5 text-xs text-ink-faint">
-        {{
-          pr.state === 'OPEN' && showUnresolvedOnly
-            ? 'No unresolved review threads.'
-            : 'No general comments or review summaries yet.'
-        }}
-      </div>
+      <div class="flex flex-col">
+        <div
+          v-if="filteredConversationItems.length === 0"
+          class="px-5 py-5 text-xs text-ink-faint"
+          :class="historyNewestFirst ? 'order-2' : 'order-1'"
+        >
+          {{
+            pr.state === 'OPEN' && showUnresolvedOnly
+              ? 'No unresolved review threads.'
+              : 'No general comments or review summaries yet.'
+          }}
+        </div>
 
-      <div v-else class="divide-y divide-border-muted">
+        <div
+          v-else
+          class="divide-y divide-border-muted"
+          :class="historyNewestFirst ? 'order-2' : 'order-1'"
+        >
         <article
           v-for="item in filteredConversationItems"
           :key="item.id"
@@ -1694,34 +1695,36 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
             </div>
           </div>
 
-          <div v-if="editingCommentId === item.rawId" class="space-y-2 pt-1">
-            <textarea
+          <div v-if="editingCommentId === item.rawId" class="pt-1">
+            <MarkdownEditor
               v-model="editCommentBody"
-              rows="5"
-              class="min-h-28 w-full resize-y rounded-xl border border-border bg-canvas-inset px-3 py-2 text-xs text-ink focus:border-terra-border focus:outline-none"
-              @keydown.meta.enter.prevent="handleSaveIssueCommentEdit(item.rawId)"
-              @keydown.ctrl.enter.prevent="handleSaveIssueCommentEdit(item.rawId)"
-              @keydown.esc.prevent="editingCommentId = null"
-            />
-            <div class="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-canvas-elevated"
-                @click="editingCommentId = null"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                class="inline-flex items-center gap-1 rounded-lg bg-terra px-3 py-1 text-[11px] font-semibold text-white hover:bg-terra-hover disabled:opacity-40"
-                :disabled="isSavingCommentEdit || !editCommentBody.trim()"
-                :aria-busy="isSavingCommentEdit"
-                @click="handleSaveIssueCommentEdit(item.rawId)"
-              >
-                <Loader2 v-if="isSavingCommentEdit" class="h-3 w-3 animate-spin" />
-                <span>Save</span>
-              </button>
-            </div>
+              :rows="5"
+              autofocus
+              @submit="handleSaveIssueCommentEdit(item.rawId)"
+              @cancel="editingCommentId = null"
+            >
+              <template #footer>
+                <div class="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-canvas-elevated"
+                    @click="editingCommentId = null"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 rounded-lg bg-terra px-3 py-1 text-[11px] font-semibold text-white hover:bg-terra-hover disabled:opacity-40"
+                    :disabled="isSavingCommentEdit || !editCommentBody.trim()"
+                    :aria-busy="isSavingCommentEdit"
+                    @click="handleSaveIssueCommentEdit(item.rawId)"
+                  >
+                    <Loader2 v-if="isSavingCommentEdit" class="h-3 w-3 animate-spin" />
+                    <span>Save</span>
+                  </button>
+                </div>
+              </template>
+            </MarkdownEditor>
           </div>
           <template v-else>
             <pre
@@ -1766,35 +1769,37 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
               </div>
             </div>
             <div v-if="item.kind === 'thread'" class="pt-1">
-              <div v-if="replyingThreadId === item.rawId" class="space-y-2 pt-1">
-                <textarea
+              <div v-if="replyingThreadId === item.rawId" class="pt-1">
+                <MarkdownEditor
                   v-model="threadReplyBody"
-                  rows="3"
+                  :rows="3"
+                  autofocus
                   placeholder="Write a reply…"
-                  class="w-full resize-y rounded-xl border border-border bg-canvas-inset px-3 py-2 text-xs text-ink placeholder:text-ink-faint focus:border-terra-border focus:outline-none"
-                  @keydown.meta.enter.prevent="handleReplyToThread(item.rawId)"
-                  @keydown.ctrl.enter.prevent="handleReplyToThread(item.rawId)"
-                  @keydown.esc.prevent="replyingThreadId = null"
-                />
-                <div class="flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-canvas-elevated"
-                    @click="replyingThreadId = null"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    class="inline-flex items-center gap-1 rounded-lg bg-pine px-3 py-1 text-[11px] font-semibold text-white hover:bg-pine-hover disabled:opacity-40"
-                    :disabled="isReplyingThread || !threadReplyBody.trim()"
-                    :aria-busy="isReplyingThread"
-                    @click="handleReplyToThread(item.rawId)"
-                  >
-                    <Loader2 v-if="isReplyingThread" class="h-3 w-3 animate-spin" />
-                    <span>Reply</span>
-                  </button>
-                </div>
+                  @submit="handleReplyToThread(item.rawId)"
+                  @cancel="replyingThreadId = null"
+                >
+                  <template #footer>
+                    <div class="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-canvas-elevated"
+                        @click="replyingThreadId = null"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-1 rounded-lg bg-pine px-3 py-1 text-[11px] font-semibold text-white hover:bg-pine-hover disabled:opacity-40"
+                        :disabled="isReplyingThread || !threadReplyBody.trim()"
+                        :aria-busy="isReplyingThread"
+                        @click="handleReplyToThread(item.rawId)"
+                      >
+                        <Loader2 v-if="isReplyingThread" class="h-3 w-3 animate-spin" />
+                        <span>Reply</span>
+                      </button>
+                    </div>
+                  </template>
+                </MarkdownEditor>
               </div>
               <button
                 v-else
@@ -1810,50 +1815,43 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
       </div>
 
       <!-- Reply Composer -->
-      <div class="border-t border-border-muted bg-canvas/50 p-4">
-        <textarea
-          ref="commentDraftRef"
+      <div
+        class="border-border-muted bg-canvas/50 p-4"
+        :class="historyNewestFirst ? 'order-1 border-b' : 'order-2 border-t'"
+      >
+        <MarkdownEditor
+          ref="commentEditorRef"
           v-model="commentDraft"
-          rows="6"
+          v-model:preview="commentPreviewMode"
+          :rows="6"
+          min-height-class="min-h-32"
+          :stop-esc-propagation="false"
           placeholder="Leave a general comment on this pull request…"
-          class="min-h-32 w-full resize-y rounded-xl border border-border bg-canvas-subtle px-3 py-2 text-xs text-ink placeholder:text-ink-faint focus:border-terra-border focus:outline-none"
-          @input="commentAutocomplete.onInputOrCursor()"
-          @click="commentAutocomplete.onInputOrCursor()"
-          @keydown="commentAutocomplete.handleKeydown($event) && $event.stopPropagation()"
-          @keydown.meta.enter.prevent="!commentAutocomplete.isOpen.value && handlePostComment()"
-          @keydown.ctrl.enter.prevent="!commentAutocomplete.isOpen.value && handlePostComment()"
-          @blur="commentAutocomplete.close()"
-        />
-        <CommentAutocompletePopover
-          :open="commentAutocomplete.isOpen.value"
-          :trigger="commentAutocomplete.trigger.value"
-          :options="commentAutocomplete.options.value"
-          :active-index="commentAutocomplete.activeIndex.value"
-          :is-loading="commentAutocomplete.isLoading.value"
-          :coords="commentAutocomplete.coords.value"
-          @select="commentAutocomplete.selectOption"
-          @hover="commentAutocomplete.activeIndex.value = $event"
-        />
+          @submit="handlePostComment"
+        >
+          <template #footer>
+            <div class="flex items-center justify-between gap-3 pt-0.5">
+              <p v-if="commentError" class="text-[11px] text-crimson-text">
+                {{ commentError }}
+              </p>
+              <span v-else class="text-[11px] text-ink-faint">
+                {{ pr.isMock ? 'Demo mode: comment will be added locally.' : 'Markdown supported · ⌘↵ to post' }}
+              </span>
 
-        <div class="mt-2.5 flex items-center justify-between gap-3">
-          <p v-if="commentError" class="text-[11px] text-crimson-text">
-            {{ commentError }}
-          </p>
-          <span v-else class="text-[11px] text-ink-faint">
-            {{ pr.isMock ? 'Demo mode: comment will be added locally.' : 'Markdown supported · ⌘↵ to post' }}
-          </span>
-
-          <button
-            class="inline-flex items-center gap-1.5 rounded-xl bg-pine px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs transition-all hover:bg-pine-hover active:scale-[0.98] disabled:opacity-40"
-            :disabled="!commentDraft.trim() || isPostingComment"
-            :aria-busy="isPostingComment"
-            @click="handlePostComment"
-          >
-            <Loader2 v-if="isPostingComment" class="h-3.5 w-3.5 animate-spin" />
-            <Send v-else class="h-3.5 w-3.5" />
-            <span>Comment</span>
-          </button>
-        </div>
+              <button
+                class="inline-flex items-center gap-1.5 rounded-xl bg-pine px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs transition-all hover:bg-pine-hover active:scale-[0.98] disabled:opacity-40"
+                :disabled="!commentDraft.trim() || isPostingComment"
+                :aria-busy="isPostingComment"
+                @click="handlePostComment"
+              >
+                <Loader2 v-if="isPostingComment" class="h-3.5 w-3.5 animate-spin" />
+                <Send v-else class="h-3.5 w-3.5" />
+                <span>Comment</span>
+              </button>
+            </div>
+          </template>
+        </MarkdownEditor>
+      </div>
       </div>
     </section>
 
