@@ -49,5 +49,5 @@ cargo check --manifest-path src-tauri/Cargo.toml   # Verify Rust backend compile
 ## Git Workflow
 
 - **Feature Branches Only:** Do all development on dedicated feature branches created from `main` (never commit directly to `main`).
-- **Pull Requests:** All changes must be merged into `main` via a Pull Request.
+- **Pull Requests:** All changes must be merged into `main` via a Pull Request. Before creating a PR (or pushing updates to an open PR when the base branch has moved), fetch `origin`, rebase the branch onto the target base branch (e.g., `git fetch origin && git rebase origin/main`), and re-run `bun run test` and `bun run build`.
 - **Release Tags:** Only create and push release tags (`v*`) from `main` after the version bump PR has been merged.
