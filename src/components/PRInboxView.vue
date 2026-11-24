@@ -5,6 +5,7 @@ import {
   Check,
   CheckCheck,
   CheckCircle2,
+  ChevronDown,
   Clock,
   FileDiff,
   FolderGit2,
@@ -67,6 +68,8 @@ const searchQuery = ref('')
 const searchInputRef = ref<HTMLInputElement | null>(null)
 const selectedRepo = ref('all')
 const sortBy = ref<PRInboxSortOption>('updated-desc')
+const openToolbarMenu = ref<'repo' | 'sort' | null>(null)
+const toolbarFiltersRef = ref<HTMLElement | null>(null)
 const lastRefreshedAt = ref<Date | null>(auth.isAuthenticated ? new Date() : null)
 const selectedIndex = ref(-1)
 const prProgress = ref<Record<string, PRLocalProgress>>({})
@@ -79,6 +82,15 @@ const sortOptions: ReadonlyArray<{ value: PRInboxSortOption; label: string }> = 
   { value: 'diff-asc', label: 'Smallest Diff' },
   { value: 'diff-desc', label: 'Largest Diff' },
 ]
+
+const activeSortOption = computed(
+  () => sortOptions.find((opt) => opt.value === sortBy.value) ?? sortOptions[0],
+)
+
+const repoOptions = computed(() => [
+  { value: 'all', label: 'All repos' },
+  ...availableRepos.value.map((repo) => ({ value: repo, label: repo })),
+])
 
 const availableRepos = computed(() => extractInboxRepos(auth.requestedPRs))
 const inboxStacks = computed(() => annotateInboxStacks(auth.requestedPRs))
@@ -163,9 +175,24 @@ function moveSelection(delta: 1 | -1) {
   scrollSelectedIntoView()
 }
 
+function handleToolbarMenuPointerDown(e: PointerEvent) {
+  if (!openToolbarMenu.value) return
+  if (toolbarFiltersRef.value && !toolbarFiltersRef.value.contains(e.target as Node)) {
+    openToolbarMenu.value = null
+  }
+}
+
 function handleInboxKeydown(e: KeyboardEvent) {
   if (review.screen !== 'inbox') return
   if (settings.isOpen || review.isLoadingPR || review.showLoaderModal || review.showFinishModal) {
+    return
+  }
+
+  if (openToolbarMenu.value) {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      openToolbarMenu.value = null
+    }
     return
   }
 
@@ -362,6 +389,7 @@ onMounted(() => {
   void refreshLocalProgress()
   window.addEventListener('focus', refreshCheckoutStatuses)
   window.addEventListener('keydown', handleInboxKeydown)
+  window.addEventListener('pointerdown', handleToolbarMenuPointerDown)
 })
 
 watch([() => auth.requestedPRs, () => review.repoPaths], refreshCheckoutStatuses, { immediate: true })
@@ -399,6 +427,7 @@ watch(
 onBeforeUnmount(() => {
   window.removeEventListener('focus', refreshCheckoutStatuses)
   window.removeEventListener('keydown', handleInboxKeydown)
+  window.removeEventListener('pointerdown', handleToolbarMenuPointerDown)
   if (pollTimer !== null) {
     window.clearInterval(pollTimer)
     pollTimer = null
@@ -788,31 +817,92 @@ onBeforeUnmount(() => {
                 </button>
               </div>
 
-              <div class="flex items-center gap-2">
-                <select
-                  v-model="selectedRepo"
-                  aria-label="Filter by repository"
-                  class="rounded-xl border border-border bg-canvas-subtle px-2.5 py-1.5 text-xs text-ink-secondary transition-colors focus:border-terra focus:outline-none"
-                >
-                  <option value="all">All repos</option>
-                  <option v-for="repo in availableRepos" :key="repo" :value="repo">
-                    {{ repo }}
-                  </option>
-                </select>
-
-                <div class="relative flex items-center">
-                  <ArrowUpDown
-                    class="pointer-events-none absolute left-2.5 h-3 w-3 text-ink-faint"
-                  />
-                  <select
-                    v-model="sortBy"
-                    aria-label="Sort pull requests"
-                    class="rounded-xl border border-border bg-canvas-subtle py-1.5 pr-2.5 pl-7 text-xs text-ink-secondary transition-colors focus:border-terra focus:outline-none"
+              <div ref="toolbarFiltersRef" class="flex items-center gap-2">
+                <div class="relative">
+                  <button
+                    type="button"
+                    aria-label="Filter by repository"
+                    aria-haspopup="listbox"
+                    :aria-expanded="openToolbarMenu === 'repo'"
+                    class="inline-flex items-center gap-1.5 rounded-xl border border-border bg-canvas-subtle px-2.5 py-1.5 text-xs text-ink-secondary transition-colors hover:border-terra-border hover:text-ink focus:border-terra focus:outline-none"
+                    @click="openToolbarMenu = openToolbarMenu === 'repo' ? null : 'repo'"
                   >
-                    <option v-for="opt in sortOptions" :key="opt.value" :value="opt.value">
-                      {{ opt.label }}
-                    </option>
-                  </select>
+                    <span class="max-w-44 truncate">
+                      {{ selectedRepo === 'all' ? 'All repos' : selectedRepo }}
+                    </span>
+                    <ChevronDown
+                      class="h-3 w-3 shrink-0 text-ink-faint transition-transform"
+                      :class="{ 'rotate-180': openToolbarMenu === 'repo' }"
+                    />
+                  </button>
+
+                  <div
+                    v-if="openToolbarMenu === 'repo'"
+                    role="listbox"
+                    aria-label="Filter by repository"
+                    class="animate-pop-in stroll-elevated absolute top-full left-0 z-20 mt-1.5 max-h-60 min-w-44 overflow-y-auto rounded-xl border border-border bg-canvas-subtle p-1 sm:right-0 sm:left-auto"
+                  >
+                    <button
+                      v-for="opt in repoOptions"
+                      :key="opt.value"
+                      type="button"
+                      role="option"
+                      :aria-selected="selectedRepo === opt.value"
+                      class="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-canvas-elevated"
+                      :class="
+                        selectedRepo === opt.value
+                          ? 'font-semibold text-terra-text'
+                          : 'text-ink-secondary'
+                      "
+                      @click="selectedRepo = opt.value; openToolbarMenu = null"
+                    >
+                      <span class="truncate">{{ opt.label }}</span>
+                      <Check v-if="selectedRepo === opt.value" class="h-3 w-3 shrink-0" />
+                    </button>
+                  </div>
+                </div>
+
+                <div class="relative">
+                  <button
+                    type="button"
+                    aria-label="Sort pull requests"
+                    aria-haspopup="listbox"
+                    :aria-expanded="openToolbarMenu === 'sort'"
+                    class="inline-flex items-center gap-1.5 rounded-xl border border-border bg-canvas-subtle px-2.5 py-1.5 text-xs text-ink-secondary transition-colors hover:border-terra-border hover:text-ink focus:border-terra focus:outline-none"
+                    @click="openToolbarMenu = openToolbarMenu === 'sort' ? null : 'sort'"
+                  >
+                    <ArrowUpDown class="h-3 w-3 shrink-0 text-ink-faint" />
+                    <span>{{ activeSortOption.label }}</span>
+                    <ChevronDown
+                      class="h-3 w-3 shrink-0 text-ink-faint transition-transform"
+                      :class="{ 'rotate-180': openToolbarMenu === 'sort' }"
+                    />
+                  </button>
+
+                  <div
+                    v-if="openToolbarMenu === 'sort'"
+                    role="listbox"
+                    aria-label="Sort pull requests"
+                    class="animate-pop-in stroll-elevated absolute top-full right-0 z-20 mt-1.5 min-w-44 rounded-xl border border-border bg-canvas-subtle p-1"
+                  >
+                    <button
+                      v-for="opt in sortOptions"
+                      :key="opt.value"
+                      type="button"
+                      role="option"
+                      :aria-selected="sortBy === opt.value"
+                      class="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-canvas-elevated"
+                      :class="
+                        sortBy === opt.value
+                          ? 'font-semibold text-terra-text'
+                          : 'text-ink-secondary'
+                      "
+                      @click="sortBy = opt.value; openToolbarMenu = null"
+                    >
+                      <span>{{ opt.label }}</span>
+                      <Check v-if="sortBy === opt.value" class="h-3 w-3 shrink-0" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
