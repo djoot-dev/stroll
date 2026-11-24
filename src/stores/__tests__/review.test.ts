@@ -54,6 +54,18 @@ const removePullRequestReviewersMock = vi.fn<
     teamReviewers?: string[],
   ) => Promise<void>
 >(async () => undefined)
+const fetchOpenRepoPRsForStackMock = vi.fn<
+  (pat: string, owner: string, repo: string) => Promise<{ defaultBranch: string; prs: any[] }>
+>(async () => ({ defaultBranch: 'main', prs: [] }))
+const openExternalUrlMock = vi.fn<(url: string) => Promise<void>>(async () => undefined)
+
+vi.mock('@/services/native', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/native')>()
+  return {
+    ...actual,
+    openExternalUrl: (url: string) => openExternalUrlMock(url),
+  }
+})
 
 vi.mock('@/services/github', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/github')>()
@@ -103,6 +115,8 @@ vi.mock('@/services/github', async (importOriginal) => {
       reviewers: string[],
       teamReviewers?: string[],
     ) => removePullRequestReviewersMock(pat, owner, repo, number, reviewers, teamReviewers),
+    fetchOpenRepoPRsForStack: (pat: string, owner: string, repo: string) =>
+      fetchOpenRepoPRsForStackMock(pat, owner, repo),
   }
 })
 
@@ -485,6 +499,89 @@ describe('useReviewStore refreshCurrentPR and PR overview comments', () => {
     expect(store.isLoadingPR).toBe(false)
     expect(store.loadingPRKey).toBeNull()
     expect(store.prError).toBe('Network timeout')
+  })
+
+  it('discards late fetchPullRequest results after dismissPRLoading is called', async () => {
+    let resolveFetch!: (value: PullRequestData) => void
+    fetchPullRequestMock.mockImplementationOnce(
+      () =>
+        new Promise<PullRequestData>((resolve) => {
+          resolveFetch = resolve
+        }),
+    )
+
+    const auth = useAuthStore()
+    auth.pat = 'ghp_test_token'
+
+    const store = useReviewStore()
+    await store.loadMockPR()
+    const initialPrId = store.pr?.id
+
+    const pending = store.loadPRByRepo('acme', 'stroll', 77)
+    expect(store.isLoadingPR).toBe(true)
+    expect(store.loadingPRKey).toBe('acme/stroll#77')
+
+    store.dismissPRLoading()
+    expect(store.isLoadingPR).toBe(false)
+    expect(store.loadingPRKey).toBeNull()
+
+    resolveFetch(makePR({ id: 'pr_77', owner: 'acme', repo: 'stroll', number: 77 }))
+    const ok = await pending
+
+    expect(ok).toBe(false)
+    expect(store.pr?.id).toBe(initialPrId)
+  })
+
+  it('openStackPR opens external URL in demo mode and loads PR in real mode', async () => {
+    openExternalUrlMock.mockClear()
+    fetchPullRequestMock.mockClear()
+
+    const store = useReviewStore()
+    await store.loadMockPR()
+    expect(store.prStack).not.toBeNull()
+
+    const nextNode = store.prStack!.descendants[0]
+    await store.openStackPR(nextNode)
+    expect(openExternalUrlMock).toHaveBeenCalledWith(nextNode.url)
+    expect(fetchPullRequestMock).not.toHaveBeenCalled()
+
+    // Real mode
+    const auth = useAuthStore()
+    auth.pat = 'ghp_test_token'
+    store.pr = makePR({ id: 'pr_10', owner: 'acme', repo: 'stroll', number: 10, isMock: false })
+    fetchPullRequestMock.mockResolvedValueOnce(
+      makePR({ id: 'pr_11', owner: 'acme', repo: 'stroll', number: 11, isMock: false }),
+    )
+
+    await store.openStackPR({
+      ...nextNode,
+      owner: 'acme',
+      repo: 'stroll',
+      number: 11,
+    })
+    expect(fetchPullRequestMock).toHaveBeenCalledWith('ghp_test_token', 'acme', 'stroll', 11, null)
+    expect(store.pr?.number).toBe(11)
+  })
+
+  it('clears stale prStack when switching to a PR in another repo whose stack fetch fails', async () => {
+    const auth = useAuthStore()
+    auth.pat = 'ghp_test_token'
+
+    const store = useReviewStore()
+    await store.loadMockPR()
+    expect(store.prStack).not.toBeNull()
+
+    fetchOpenRepoPRsForStackMock.mockRejectedValueOnce(new Error('API error'))
+    fetchPullRequestMock.mockResolvedValueOnce(
+      makePR({ id: 'pr_other', owner: 'other', repo: 'repo', number: 5, isMock: false }),
+    )
+
+    await store.loadPRByRepo('other', 'repo', 5)
+    // Wait a microtask for the stack watcher's async fetch to settle
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(store.prStack).toBeNull()
   })
 })
 

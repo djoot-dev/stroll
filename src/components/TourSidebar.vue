@@ -19,10 +19,11 @@ import {
   Pin,
   RotateCcw,
   Sparkles,
+  X,
 } from '@lucide/vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { isLockfile, LAYER_META } from '@/services/readingOrder'
-import { openExternalUrl } from '@/services/native'
+import type { PRStackCandidate } from '@/services/prStack'
 import { computeRemainingReviewEstimate } from '@/services/reviewEstimate'
 import { computeRevealScrollTop } from '@/services/scrollReveal'
 import { useReviewStore } from '@/stores/review'
@@ -43,6 +44,19 @@ const stepListRef = ref<HTMLElement | null>(null)
 const statusFilter = ref<StepStatusFilter>('all')
 const hideReviewed = ref(false)
 const groupByLayer = ref(false)
+
+const prevStackNode = computed(() => {
+  const ancestors = review.prStack?.ancestors
+  return ancestors?.length ? ancestors[ancestors.length - 1] : null
+})
+const nextStackNode = computed(() => review.prStack?.descendants[0] ?? null)
+
+function isOpeningStackNode(node: PRStackCandidate): boolean {
+  return (
+    review.isLoadingPR &&
+    review.loadingPRKey === `${node.owner}/${node.repo}#${node.number}`
+  )
+}
 const collapsedLayers = ref<Set<ArchitecturalLayer>>(new Set())
 const showHiddenList = ref(false)
 const draggedPath = ref<string | null>(null)
@@ -440,30 +454,56 @@ function dirOnly(path: string): string {
           </span>
           <div class="flex shrink-0 items-center gap-1">
             <button
-              v-if="review.prStack.ancestors.length > 0"
+              v-if="prevStackNode"
               type="button"
-              :title="`Previous in stack: #${review.prStack.ancestors[review.prStack.ancestors.length - 1].number}`"
-              class="rounded border border-border bg-canvas-subtle px-1.5 py-0.5 font-mono text-[10px] text-ink-secondary hover:border-terra-border hover:text-terra-text"
-              @click="
-                const prev = review.prStack!.ancestors[review.prStack!.ancestors.length - 1];
-                review.pr?.isMock ? openExternalUrl(prev.url) : review.loadPRByRepo(prev.owner, prev.repo, prev.number)
+              :disabled="review.isLoadingPR"
+              :aria-busy="isOpeningStackNode(prevStackNode)"
+              :title="`Previous in stack: #${prevStackNode.number}`"
+              class="inline-flex items-center gap-1 rounded border border-border bg-canvas-subtle px-1.5 py-0.5 font-mono text-[10px] text-ink-secondary transition-colors"
+              :class="
+                review.isLoadingPR
+                  ? 'cursor-not-allowed opacity-60'
+                  : 'hover:border-terra-border hover:text-terra-text'
               "
+              @click="review.openStackPR(prevStackNode)"
             >
-              ↑ #{{ review.prStack.ancestors[review.prStack.ancestors.length - 1].number }}
+              <Loader2 v-if="isOpeningStackNode(prevStackNode)" class="h-2.5 w-2.5 animate-spin" />
+              <span>↑ #{{ prevStackNode.number }}</span>
             </button>
             <button
-              v-if="review.prStack.descendants.length > 0"
+              v-if="nextStackNode"
               type="button"
-              :title="`Next in stack: #${review.prStack.descendants[0].number}`"
-              class="rounded border border-border bg-canvas-subtle px-1.5 py-0.5 font-mono text-[10px] text-ink-secondary hover:border-terra-border hover:text-terra-text"
-              @click="
-                const next = review.prStack!.descendants[0];
-                review.pr?.isMock ? openExternalUrl(next.url) : review.loadPRByRepo(next.owner, next.repo, next.number)
+              :disabled="review.isLoadingPR"
+              :aria-busy="isOpeningStackNode(nextStackNode)"
+              :title="`Next in stack: #${nextStackNode.number}`"
+              class="inline-flex items-center gap-1 rounded border border-border bg-canvas-subtle px-1.5 py-0.5 font-mono text-[10px] text-ink-secondary transition-colors"
+              :class="
+                review.isLoadingPR
+                  ? 'cursor-not-allowed opacity-60'
+                  : 'hover:border-terra-border hover:text-terra-text'
               "
+              @click="review.openStackPR(nextStackNode)"
             >
-              ↓ #{{ review.prStack.descendants[0].number }}
+              <Loader2 v-if="isOpeningStackNode(nextStackNode)" class="h-2.5 w-2.5 animate-spin" />
+              <span>↓ #{{ nextStackNode.number }}</span>
             </button>
           </div>
+        </div>
+        <div
+          v-if="review.prStack && review.prError"
+          role="alert"
+          class="mt-1.5 flex items-start justify-between gap-1.5 rounded-lg border border-crimson-border bg-crimson-soft px-2.5 py-1.5 text-[10.5px] text-crimson-text"
+        >
+          <span class="min-w-0 break-words">{{ review.prError }}</span>
+          <button
+            type="button"
+            class="shrink-0 rounded p-0.5 hover:bg-crimson/10"
+            title="Dismiss error"
+            aria-label="Dismiss error"
+            @click="review.prError = null"
+          >
+            <X class="h-3 w-3" />
+          </button>
         </div>
       </div>
 

@@ -41,6 +41,7 @@ import {
 } from '@/services/markdown'
 import { openExternalUrl } from '@/services/native'
 import { mergeGate } from '@/services/mergeGate'
+import type { PRStackCandidate } from '@/services/prStack'
 import { appendQuoteToDraft, getCommentQuoteText } from '@/services/quoteReply'
 import { getReviewDecisionDisplay } from '@/services/reviewDecision'
 import { computeRemainingReviewEstimate } from '@/services/reviewEstimate'
@@ -61,6 +62,13 @@ import LabelPicker from './LabelPicker.vue'
 import MarkdownContent from './MarkdownContent.vue'
 import MarkdownEditor from './MarkdownEditor.vue'
 import ReactionBar from './ReactionBar.vue'
+
+function isOpeningStackNode(node: PRStackCandidate): boolean {
+  return (
+    review.isLoadingPR &&
+    review.loadingPRKey === `${node.owner}/${node.repo}#${node.number}`
+  )
+}
 import ReviewerPicker from './ReviewerPicker.vue'
 
 const auth = useAuthStore()
@@ -1087,21 +1095,25 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
           <ArrowRight class="h-3 w-3 shrink-0 rotate-180 text-ink-faint" />
           <button
             type="button"
-            :disabled="node.isCurrent"
+            :disabled="node.isCurrent || review.isLoadingPR"
+            :aria-busy="isOpeningStackNode(node)"
             :title="node.isCurrent ? 'Current PR' : `Open #${node.number}: ${node.title}`"
             class="inline-flex max-w-64 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-left text-[11px] transition-colors"
             :class="
               node.isCurrent
                 ? 'border-terra-border bg-terra-soft font-semibold text-terra-text'
-                : 'border-border bg-canvas text-ink-secondary hover:border-terra-border hover:text-ink'
+                : review.isLoadingPR
+                  ? 'cursor-not-allowed border-border bg-canvas text-ink-secondary opacity-60'
+                  : 'border-border bg-canvas text-ink-secondary hover:border-terra-border hover:text-ink'
             "
-            @click="
-              pr.isMock
-                ? openExternalUrl(node.url)
-                : review.loadPRByRepo(node.owner, node.repo, node.number)
-            "
+            @click="review.openStackPR(node)"
           >
+            <Loader2
+              v-if="isOpeningStackNode(node)"
+              class="h-3 w-3 shrink-0 animate-spin text-terra"
+            />
             <span
+              v-else
               class="h-1.5 w-1.5 shrink-0 rounded-full"
               :class="
                 node.ciState === 'SUCCESS'
@@ -1118,6 +1130,22 @@ async function handleRerequestReviewer(reviewer: ReviewerSummary) {
             <span v-if="node.isCurrent" class="shrink-0 text-[9.5px] uppercase tracking-wide opacity-80">(this)</span>
           </button>
         </template>
+      </div>
+      <div
+        v-if="review.prError"
+        role="alert"
+        class="mt-2.5 flex items-center justify-between gap-2 rounded-lg border border-crimson-border bg-crimson-soft px-3 py-1.5 text-xs text-crimson-text"
+      >
+        <span>{{ review.prError }}</span>
+        <button
+          type="button"
+          class="shrink-0 rounded p-0.5 hover:bg-crimson/10"
+          title="Dismiss error"
+          aria-label="Dismiss error"
+          @click="review.prError = null"
+        >
+          <X class="h-3.5 w-3.5" />
+        </button>
       </div>
     </section>
 

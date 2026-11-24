@@ -61,6 +61,7 @@ import {
   togglePinRecentPR as togglePinRecentPRItem,
 } from '@/services/inbox'
 import { detectMovedCode } from '@/services/movedCode'
+import { openExternalUrl } from '@/services/native'
 import { buildReadingOrder } from '@/services/readingOrder'
 import {
   clearReviewCache,
@@ -135,6 +136,7 @@ export const useReviewStore = defineStore('review', () => {
 
   const isLoadingPR = ref(false)
   const loadingPRKey = ref<string | null>(null)
+  let loadRequestToken = 0
   const isRefreshingPR = ref(false)
   const prHasRemoteUpdates = ref(false)
   const remoteUpdateSummary = ref<string | null>(null)
@@ -437,22 +439,43 @@ export const useReviewStore = defineStore('review', () => {
       return false
     }
 
+    const token = ++loadRequestToken
     isLoadingPR.value = true
     loadingPRKey.value = `${owner}/${repo}#${number}`
     prError.value = null
     try {
       const localRepoPath = repoPaths.value[`${owner}/${repo}`] ?? null
       const data = await fetchPullRequest(auth.pat, owner, repo, number, localRepoPath)
+      if (token !== loadRequestToken) return false
       await activatePR(data)
       showLoaderModal.value = false
       return true
     } catch (err) {
-      prError.value = err instanceof Error ? err.message : 'Failed to load Pull Request'
+      if (token === loadRequestToken) {
+        prError.value = err instanceof Error ? err.message : 'Failed to load Pull Request'
+      }
       return false
     } finally {
-      isLoadingPR.value = false
-      loadingPRKey.value = null
+      if (token === loadRequestToken) {
+        isLoadingPR.value = false
+        loadingPRKey.value = null
+      }
     }
+  }
+
+  function dismissPRLoading(): void {
+    loadRequestToken++
+    isLoadingPR.value = false
+    loadingPRKey.value = null
+  }
+
+  async function openStackPR(node: PRStackCandidate): Promise<boolean> {
+    if (isLoadingPR.value) return false
+    if (pr.value?.isMock) {
+      await openExternalUrl(node.url)
+      return true
+    }
+    return loadPRByRepo(node.owner, node.repo, node.number)
   }
 
   /**
@@ -1648,6 +1671,7 @@ export const useReviewStore = defineStore('review', () => {
       prStack.value = inferPRStack(current, cached.prs, cached.defaultBranch)
       return
     }
+    prStack.value = null
     const seq = ++stackLoadSeq
     try {
       const { defaultBranch, prs } = await fetchOpenRepoPRsForStack(
@@ -1781,6 +1805,8 @@ export const useReviewStore = defineStore('review', () => {
     loadMockPR,
     loadPRByUrl,
     loadPRByRepo,
+    dismissPRLoading,
+    openStackPR,
     refreshCurrentPR,
     checkForRemotePRUpdates,
     dismissRemoteUpdates,
