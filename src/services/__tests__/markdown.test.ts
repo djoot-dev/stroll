@@ -3,6 +3,7 @@ import {
   isVideoAttachmentUrl,
   parseChecklistProgress,
   renderSafeMarkdown,
+  renderSafeMarkdownBlocks,
   toggleChecklistItem,
 } from '../markdown'
 
@@ -259,5 +260,61 @@ describe('checklist helpers', () => {
     const html = renderSafeMarkdown('- [x] Done\n- [ ] Todo', { interactiveChecklist: true })
     expect(html).toContain('<button type="button" data-task-index="0" aria-label="Checked"')
     expect(html).toContain('<button type="button" data-task-index="1" aria-label="Unchecked"')
+  })
+})
+
+describe('renderSafeMarkdownBlocks', () => {
+  it('tracks accurate 1-based line ranges across blocks, lists, tables, and code fences', () => {
+    const md = [
+      '# Title',
+      '',
+      'Line 3 para',
+      'Line 4 para',
+      '',
+      '- First item',
+      '- Second item',
+      '  - Nested item',
+      '',
+      '| Col A | Col B |',
+      '| :--- | ---: |',
+      '| 1 | 2 |',
+      '',
+      '```ts',
+      'const a = 1',
+      '```',
+    ].join('\n')
+
+    const blocks = renderSafeMarkdownBlocks(md)
+    expect(blocks.map((b) => [b.kind, b.startLine, b.endLine])).toEqual([
+      ['heading', 1, 1],
+      ['paragraph', 3, 4],
+      ['list', 6, 8],
+      ['table', 10, 12],
+      ['code', 14, 16],
+    ])
+
+    expect(blocks[2].listMeta?.items.map((it) => [it.startLine, it.endLine])).toEqual([
+      [6, 6],
+      [7, 8],
+    ])
+    expect(blocks[3].tableMeta?.rows.map((r) => r.line)).toEqual([12])
+    expect(blocks[4].codeMeta?.contentStartLine).toBe(15)
+  })
+
+  it('preserves source line numbers when stripping multi-line HTML comments', () => {
+    const md = [
+      '<!--',
+      'template note',
+      '-->',
+      '# Heading on line 4',
+      '',
+      'Paragraph on line 6',
+    ].join('\n')
+
+    const blocks = renderSafeMarkdownBlocks(md)
+    expect(blocks.map((b) => [b.kind, b.startLine, b.endLine])).toEqual([
+      ['heading', 4, 4],
+      ['paragraph', 6, 6],
+    ])
   })
 })

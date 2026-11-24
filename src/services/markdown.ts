@@ -243,6 +243,15 @@ interface TaskCounter {
   index: number
 }
 
+interface ParsedListResult {
+  html: string
+  nextIndex: number
+  ordered: boolean
+  isTaskList: boolean
+  listClass: string
+  items: MarkdownListItemBlock[]
+}
+
 function parseList(
   lines: string[],
   startIndex: number,
@@ -251,8 +260,8 @@ function parseList(
   interactiveChecklist: boolean,
   taskCounter: TaskCounter,
   repoContext?: { owner: string; repo: string },
-): { html: string; nextIndex: number } {
-  const items: string[] = []
+): ParsedListResult {
+  const items: MarkdownListItemBlock[] = []
   let isTaskList = false
   let i = startIndex
 
@@ -268,17 +277,27 @@ function parseList(
 
     if (indent > baseIndent) {
       // Malformed leading deeper indent without a parent item: treat at current level
+      const nestedStartLine = i + 1
       const nested = parseList(lines, i, indent, isItemOrdered, interactiveChecklist, taskCounter, repoContext)
       if (items.length > 0) {
         const last = items[items.length - 1]
-        items[items.length - 1] = last.replace(/<\/li>$/, `${nested.html}</li>`)
+        last.innerHtml += nested.html
+        last.html = `<li>${last.innerHtml}</li>`
+        last.endLine = nested.nextIndex
       } else {
-        items.push(`<li>${nested.html}</li>`)
+        items.push({
+          innerHtml: nested.html,
+          html: `<li>${nested.html}</li>`,
+          rawText: lines[i].trim(),
+          startLine: nestedStartLine,
+          endLine: nested.nextIndex,
+        })
       }
       i = nested.nextIndex
       continue
     }
 
+    const itemStartLine = i + 1
     const content = match[3]
     let itemBody: string
     const taskMatch = !ordered ? content.match(/^\[([ xX])\]\s+(.*)$/) : null
@@ -312,19 +331,31 @@ function parseList(
           nestedOrdered,
           interactiveChecklist,
           taskCounter,
+          repoContext,
         )
         itemBody += nested.html
         i = nested.nextIndex
       }
     }
 
-    items.push(`<li>${itemBody}</li>`)
+    items.push({
+      innerHtml: itemBody,
+      html: `<li>${itemBody}</li>`,
+      rawText: content,
+      startLine: itemStartLine,
+      endLine: i,
+    })
   }
 
   if (ordered) {
+    const listClass = 'my-2 list-decimal space-y-1 pl-5 marker:text-ink-faint'
     return {
-      html: `<ol class="my-2 list-decimal space-y-1 pl-5 marker:text-ink-faint">${items.join('')}</ol>`,
+      html: `<ol class="${listClass}">${items.map((item) => item.html).join('')}</ol>`,
       nextIndex: i,
+      ordered: true,
+      isTaskList: false,
+      listClass,
+      items,
     }
   }
 
@@ -332,8 +363,67 @@ function parseList(
     ? 'my-2 space-y-1.5 pl-0 list-none'
     : 'my-2 space-y-1 pl-5 list-disc marker:text-ink-faint'
   return {
-    html: `<ul class="${listClass}">${items.join('')}</ul>`,
+    html: `<ul class="${listClass}">${items.map((item) => item.html).join('')}</ul>`,
     nextIndex: i,
+    ordered: false,
+    isTaskList,
+    listClass,
+    items,
+  }
+}
+
+export type MarkdownBlockKind =
+  | 'code'
+  | 'suggestion'
+  | 'hr'
+  | 'heading'
+  | 'alert'
+  | 'blockquote'
+  | 'table'
+  | 'list'
+  | 'video'
+  | 'paragraph'
+
+export interface MarkdownListItemBlock {
+  innerHtml: string
+  html: string
+  rawText: string
+  startLine: number
+  endLine: number
+}
+
+export interface MarkdownTableRowBlock {
+  cellsHtml: string[]
+  rawCells: string[]
+  line: number
+}
+
+export interface MarkdownBlock {
+  kind: MarkdownBlockKind
+  html: string
+  /** 1-based inclusive start line in source markdown. */
+  startLine: number
+  /** 1-based inclusive end line in source markdown. */
+  endLine: number
+  rawLines: string[]
+  codeMeta?: {
+    lang: string
+    codeLines: string[]
+    contentStartLine: number
+  }
+  listMeta?: {
+    ordered: boolean
+    isTaskList: boolean
+    listClass: string
+    items: MarkdownListItemBlock[]
+  }
+  tableMeta?: {
+    headers: string[]
+    alignments: Array<'left' | 'center' | 'right'>
+    headerHtml: string
+    headerStartLine: number
+    separatorLine: number
+    rows: MarkdownTableRowBlock[]
   }
 }
 
@@ -476,7 +566,7 @@ export function toggleChecklistItem(markdown: string, targetIndex: number): stri
   )
 }
 
-function stripHtmlComments(markdown: string): string {
+function stripHtmlCommentsPreservingLines(markdown: string): string {
   const out: string[] = []
   let i = 0
   const len = markdown.length
@@ -538,10 +628,13 @@ function stripHtmlComments(markdown: string): string {
       continue
     }
 
-    // Strip HTML comments outside code blocks and code spans
+    // Strip HTML comments outside code blocks and code spans while keeping newlines intact
     if (markdown.startsWith('<!--', i)) {
       const closeIdx = markdown.indexOf('-->', i + 4)
       if (closeIdx !== -1) {
+        for (let k = i; k < closeIdx + 3; k++) {
+          if (markdown[k] === '\n') out.push('\n')
+        }
         i = closeIdx + 3
         continue
       }
@@ -552,6 +645,19 @@ function stripHtmlComments(markdown: string): string {
   }
 
   return out.join('')
+}
+
+export function escapeMarkdownHtml(text: string): string {
+  return escapeHtml(text)
+}
+
+export function renderCodeBlockShell(lang: string, codeInnerHtml: string): string {
+  const escapedLang = lang ? escapeHtml(lang) : ''
+  const copyBtn = `<button type="button" data-copy-code aria-label="Copy code" title="Copy code" class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-[10px] font-medium normal-case tracking-normal text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-terra">Copy</button>`
+  const langBadge = escapedLang
+    ? `<div class="flex items-center justify-between border-b border-border-muted bg-canvas-elevated/50 px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-ink-faint"><div>${escapedLang}</div>${copyBtn}</div>`
+    : `<button type="button" data-copy-code aria-label="Copy code" title="Copy code" class="absolute right-2 top-2 z-10 inline-flex items-center gap-1 rounded border border-border bg-canvas-elevated/90 px-1.5 py-0.5 font-sans text-[10px] font-medium text-ink-muted opacity-0 transition-opacity hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-terra group-hover:opacity-100">Copy</button>`
+  return `<div class="group relative my-3 overflow-hidden rounded-lg border border-border bg-code">${langBadge}<pre class="overflow-x-auto p-3 font-mono text-xs leading-relaxed text-ink"><code>${codeInnerHtml}</code></pre></div>`
 }
 
 function renderSuggestionBlock(codeLines: string[], originalLines?: string[]): string {
@@ -588,15 +694,21 @@ export function isVideoAttachmentUrl(rawUrl: string): boolean {
   }
 }
 
-export function renderSafeMarkdown(
+export function tableAlignmentClass(align: 'left' | 'center' | 'right' | undefined): string {
+  if (align === 'center') return 'text-center'
+  if (align === 'right') return 'text-right'
+  return 'text-left'
+}
+
+export function renderSafeMarkdownBlocks(
   markdown: string,
   options?: MarkdownRenderOptions,
-): string {
-  const normalized = stripHtmlComments(markdown.replace(/\r\n?/g, '\n')).trim()
-  if (!normalized) return ''
+): MarkdownBlock[] {
+  const stripped = stripHtmlCommentsPreservingLines(markdown.replace(/\r\n?/g, '\n'))
+  if (!stripped.trim()) return []
 
-  const lines = normalized.split('\n')
-  const out: string[] = []
+  const lines = stripped.split('\n')
+  const blocks: MarkdownBlock[] = []
   const interactiveChecklist = Boolean(options?.interactiveChecklist)
   const repoContext = options?.repoContext
   const taskCounter: TaskCounter = { index: 0 }
@@ -608,28 +720,42 @@ export function renderSafeMarkdown(
     // Fenced code block (``` or ~~~)
     const fenceMatch = line.match(/^(`{3,}|~{3,})([\w+-]*)\s*$/)
     if (fenceMatch) {
+      const startLine = i + 1
       const fenceChar = fenceMatch[1][0]
       const fenceLen = fenceMatch[1].length
-      const lang = fenceMatch[2] ? escapeHtml(fenceMatch[2]) : ''
+      const rawLang = fenceMatch[2] ?? ''
       const closeRe = new RegExp(`^${fenceChar}{${fenceLen},}\\s*$`)
       const codeLines: string[] = []
+      const contentStartLine = i + 2
       i += 1
       while (i < lines.length && !closeRe.test(lines[i])) {
         codeLines.push(lines[i])
         i += 1
       }
       if (i < lines.length) i += 1 // skip closing fence
-      if (lang.toLowerCase() === 'suggestion') {
-        out.push(renderSuggestionBlock(codeLines, options?.originalLines))
+      const endLine = i
+      if (rawLang.toLowerCase() === 'suggestion') {
+        blocks.push({
+          kind: 'suggestion',
+          html: renderSuggestionBlock(codeLines, options?.originalLines),
+          startLine,
+          endLine,
+          rawLines: lines.slice(startLine - 1, endLine),
+        })
         continue
       }
-      const copyBtn = `<button type="button" data-copy-code aria-label="Copy code" title="Copy code" class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-[10px] font-medium normal-case tracking-normal text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-terra">Copy</button>`
-      const langBadge = lang
-        ? `<div class="flex items-center justify-between border-b border-border-muted bg-canvas-elevated/50 px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-ink-faint"><div>${lang}</div>${copyBtn}</div>`
-        : `<button type="button" data-copy-code aria-label="Copy code" title="Copy code" class="absolute right-2 top-2 z-10 inline-flex items-center gap-1 rounded border border-border bg-canvas-elevated/90 px-1.5 py-0.5 font-sans text-[10px] font-medium text-ink-muted opacity-0 transition-opacity hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-terra group-hover:opacity-100">Copy</button>`
-      out.push(
-        `<div class="group relative my-3 overflow-hidden rounded-lg border border-border bg-code">${langBadge}<pre class="overflow-x-auto p-3 font-mono text-xs leading-relaxed text-ink"><code>${escapeHtml(codeLines.join('\n'))}</code></pre></div>`,
-      )
+      blocks.push({
+        kind: 'code',
+        html: renderCodeBlockShell(rawLang, escapeHtml(codeLines.join('\n'))),
+        startLine,
+        endLine,
+        rawLines: lines.slice(startLine - 1, endLine),
+        codeMeta: {
+          lang: rawLang,
+          codeLines,
+          contentStartLine,
+        },
+      })
       continue
     }
 
@@ -641,7 +767,14 @@ export function renderSafeMarkdown(
 
     // Horizontal rule
     if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(line.trim())) {
-      out.push('<hr class="my-4 border-border-muted" />')
+      const startLine = i + 1
+      blocks.push({
+        kind: 'hr',
+        html: '<hr class="my-4 border-border-muted" />',
+        startLine,
+        endLine: startLine,
+        rawLines: [line],
+      })
       i += 1
       continue
     }
@@ -649,21 +782,29 @@ export function renderSafeMarkdown(
     // Heading (# to ######)
     const headingMatch = line.match(/^(#{1,6})\s+(.+?)(?:\s+#+\s*)?$/)
     if (headingMatch) {
+      const startLine = i + 1
       const level = headingMatch[1].length
-      out.push(
-        `<h${level} class="${HEADING_CLASSES[level]}">${renderInline(headingMatch[2].trim(), repoContext)}</h${level}>`,
-      )
+      blocks.push({
+        kind: 'heading',
+        html: `<h${level} class="${HEADING_CLASSES[level]}">${renderInline(headingMatch[2].trim(), repoContext)}</h${level}>`,
+        startLine,
+        endLine: startLine,
+        rawLines: [line],
+      })
       i += 1
       continue
     }
 
     // Blockquote & GitHub Alerts
     if (/^>\s?/.test(line)) {
+      const startIdx = i
       const quoteLines: string[] = []
       while (i < lines.length && /^>\s?/.test(lines[i])) {
         quoteLines.push(lines[i].replace(/^>\s?/, ''))
         i += 1
       }
+      const startLine = startIdx + 1
+      const endLine = i
 
       const alertMatch = quoteLines[0]?.trim().match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]$/i)
       if (alertMatch) {
@@ -673,45 +814,56 @@ export function renderSafeMarkdown(
         const bodyHtml = bodyLines.length > 0
           ? `<div class="mt-1 text-xs text-ink-secondary">${bodyLines.map((l) => renderInline(l, repoContext)).join('<br />')}</div>`
           : ''
-        out.push(
-          `<div class="my-2.5 rounded-lg border-l-2 px-3 py-2 ${style.wrapper}"><div class="text-[11px] font-semibold uppercase tracking-wide ${style.title}">${style.label}</div>${bodyHtml}</div>`,
-        )
+        blocks.push({
+          kind: 'alert',
+          html: `<div class="my-2.5 rounded-lg border-l-2 px-3 py-2 ${style.wrapper}"><div class="text-[11px] font-semibold uppercase tracking-wide ${style.title}">${style.label}</div>${bodyHtml}</div>`,
+          startLine,
+          endLine,
+          rawLines: lines.slice(startIdx, endLine),
+        })
       } else {
-        out.push(
-          `<blockquote class="my-2.5 border-l-2 border-terra-border bg-canvas/60 px-3 py-1.5 text-xs text-ink-muted">${quoteLines.map((l) => renderInline(l, repoContext)).join('<br />')}</blockquote>`,
-        )
+        blocks.push({
+          kind: 'blockquote',
+          html: `<blockquote class="my-2.5 border-l-2 border-terra-border bg-canvas/60 px-3 py-1.5 text-xs text-ink-muted">${quoteLines.map((l) => renderInline(l, repoContext)).join('<br />')}</blockquote>`,
+          startLine,
+          endLine,
+          rawLines: lines.slice(startIdx, endLine),
+        })
       }
       continue
     }
 
     // GFM Table
     if (isTableStart(lines, i)) {
+      const startIdx = i
+      const headerStartLine = i + 1
+      const separatorLine = i + 2
       const headers = splitTableRow(lines[i])
       const alignments = parseTableAlignments(lines[i + 1])
       i += 2
 
-      const bodyRows: string[][] = []
+      const bodyRows: MarkdownTableRowBlock[] = []
       while (
         i < lines.length &&
         lines[i].trim() !== '' &&
         lines[i].includes('|') &&
         !/^(`{3,}|~{3,})/.test(lines[i])
       ) {
-        bodyRows.push(splitTableRow(lines[i]))
+        const rawCells = splitTableRow(lines[i])
+        const cellsHtml = headers.map((_h, idx) => renderInline(rawCells[idx] ?? '', repoContext))
+        bodyRows.push({
+          cellsHtml,
+          rawCells,
+          line: i + 1,
+        })
         i += 1
       }
-
-      const alignClass = (idx: number): string => {
-        const align = alignments[idx] ?? 'left'
-        if (align === 'center') return 'text-center'
-        if (align === 'right') return 'text-right'
-        return 'text-left'
-      }
+      const endLine = i
 
       const ths = headers
         .map(
           (h, idx) =>
-            `<th class="border-b border-border bg-canvas-elevated/60 px-3 py-1.5 font-semibold text-ink ${alignClass(idx)}">${renderInline(h, repoContext)}</th>`,
+            `<th class="border-b border-border bg-canvas-elevated/60 px-3 py-1.5 font-semibold text-ink ${tableAlignmentClass(alignments[idx])}">${renderInline(h, repoContext)}</th>`,
         )
         .join('')
 
@@ -720,22 +872,35 @@ export function renderSafeMarkdown(
           const tds = headers
             .map(
               (_h, idx) =>
-                `<td class="border-b border-border-muted px-3 py-1.5 text-ink-secondary ${alignClass(idx)}">${renderInline(row[idx] ?? '', repoContext)}</td>`,
+                `<td class="border-b border-border-muted px-3 py-1.5 text-ink-secondary ${tableAlignmentClass(alignments[idx])}">${row.cellsHtml[idx] ?? ''}</td>`,
             )
             .join('')
           return `<tr class="last:[&>td]:border-b-0">${tds}</tr>`
         })
         .join('')
 
-      out.push(
-        `<div class="my-3 overflow-x-auto rounded-lg border border-border"><table class="w-full border-collapse text-xs"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table></div>`,
-      )
+      blocks.push({
+        kind: 'table',
+        html: `<div class="my-3 overflow-x-auto rounded-lg border border-border"><table class="w-full border-collapse text-xs"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table></div>`,
+        startLine: headerStartLine,
+        endLine,
+        rawLines: lines.slice(startIdx, endLine),
+        tableMeta: {
+          headers,
+          alignments,
+          headerHtml: `<tr>${ths}</tr>`,
+          headerStartLine,
+          separatorLine,
+          rows: bodyRows,
+        },
+      })
       continue
     }
 
     // Unordered or ordered list (with nesting)
     const listMatch = line.match(LIST_ITEM_RE)
     if (listMatch) {
+      const startIdx = i
       const ordered = /^\d+\.$/.test(listMatch[2])
       const parsed = parseList(
         lines,
@@ -746,12 +911,25 @@ export function renderSafeMarkdown(
         taskCounter,
         repoContext,
       )
-      out.push(parsed.html)
       i = parsed.nextIndex
+      blocks.push({
+        kind: 'list',
+        html: parsed.html,
+        startLine: startIdx + 1,
+        endLine: i,
+        rawLines: lines.slice(startIdx, i),
+        listMeta: {
+          ordered: parsed.ordered,
+          isTaskList: parsed.isTaskList,
+          listClass: parsed.listClass,
+          items: parsed.items,
+        },
+      })
       continue
     }
 
     // Paragraph (consume consecutive non-special lines)
+    const startIdx = i
     const paraLines: string[] = []
     while (
       i < lines.length &&
@@ -766,23 +944,42 @@ export function renderSafeMarkdown(
       paraLines.push(lines[i])
       i += 1
     }
+    const startLine = startIdx + 1
+    const endLine = i
     if (paraLines.length === 1) {
       const singleLine = paraLines[0].trim()
       if (/^https?:\/\/[^\s<>]+$/.test(singleLine) && isVideoAttachmentUrl(singleLine)) {
         const safeVideoUrl = sanitizeHref(singleLine)
         if (safeVideoUrl) {
           const escaped = escapeHtml(safeVideoUrl)
-          out.push(
-            `<div class="my-2 overflow-hidden rounded-lg border border-border bg-code"><video controls preload="metadata" playsinline class="max-h-96 w-full bg-black/80" src="${escaped}" data-video-attachment="${escaped}"></video><div class="flex items-center justify-between border-t border-border-muted bg-canvas-elevated/50 px-2.5 py-1 text-[10.5px] text-ink-muted"><span>Video attachment</span><a href="${escaped}" data-external-url="${escaped}" class="text-terra-text hover:underline">Open in browser</a></div></div>`,
-          )
+          blocks.push({
+            kind: 'video',
+            html: `<div class="my-2 overflow-hidden rounded-lg border border-border bg-code"><video controls preload="metadata" playsinline class="max-h-96 w-full bg-black/80" src="${escaped}" data-video-attachment="${escaped}"></video><div class="flex items-center justify-between border-t border-border-muted bg-canvas-elevated/50 px-2.5 py-1 text-[10.5px] text-ink-muted"><span>Video attachment</span><a href="${escaped}" data-external-url="${escaped}" class="text-terra-text hover:underline">Open in browser</a></div></div>`,
+            startLine,
+            endLine,
+            rawLines: lines.slice(startIdx, endLine),
+          })
           continue
         }
       }
     }
-    out.push(
-      `<p class="my-2 leading-relaxed first:mt-0 last:mb-0">${paraLines.map((l) => renderInline(l, repoContext)).join('<br />')}</p>`,
-    )
+    blocks.push({
+      kind: 'paragraph',
+      html: `<p class="my-2 leading-relaxed first:mt-0 last:mb-0">${paraLines.map((l) => renderInline(l, repoContext)).join('<br />')}</p>`,
+      startLine,
+      endLine,
+      rawLines: lines.slice(startIdx, endLine),
+    })
   }
 
-  return out.join('')
+  return blocks
+}
+
+export function renderSafeMarkdown(
+  markdown: string,
+  options?: MarkdownRenderOptions,
+): string {
+  return renderSafeMarkdownBlocks(markdown, options)
+    .map((block) => block.html)
+    .join('')
 }

@@ -13,6 +13,7 @@ import {
   Eye,
   FileArchive,
   FileCode2,
+  FileDiff,
   FileText,
   Filter,
   Image as ImageIcon,
@@ -45,7 +46,12 @@ import {
   type SymbolUsage,
 } from '@/services/codeContext'
 import { isCSharpPath, loadCSharpTypeIndex, type CSharpTypeIndex } from '@/services/csharpIndex'
-import { buildDiffSegments, isPureRename, type DiffLine } from '@/services/diffParser'
+import { buildDiffSegments, isPureRename, type DiffLine, type DiffSegment } from '@/services/diffParser'
+import {
+  buildMarkdownDiffBlocks,
+  type MarkdownDiffBlock,
+  type MarkdownDiffLineAnchor,
+} from '@/services/markdownDiff'
 import { formatMovedBadgeLabel, type MovedLineInfo } from '@/services/movedCode'
 import {
   computeCenteredRevealDelta,
@@ -80,6 +86,7 @@ import DiffSearchPalette from './DiffSearchPalette.vue'
 import FileCommitsBar from './FileCommitsBar.vue'
 import ImageDiffViewer from './ImageDiffViewer.vue'
 import MarkdownContent from './MarkdownContent.vue'
+import MarkdownDiffPreview from './MarkdownDiffPreview.vue'
 import ReferencedContextCard from './ReferencedContextCard.vue'
 import ReviewThreadCard from './ReviewThreadCard.vue'
 
@@ -96,6 +103,14 @@ const expandedGaps = ref<Set<string>>(new Set())
 const isGeneratedExpanded = ref(false)
 const showSvgSource = ref(false)
 const showMarkdownPreview = ref(false)
+const showMarkdownChanges = ref(true)
+const activePreviewComposer = ref<{
+  blockId: string
+  line: number
+  side: DiffSide
+} | null>(null)
+const flashPreviewBlockId = ref<string | null>(null)
+let flashPreviewTimer: ReturnType<typeof setTimeout> | null = null
 const baseImageSrc = ref<string | null>(null)
 const headImageSrc = ref<string | null>(null)
 const isLoadingImages = ref(false)
@@ -339,6 +354,8 @@ watch(
     showSvgSource.value = false
     showMarkdownPreview.value = false
     activeComposer.value = null
+    activePreviewComposer.value = null
+    flashPreviewBlockId.value = null
     fileComposerOpen.value = false
     activeScopes.value = []
     activeReplacedCount.value = 0
@@ -416,6 +433,17 @@ const segments = computed(() =>
     movedCode: review.movedCodeIndex,
   }),
 )
+
+const markdownDiffBlocks = computed<MarkdownDiffBlock[]>(() => {
+  if (!canPreviewMarkdown.value) return []
+  return buildMarkdownDiffBlocks({
+    baseContent: props.step.file.baseContent,
+    headContent: props.step.file.headContent,
+    status: props.step.file.status,
+    segments: segments.value,
+    repoContext: review.pr ? { owner: review.pr.owner, repo: review.pr.repo } : undefined,
+  })
+})
 
 const gapSegments = computed(() => segments.value.filter((seg) => seg.kind === 'gap'))
 
@@ -784,6 +812,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleDiffKeydown)
   if (lingerTimer) clearTimeout(lingerTimer)
+  if (flashPreviewTimer) clearTimeout(flashPreviewTimer)
   splitResizeObserver?.disconnect()
   splitResizeObserver = null
 })
@@ -1371,41 +1400,116 @@ watch(
 const flashLineKey = ref<string | null>(null)
 let flashLineTimer: ReturnType<typeof setTimeout> | null = null
 
-async function revealFocusedLine() {
-  const target = review.focusedLine
-  if (!target || target.path !== props.step.file.path) return
-  if (allDiffLines.value.length === 0) return
+function openPreviewComment(blockId: string, anchor: MarkdownDiffLineAnchor) {
+  fileComposerOpen.value = false
+  editingDraftId.value = null
+  activePreviewComposer.value = {
+    blockId,
+    line: anchor.line,
+    side: anchor.side,
+  }
+}
+
+async function handleCreatePreviewDraft(body: string) {
+  if (!activePreviewComposer.value) return
+  await review.addDraftComment(
+    props.step.file.path,
+    activePreviewComposer.value.line,
+    activePreviewComposer.value.side,
+    body,
+  )
+  activePreviewComposer.value = null
+}
+
+async function scrollToSourceLine(targetLine: number, side?: DiffSide): Promise<boolean> {
+  if (allDiffLines.value.length === 0) return false
 
   const line =
-    target.side === 'LEFT'
-      ? (allDiffLines.value.find((l) => l.oldLineNumber === target.line && l.type === 'del') ??
-         allDiffLines.value.find((l) => l.oldLineNumber === target.line) ??
-         allDiffLines.value.find((l) => l.newLineNumber === target.line) ??
-         allDiffLines.value.find((l) => l.commentLine === target.line))
-      : target.side === 'RIGHT'
-        ? (allDiffLines.value.find((l) => l.newLineNumber === target.line && l.type === 'add') ??
-           allDiffLines.value.find((l) => l.newLineNumber === target.line) ??
-           allDiffLines.value.find((l) => l.commentLine === target.line) ??
-           allDiffLines.value.find((l) => l.oldLineNumber === target.line))
-        : (allDiffLines.value.find((l) => l.newLineNumber === target.line) ??
-           allDiffLines.value.find((l) => l.commentLine === target.line) ??
-           allDiffLines.value.find((l) => l.oldLineNumber === target.line))
-  if (!line) {
-    review.focusedLine = null
-    return
-  }
+    side === 'LEFT'
+      ? (allDiffLines.value.find((l) => l.oldLineNumber === targetLine && l.type === 'del') ??
+         allDiffLines.value.find((l) => l.oldLineNumber === targetLine) ??
+         allDiffLines.value.find((l) => l.newLineNumber === targetLine) ??
+         allDiffLines.value.find((l) => l.commentLine === targetLine))
+      : side === 'RIGHT'
+        ? (allDiffLines.value.find((l) => l.newLineNumber === targetLine && l.type === 'add') ??
+           allDiffLines.value.find((l) => l.newLineNumber === targetLine) ??
+           allDiffLines.value.find((l) => l.commentLine === targetLine) ??
+           allDiffLines.value.find((l) => l.oldLineNumber === targetLine))
+        : (allDiffLines.value.find((l) => l.newLineNumber === targetLine) ??
+           allDiffLines.value.find((l) => l.commentLine === targetLine) ??
+           allDiffLines.value.find((l) => l.oldLineNumber === targetLine))
+  if (!line) return false
 
   ensureLineRendered(line.key)
   await nextTick()
   const row = findLineRow(line.key)
-  if (!row || review.focusedLine?.path !== target.path) return
-  review.focusedLine = null
+  if (!row) return false
   row.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
   flashLineKey.value = line.key
   if (flashLineTimer) clearTimeout(flashLineTimer)
   flashLineTimer = setTimeout(() => {
     flashLineKey.value = null
   }, 1800)
+  return true
+}
+
+async function jumpFromPreviewToSource(anchor: MarkdownDiffLineAnchor) {
+  await scrollToSourceLine(anchor.line, anchor.side)
+}
+
+async function jumpFromHunkToPreview(seg: DiffSegment) {
+  if (!canPreviewMarkdown.value) return
+  const changedLines = seg.lines.filter((l) => l.type === 'add' || l.type === 'del')
+  const probeLines = changedLines.length > 0 ? changedLines : seg.lines
+
+  showMarkdownPreview.value = true
+  showMarkdownChanges.value = true
+  await nextTick()
+
+  const match =
+    markdownDiffBlocks.value.find((block) => {
+      if (block.changeKind === 'unchanged') return false
+      return probeLines.some((line) => {
+        if (line.type === 'del' && line.oldLineNumber !== null && block.baseRange) {
+          return (
+            line.oldLineNumber >= block.baseRange.startLine &&
+            line.oldLineNumber <= block.baseRange.endLine
+          )
+        }
+        if (line.newLineNumber !== null && block.headRange) {
+          return (
+            line.newLineNumber >= block.headRange.startLine &&
+            line.newLineNumber <= block.headRange.endLine
+          )
+        }
+        return false
+      })
+    }) ?? markdownDiffBlocks.value.find((b) => b.changeKind !== 'unchanged')
+
+  if (!match) return
+  const el = diffSurfaceRef.value?.querySelector<HTMLElement>(
+    `[data-md-block-id="${CSS.escape(match.id)}"]`,
+  )
+  if (!el) return
+  el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
+  flashPreviewBlockId.value = match.id
+  if (flashPreviewTimer) clearTimeout(flashPreviewTimer)
+  flashPreviewTimer = setTimeout(() => {
+    flashPreviewBlockId.value = null
+  }, 1800)
+}
+
+async function revealFocusedLine() {
+  const target = review.focusedLine
+  if (!target || target.path !== props.step.file.path) return
+  if (allDiffLines.value.length === 0) return
+
+  const revealed = await scrollToSourceLine(target.line, target.side)
+  if (!revealed || review.focusedLine?.path !== target.path) {
+    if (!revealed) review.focusedLine = null
+    return
+  }
+  review.focusedLine = null
 }
 
 watch(
@@ -2092,19 +2196,57 @@ function statusBadgeClass(status: string): string {
               Markdown preview ({{ step.file.status === 'deleted' ? 'Before / Base' : 'After / Head' }})
             </span>
           </div>
-          <button
-            class="inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-0.5 text-[10.5px] text-ink-secondary transition-colors hover:bg-canvas-elevated hover:text-ink"
-            @click="showMarkdownPreview = false"
-          >
-            <Code2 class="h-3 w-3" />
-            <span>View Source Diff</span>
-          </button>
+          <div class="flex items-center gap-1.5">
+            <button
+              type="button"
+              data-toggle-markdown-changes
+              class="inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[10.5px] transition-colors"
+              :class="
+                showMarkdownChanges
+                  ? 'border-terra-border bg-terra-soft text-terra-text'
+                  : 'border-border bg-canvas text-ink-secondary hover:bg-canvas-elevated hover:text-ink'
+              "
+              :aria-pressed="showMarkdownChanges"
+              title="Toggle inline diff highlights in markdown preview"
+              @click="showMarkdownChanges = !showMarkdownChanges"
+            >
+              <FileDiff class="h-3 w-3" />
+              <span>Show changes</span>
+            </button>
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 rounded-lg border border-border bg-canvas px-2 py-0.5 text-[10.5px] text-ink-secondary transition-colors hover:bg-canvas-elevated hover:text-ink"
+              @click="showMarkdownPreview = false"
+            >
+              <Code2 class="h-3 w-3" />
+              <span>View Source Diff</span>
+            </button>
+          </div>
         </div>
 
         <div class="bg-canvas p-6">
-          <MarkdownContent
-            :content="markdownPreviewSource ?? ''"
-            class="mx-auto max-w-3xl text-[13px] leading-relaxed text-ink-secondary"
+          <MarkdownDiffPreview
+            :blocks="markdownDiffBlocks"
+            :plain-source="markdownPreviewSource ?? ''"
+            :show-changes="showMarkdownChanges"
+            :threads="fileThreads"
+            :drafts="fileDrafts"
+            :show-unresolved-only="review.showUnresolvedOnly"
+            :editing-draft-id="editingDraftId"
+            :draft-edit-error="draftEditError"
+            :flash-draft-id="flashDraftId"
+            :active-composer="activePreviewComposer"
+            :flash-block-id="flashPreviewBlockId"
+            :get-original-code="getOriginalCodeForRange"
+            :get-original-lines="getOriginalLinesForRange"
+            @jump-to-source="jumpFromPreviewToSource"
+            @open-comment="openPreviewComment"
+            @submit-comment="handleCreatePreviewDraft"
+            @cancel-comment="activePreviewComposer = null"
+            @start-edit-draft="startEditingDraft"
+            @update-draft="handleUpdateDraft"
+            @cancel-edit-draft="cancelEditingDraft"
+            @delete-draft="review.deleteDraftComment"
           />
         </div>
       </template>
@@ -2597,9 +2739,20 @@ function statusBadgeClass(status: string): string {
           <!-- Diff Hunk Block -->
           <template v-else>
             <div
-              class="sticky left-0 w-[100cqw] border-y border-border-muted bg-sage-soft px-4 py-1 text-[11px] font-medium text-sage-text"
+              class="sticky left-0 flex w-[100cqw] items-center justify-between gap-2 border-y border-border-muted bg-sage-soft px-4 py-1 text-[11px] font-medium text-sage-text"
             >
-              {{ seg.header }}
+              <span class="truncate">{{ seg.header }}</span>
+              <button
+                v-if="canPreviewMarkdown"
+                type="button"
+                data-hunk-jump-preview
+                class="inline-flex shrink-0 items-center gap-1 rounded border border-sage-border bg-canvas/90 px-2 py-0.5 font-sans text-[10.5px] font-normal text-sage-text transition-colors hover:bg-canvas hover:text-ink"
+                title="Jump to matching section in Markdown preview"
+                @click="jumpFromHunkToPreview(seg)"
+              >
+                <FileText class="h-3 w-3" />
+                <span>Jump to preview</span>
+              </button>
             </div>
 
             <template v-if="settings.diffViewMode === 'split'">
