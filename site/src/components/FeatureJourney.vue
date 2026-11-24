@@ -217,8 +217,10 @@ const AST_EXAMPLES = {
           <div class="overflow-hidden rounded-2xl border border-border bg-canvas-subtle shadow-card">
             <img
               :src="isDark ? `${base}screenshots/overview-dark.png` : `${base}screenshots/overview-light.png`"
+              width="1024"
+              height="633"
               alt="Stroll PR Overview showing PR status badges, description, checks, reviewers, and commits"
-              class="block w-full object-cover"
+              class="block h-auto w-full object-cover"
               loading="lazy"
             />
           </div>
@@ -521,8 +523,10 @@ const AST_EXAMPLES = {
           <div class="overflow-hidden rounded-2xl border border-border bg-canvas-subtle shadow-card">
             <img
               :src="`${base}screenshots/command-palette-light.png`"
+              width="1024"
+              height="633"
               alt="Stroll Command Palette open over the diff viewer, listing PR Overview, tour steps, and quick actions"
-              class="block w-full object-cover"
+              class="block h-auto w-full object-cover"
               loading="lazy"
             />
           </div>
