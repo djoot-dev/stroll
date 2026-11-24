@@ -27,8 +27,24 @@
   box-shadow: var(--stroll-shadow-elevated);
 }
 
+/* Winding terracotta footpath animation */
+@keyframes footpath-flow {
+  from {
+    stroke-dashoffset: 32;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
 .footpath-dash {
   stroke-dasharray: 8 8;
+  animation: footpath-flow 2.8s linear infinite;
+}
+
+.footpath-track {
+  overflow-anchor: none;
+  contain: layout paint;
 }
 
 /* Scroll-triggered reveal */
@@ -44,6 +60,10 @@
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
+  }
+
+  .footpath-dash {
+    animation: none;
   }
 
   .reveal-section {

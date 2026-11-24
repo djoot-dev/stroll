@@ -119,7 +119,7 @@ const AST_EXAMPLES = {
     <!-- Winding terracotta footpath spine (desktop) -->
     <div
       aria-hidden="true"
-      class="pointer-events-none absolute inset-y-12 left-1/2 z-0 hidden -translate-x-1/2 lg:block"
+      class="footpath-track pointer-events-none absolute inset-y-12 left-1/2 z-0 hidden -translate-x-1/2 lg:block"
     >
       <svg
         width="176"
