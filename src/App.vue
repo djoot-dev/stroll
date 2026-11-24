@@ -7,6 +7,7 @@ import FinishReviewModal from '@/components/FinishReviewModal.vue'
 import KeyboardShortcutsBar from '@/components/KeyboardShortcutsBar.vue'
 import PRInboxView from '@/components/PRInboxView.vue'
 import PRLoaderModal from '@/components/PRLoaderModal.vue'
+import PRLoadingOverlay from '@/components/PRLoadingOverlay.vue'
 import PROverview from '@/components/PROverview.vue'
 import ReviewSubmittedView from '@/components/ReviewSubmittedView.vue'
 import SettingsModal from '@/components/SettingsModal.vue'
@@ -186,6 +187,11 @@ function handleKeydown(e: KeyboardEvent) {
       }
       return
     }
+    if (review.isLoadingPR) {
+      e.preventDefault()
+      review.dismissPRLoading()
+      return
+    }
     if (e.defaultPrevented) {
       return
     }
@@ -196,7 +202,7 @@ function handleKeydown(e: KeyboardEvent) {
     }
   }
 
-  if (settings.isOpen || review.showFinishModal || review.showLoaderModal || showCommandPalette.value) return
+  if (settings.isOpen || review.isLoadingPR || review.showFinishModal || review.showLoaderModal || showCommandPalette.value) return
   if (review.screen !== 'review') return
   if (isEditableElement(e.target)) return
   if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -557,5 +563,6 @@ onBeforeUnmount(() => {
   <ShortcutsCheatsheetModal :open="showShortcutsModal" @close="showShortcutsModal = false" />
   <SettingsModal />
   <PRLoaderModal />
+  <PRLoadingOverlay />
   <FinishReviewModal />
 </template>

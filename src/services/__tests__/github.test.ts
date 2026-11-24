@@ -4,6 +4,7 @@ import {
   buildFileHistoryQuery,
   detectLanguage,
   fetchFileCommitHistory,
+  fetchOpenRepoPRsForStack,
   fetchRestPRFiles,
   getGitHubEndpoints,
   isBinaryFilePath,
@@ -429,5 +430,80 @@ describe('fetchFileCommitHistory', () => {
       isOutdated: true,
       diffHunk: '@@ -40,3 +40,3 @@\n-old\n+new',
     })
+  })
+})
+
+describe('fetchOpenRepoPRsForStack pagination', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('paginates through multiple pages of open PRs using pageInfo cursor', async () => {
+    const fetchSpy = vi
+      .spyOn(httpModule, 'httpFetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              repository: {
+                defaultBranchRef: { name: 'develop' },
+                pullRequests: {
+                  pageInfo: { hasNextPage: true, endCursor: 'cursor_p1' },
+                  nodes: [
+                    {
+                      number: 101,
+                      title: 'Stack part 1',
+                      url: 'https://github.com/acme/stroll/pull/101',
+                      state: 'OPEN',
+                      isDraft: false,
+                      baseRefName: 'develop',
+                      headRefName: 'feat/p1',
+                      isCrossRepository: false,
+                      reviewDecision: null,
+                      commits: { nodes: [] },
+                    },
+                  ],
+                },
+              },
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              repository: {
+                defaultBranchRef: { name: 'develop' },
+                pullRequests: {
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                  nodes: [
+                    {
+                      number: 102,
+                      title: 'Stack part 2',
+                      url: 'https://github.com/acme/stroll/pull/102',
+                      state: 'OPEN',
+                      isDraft: false,
+                      baseRefName: 'feat/p1',
+                      headRefName: 'feat/p2',
+                      isCrossRepository: false,
+                      reviewDecision: 'APPROVED',
+                      commits: { nodes: [{ commit: { statusCheckRollup: { state: 'SUCCESS' } } }] },
+                    },
+                  ],
+                },
+              },
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+
+    const result = await fetchOpenRepoPRsForStack('ghp_test', 'acme', 'stroll')
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    expect(result.defaultBranch).toBe('develop')
+    expect(result.prs.map((p) => p.number)).toEqual([101, 102])
+    expect(result.prs[1].ciState).toBe('SUCCESS')
   })
 })

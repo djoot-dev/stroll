@@ -2928,6 +2928,8 @@ export async function fetchPRReferenceMetadataBatch(
   return out
 }
 
+const MAX_STACK_PR_PAGES = 5
+
 export async function fetchOpenRepoPRsForStack(
   pat: string,
   owner: string,
@@ -2937,12 +2939,21 @@ export async function fetchOpenRepoPRsForStack(
   prs: import('./prStack').PRStackCandidate[]
 }> {
   const gql = `
-    query RepoOpenPRsForStack($owner: String!, $repo: String!) {
+    query RepoOpenPRsForStack($owner: String!, $repo: String!, $cursor: String) {
       repository(owner: $owner, name: $repo) {
         defaultBranchRef {
           name
         }
-        pullRequests(first: 50, states: OPEN, orderBy: { field: UPDATED_AT, direction: DESC }) {
+        pullRequests(
+          first: 100
+          after: $cursor
+          states: OPEN
+          orderBy: { field: UPDATED_AT, direction: DESC }
+        ) {
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
           nodes {
             number
             title
@@ -2968,50 +2979,69 @@ export async function fetchOpenRepoPRsForStack(
     }
   `
 
-  const data = await graphql<{
-    repository: {
-      defaultBranchRef: { name: string } | null
-      pullRequests: {
-        nodes: Array<{
-          number: number
-          title: string
-          url: string
-          state: 'OPEN' | 'CLOSED' | 'MERGED'
-          isDraft: boolean
-          baseRefName: string
-          headRefName: string
-          isCrossRepository: boolean | null
-          reviewDecision: PRReviewDecision
-          commits: {
-            nodes: Array<{
-              commit: {
-                statusCheckRollup: { state: CheckRollupState } | null
-              }
-            }>
-          } | null
-        } | null>
-      }
-    } | null
-  }>(pat, gql, { owner, repo })
-
-  const defaultBranch = data.repository?.defaultBranchRef?.name ?? 'main'
+  let defaultBranch = 'main'
   const prs: import('./prStack').PRStackCandidate[] = []
-  for (const n of data.repository?.pullRequests?.nodes ?? []) {
-    if (!n) continue
-    prs.push({
-      owner,
-      repo,
-      number: n.number,
-      title: n.title,
-      url: n.url,
-      state: n.state,
-      isDraft: Boolean(n.isDraft),
-      baseRefName: n.baseRefName,
-      headRefName: n.headRefName,
-      isCrossRepository: Boolean(n.isCrossRepository),
-      reviewDecision: n.reviewDecision ?? null,
-      ciState: n.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state ?? null,
-    })
+  let cursor: string | null = null
+
+  for (let page = 0; page < MAX_STACK_PR_PAGES; page++) {
+    const data: {
+      repository: {
+        defaultBranchRef: { name: string } | null
+        pullRequests: {
+          pageInfo: {
+            hasNextPage: boolean
+            endCursor: string | null
+          }
+          nodes: Array<{
+            number: number
+            title: string
+            url: string
+            state: 'OPEN' | 'CLOSED' | 'MERGED'
+            isDraft: boolean
+            baseRefName: string
+            headRefName: string
+            isCrossRepository: boolean | null
+            reviewDecision: PRReviewDecision
+            commits: {
+              nodes: Array<{
+                commit: {
+                  statusCheckRollup: { state: CheckRollupState } | null
+                }
+              }>
+            } | null
+          } | null>
+        }
+      } | null
+    } = await graphql(pat, gql, { owner, repo, cursor })
+
+    if (page === 0) {
+      defaultBranch = data.repository?.defaultBranchRef?.name ?? 'main'
+    }
+
+    const conn = data.repository?.pullRequests
+    for (const n of conn?.nodes ?? []) {
+      if (!n) continue
+      prs.push({
+        owner,
+        repo,
+        number: n.number,
+        title: n.title,
+        url: n.url,
+        state: n.state,
+        isDraft: Boolean(n.isDraft),
+        baseRefName: n.baseRefName,
+        headRefName: n.headRefName,
+        isCrossRepository: Boolean(n.isCrossRepository),
+        reviewDecision: n.reviewDecision ?? null,
+        ciState: n.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state ?? null,
+      })
+    }
+
+    if (!conn?.pageInfo.hasNextPage || !conn.pageInfo.endCursor) {
+      break
+    }
+    cursor = conn.pageInfo.endCursor
   }
+
   return { defaultBranch, prs }
 }
