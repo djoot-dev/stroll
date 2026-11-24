@@ -103,6 +103,7 @@ describe('buildReadingOrder', () => {
     expect(paths).toEqual([
       'db/migrations/004_webhook_deliveries.sql',
       'src/types/webhook.ts',
+      'docs/webhooks.md',
       'src/services/rateLimiter.ts',
       'src/services/webhookDispatcher.ts',
       'src/tests/webhookDispatcher.test.ts',

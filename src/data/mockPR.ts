@@ -69,6 +69,68 @@ export interface WebhookEventPayload {
   data: Record<string, unknown>
 }`
 
+const DOCS_BASE = `# Webhook Delivery Guide
+
+Outgoing webhooks are dispatched sequentially using best-effort HTTP POST requests.
+
+## Retry & Rate Limiting
+
+- Failed deliveries are dropped after the first timeout.
+- Requests are sent without per-endpoint throttling.
+- Payloads include an \`id\` and \`type\` field.
+
+## Delivery Statuses
+
+| Status | Meaning | Retried |
+| :--- | :--- | :---: |
+| \`delivered\` | Endpoint returned 2xx | No |
+| \`dropped\` | Timeout after 5s | No |
+
+## Legacy Signing Note
+
+Earlier versions used an unversioned HMAC header without timestamp validation.
+
+## SDK Example
+
+\`\`\`ts
+const endpoint = {
+  id: 'ep_123',
+  url: 'https://hooks.example.com',
+}
+\`\`\``
+
+const DOCS_HEAD = `# Webhook Delivery Guide
+
+Outgoing webhooks use an in-memory token bucket rate limiter and persist retryable attempts in Postgres.
+
+## Retry & Rate Limiting
+
+- Failed deliveries retry with exponential backoff and jitter.
+- Requests respect each endpoint's \`maxRequestsPerMinute\` limit.
+- Payloads include an \`id\` and \`type\` field.
+- New \`delivery.failed\` event fires once max attempts are exhausted.
+
+> [!NOTE]
+> Tune \`maxRequestsPerMinute\` in the **Webhook Endpoint** settings card.
+
+## Delivery Statuses
+
+| Status | Meaning | Retried |
+| :--- | :--- | :---: |
+| \`delivered\` | Endpoint returned 2xx | No |
+| \`retrying\` | Scheduled via \`nextRetryAt\` | Yes |
+| \`failed\` | Exhausted retry budget | No |
+
+## SDK Example
+
+\`\`\`ts
+const endpoint = {
+  id: 'ep_123',
+  url: 'https://hooks.example.com',
+  maxRequestsPerMinute: 120,
+}
+\`\`\``
+
 const RATE_LIMITER_HEAD = `import type { WebhookEndpoint } from '../types/webhook'
 
 interface BucketState {
@@ -573,6 +635,26 @@ const delayMs = computeBackoffMs(attempt, {
         },
       ],
     },
+    {
+      id: 'thread-mock-docs',
+      path: 'docs/webhooks.md',
+      line: 13,
+      side: 'RIGHT',
+      isResolved: false,
+      isOutdated: false,
+      diffHunk: '@@ -7,3 +7,7 @@\n > [!NOTE]\n+> Tune `maxRequestsPerMinute` in the **Webhook Endpoint** settings card.',
+      comments: [
+        {
+          id: 'comment-mock-docs-1',
+          author: {
+            login: 'samira-okafor',
+            avatarUrl: 'https://avatars.githubusercontent.com/u/4?v=4',
+          },
+          body: 'Should we also mention the default `maxRequestsPerMinute` value here so operators know what to expect?',
+          createdAt: '2026-11-18T12:05:00Z',
+        },
+      ],
+    },
   ],
   files: [
     // Intentionally listed in alphabetical order (like GitHub) so the Reading Order Engine visibly reorders them!
@@ -914,6 +996,55 @@ const delayMs = computeBackoffMs(attempt, {
 +  data: Record<string, unknown>
  }`,
     },
+    {
+      path: 'docs/webhooks.md',
+      status: 'modified',
+      additions: 10,
+      deletions: 8,
+      language: 'markdown',
+      baseContent: DOCS_BASE,
+      headContent: DOCS_HEAD,
+      patch: `@@ -1,29 +1,31 @@
+ # Webhook Delivery Guide
+ 
+-Outgoing webhooks are dispatched sequentially using best-effort HTTP POST requests.
++Outgoing webhooks use an in-memory token bucket rate limiter and persist retryable attempts in Postgres.
+ 
+ ## Retry & Rate Limiting
+ 
+-- Failed deliveries are dropped after the first timeout.
+-- Requests are sent without per-endpoint throttling.
++- Failed deliveries retry with exponential backoff and jitter.
++- Requests respect each endpoint's \`maxRequestsPerMinute\` limit.
+ - Payloads include an \`id\` and \`type\` field.
++- New \`delivery.failed\` event fires once max attempts are exhausted.
++
++> [!NOTE]
++> Tune \`maxRequestsPerMinute\` in the **Webhook Endpoint** settings card.
+ 
+ ## Delivery Statuses
+ 
+ | Status | Meaning | Retried |
+ | :--- | :--- | :---: |
+ | \`delivered\` | Endpoint returned 2xx | No |
+-| \`dropped\` | Timeout after 5s | No |
+-
+-## Legacy Signing Note
+-
+-Earlier versions used an unversioned HMAC header without timestamp validation.
++| \`retrying\` | Scheduled via \`nextRetryAt\` | Yes |
++| \`failed\` | Exhausted retry budget | No |
+ 
+ ## SDK Example
+ 
+ \`\`\`ts
+ const endpoint = {
+   id: 'ep_123',
+   url: 'https://hooks.example.com',
++  maxRequestsPerMinute: 120,
+ }
+ \`\`\``,
+    },
   ],
 }
 
@@ -954,6 +1085,7 @@ export const MOCK_COMMIT_BODIES: Record<string, string> = {
 
 export const MOCK_FILE_COMMIT_OIDS: Record<string, string[]> = {
   'db/migrations/004_webhook_deliveries.sql': ['c111111'],
+  'docs/webhooks.md': ['e4f5a6b'],
   'src/types/webhook.ts': ['e4f5a6b', 'c111111'],
   'src/services/rateLimiter.ts': ['e4f5a6b'],
   'src/services/webhookDispatcher.ts': ['e4f5a6b'],
