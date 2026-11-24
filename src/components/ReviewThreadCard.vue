@@ -12,14 +12,13 @@ import {
   Trash2,
 } from '@lucide/vue'
 import { computed, nextTick, ref } from 'vue'
-import { useCommentAutocomplete } from '@/composables/useCommentAutocomplete'
 import { appendQuoteToDraft, getCommentQuoteText } from '@/services/quoteReply'
 import { extractSuggestionBlocks } from '@/services/suggestions'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 import type { ReviewThread } from '@/types/pr'
-import CommentAutocompletePopover from './CommentAutocompletePopover.vue'
 import MarkdownContent from './MarkdownContent.vue'
+import MarkdownEditor from './MarkdownEditor.vue'
 import ReactionBar from './ReactionBar.vue'
 
 const props = defineProps<{
@@ -44,7 +43,7 @@ const originalLinesForThread = computed<string[] | undefined>(() => {
 
 const isReplying = ref(false)
 const replyBody = ref('')
-const replyTextareaRef = ref<HTMLTextAreaElement | null>(null)
+const replyEditorRef = ref<InstanceType<typeof MarkdownEditor> | null>(null)
 const isSubmitting = ref(false)
 const commentBodyRefs = new Map<string, HTMLElement>()
 
@@ -53,23 +52,12 @@ function setCommentBodyRef(id: string, el: unknown) {
   else commentBodyRefs.delete(id)
 }
 
-const replyAutocomplete = useCommentAutocomplete(
-  replyTextareaRef,
-  () => replyBody.value,
-  (next) => {
-    replyBody.value = next
-  },
-)
-
 function handleQuoteComment(commentId: string, fullBody: string) {
   const quoteText = getCommentQuoteText(fullBody, commentBodyRefs.get(commentId))
   replyBody.value = appendQuoteToDraft(replyBody.value, quoteText)
   isReplying.value = true
   void nextTick(() => {
-    const el = replyTextareaRef.value
-    if (!el) return
-    el.focus()
-    el.setSelectionRange(el.value.length, el.value.length)
+    void replyEditorRef.value?.focusWrite()
   })
 }
 const isTogglingResolve = ref(false)
@@ -332,37 +320,39 @@ async function handleToggleResolve() {
           </div>
         </div>
 
-        <div v-if="editingCommentId === comment.id" class="space-y-2 pt-1">
-          <textarea
+        <div v-if="editingCommentId === comment.id" class="pt-1">
+          <MarkdownEditor
             v-model="editBody"
-            rows="3"
-            class="w-full rounded-lg border border-border bg-canvas-inset px-2.5 py-1.5 text-xs text-ink focus:border-terra focus:outline-none"
-            @keydown.meta.enter.prevent="handleSaveEdit(comment.id)"
-            @keydown.ctrl.enter.prevent="handleSaveEdit(comment.id)"
-            @keydown.esc.prevent="editingCommentId = null"
-          />
-          <div class="flex items-center justify-between gap-2">
-            <span class="text-[10.5px] text-ink-faint">{{ isMac ? '⌘↵' : 'Ctrl+↵' }} to save · Esc to cancel</span>
-            <div class="flex items-center gap-2">
-              <button
-                type="button"
-                class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-canvas-elevated"
-                @click="editingCommentId = null"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                class="inline-flex items-center gap-1 rounded-lg bg-terra px-3 py-1 text-[11px] font-semibold text-white hover:bg-terra-hover disabled:opacity-40"
-                :disabled="isSavingEdit || !editBody.trim()"
-                :aria-busy="isSavingEdit"
-                @click="handleSaveEdit(comment.id)"
-              >
-                <Loader2 v-if="isSavingEdit" class="h-3 w-3 animate-spin" />
-                <span>Save</span>
-              </button>
-            </div>
-          </div>
+            :rows="3"
+            autofocus
+            @submit="handleSaveEdit(comment.id)"
+            @cancel="editingCommentId = null"
+          >
+            <template #footer>
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-[10.5px] text-ink-faint">{{ isMac ? '⌘↵' : 'Ctrl+↵' }} to save · Esc to cancel</span>
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-canvas-elevated"
+                    @click="editingCommentId = null"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 rounded-lg bg-terra px-3 py-1 text-[11px] font-semibold text-white hover:bg-terra-hover disabled:opacity-40"
+                    :disabled="isSavingEdit || !editBody.trim()"
+                    :aria-busy="isSavingEdit"
+                    @click="handleSaveEdit(comment.id)"
+                  >
+                    <Loader2 v-if="isSavingEdit" class="h-3 w-3 animate-spin" />
+                    <span>Save</span>
+                  </button>
+                </div>
+              </div>
+            </template>
+          </MarkdownEditor>
         </div>
         <template v-else>
           <div :ref="(el) => setCommentBodyRef(comment.id, el)">
@@ -424,52 +414,39 @@ async function handleToggleResolve() {
           </button>
         </div>
 
-        <div v-else class="animate-pop-in space-y-2">
-          <textarea
-            ref="replyTextareaRef"
+        <div v-else class="animate-pop-in">
+          <MarkdownEditor
+            ref="replyEditorRef"
             v-model="replyBody"
-            rows="2"
+            :rows="2"
+            autofocus
             placeholder="Write a reply to this thread…"
-            class="w-full rounded-lg border border-border bg-canvas-inset px-2.5 py-1.5 text-xs text-ink placeholder-ink-faint focus:border-terra focus:outline-none"
-            @input="replyAutocomplete.onInputOrCursor()"
-            @click="replyAutocomplete.onInputOrCursor()"
-            @keydown="replyAutocomplete.handleKeydown($event) && $event.stopPropagation()"
-            @keydown.meta.enter.prevent="!replyAutocomplete.isOpen.value && handleReply()"
-            @keydown.ctrl.enter.prevent="!replyAutocomplete.isOpen.value && handleReply()"
-            @keydown.esc.prevent="!replyAutocomplete.isOpen.value && (isReplying = false)"
-            @blur="replyAutocomplete.close()"
-          />
-          <CommentAutocompletePopover
-            :open="replyAutocomplete.isOpen.value"
-            :trigger="replyAutocomplete.trigger.value"
-            :options="replyAutocomplete.options.value"
-            :active-index="replyAutocomplete.activeIndex.value"
-            :is-loading="replyAutocomplete.isLoading.value"
-            :coords="replyAutocomplete.coords.value"
-            @select="replyAutocomplete.selectOption"
-            @hover="replyAutocomplete.activeIndex.value = $event"
-          />
-
-          <div class="flex items-center justify-between gap-2">
-            <span class="text-[10.5px] text-ink-faint">{{ isMac ? '⌘↵' : 'Ctrl+↵' }} to reply · Esc to cancel</span>
-            <div class="flex items-center gap-2">
-              <button
-                class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-canvas-elevated"
-                @click="isReplying = false"
-              >
-                Cancel
-              </button>
-              <button
-                class="inline-flex items-center gap-1 rounded-lg bg-terra px-3 py-1 text-[11px] font-semibold text-white hover:bg-terra-hover disabled:opacity-40"
-                :disabled="isSubmitting || !replyBody.trim()"
-                :aria-busy="isSubmitting"
-                @click="handleReply"
-              >
-                <Loader2 v-if="isSubmitting" class="h-3 w-3 animate-spin" />
-                <span>Reply</span>
-              </button>
-            </div>
-          </div>
+            @submit="handleReply"
+            @cancel="isReplying = false"
+          >
+            <template #footer>
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-[10.5px] text-ink-faint">{{ isMac ? '⌘↵' : 'Ctrl+↵' }} to reply · Esc to cancel</span>
+                <div class="flex items-center gap-2">
+                  <button
+                    class="rounded-lg border border-border bg-canvas px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-canvas-elevated"
+                    @click="isReplying = false"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    class="inline-flex items-center gap-1 rounded-lg bg-terra px-3 py-1 text-[11px] font-semibold text-white hover:bg-terra-hover disabled:opacity-40"
+                    :disabled="isSubmitting || !replyBody.trim()"
+                    :aria-busy="isSubmitting"
+                    @click="handleReply"
+                  >
+                    <Loader2 v-if="isSubmitting" class="h-3 w-3 animate-spin" />
+                    <span>Reply</span>
+                  </button>
+                </div>
+              </div>
+            </template>
+          </MarkdownEditor>
         </div>
       </div>
     </div>
