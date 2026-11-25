@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  AlertCircle,
   ArrowRight,
   ArrowUpDown,
   Check,
@@ -23,6 +24,7 @@ import {
   Settings,
   Sparkles,
   Sun,
+  WifiOff,
   X,
   XCircle,
 } from '@lucide/vue'
@@ -269,9 +271,25 @@ function resetPollTimer() {
 }
 
 async function handleRefresh(isAutoRefresh = false) {
-  if (!auth.isAuthenticated || auth.isLoading) return
-  await auth.refreshRequestedPRs({ notifyOnNew: isAutoRefresh, showLoading: !isAutoRefresh })
-  lastRefreshedAt.value = new Date()
+  if ((!auth.isAuthenticated && !auth.pat) || auth.isLoading) return
+  const ok = await auth.refreshRequestedPRs({
+    notifyOnNew: isAutoRefresh,
+    showLoading: !isAutoRefresh,
+  })
+  if (ok) {
+    lastRefreshedAt.value = new Date()
+  }
+}
+
+function handleOffline() {
+  auth.setOffline(true)
+}
+
+function handleOnline() {
+  auth.setOffline(false)
+  if ((auth.isAuthenticated || auth.pat) && !auth.isLoading) {
+    void handleRefresh(true)
+  }
 }
 
 function ciStatusMeta(state: CheckRollupState | null): {
@@ -368,6 +386,8 @@ onMounted(() => {
   void refreshLocalProgress()
   window.addEventListener('focus', refreshCheckoutStatuses)
   window.addEventListener('keydown', handleInboxKeydown)
+  window.addEventListener('online', handleOnline)
+  window.addEventListener('offline', handleOffline)
 })
 
 watch([() => auth.requestedPRs, () => review.repoPaths], refreshCheckoutStatuses, { immediate: true })
@@ -405,6 +425,8 @@ watch(
 onBeforeUnmount(() => {
   window.removeEventListener('focus', refreshCheckoutStatuses)
   window.removeEventListener('keydown', handleInboxKeydown)
+  window.removeEventListener('online', handleOnline)
+  window.removeEventListener('offline', handleOffline)
   if (pollTimer !== null) {
     window.clearInterval(pollTimer)
     pollTimer = null
@@ -431,7 +453,7 @@ onBeforeUnmount(() => {
 
         <div class="flex items-center gap-2">
           <button
-            v-if="auth.isAuthenticated"
+            v-if="auth.isAuthenticated || auth.pat"
             class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-canvas px-3 py-1.5 text-xs text-ink-secondary transition-colors hover:bg-canvas-elevated disabled:opacity-50"
             :disabled="auth.isLoading"
             :aria-busy="auth.isLoading"
@@ -696,7 +718,7 @@ onBeforeUnmount(() => {
 
           <!-- Unauthenticated Onboarding Card -->
           <div
-            v-if="!auth.isAuthenticated"
+            v-if="!auth.isAuthenticated && !auth.pat"
             class="stroll-card rounded-2xl border border-dashed border-border bg-canvas-subtle/80 p-8 text-center"
           >
             <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-sage-soft text-pine-text">
@@ -727,20 +749,80 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- Inbox Fetch Error Banner -->
+          <!-- Inbox Fetch Error / Offline Banner -->
           <div
-            v-if="auth.isAuthenticated && auth.error"
+            v-if="(auth.isAuthenticated || auth.pat) && auth.error"
             role="alert"
-            class="flex items-center justify-between gap-3 rounded-2xl border border-crimson-border bg-crimson-soft px-4 py-3 text-xs text-crimson-text"
+            class="flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-xs"
+            :class="
+              auth.isOffline
+                ? 'border-ochre-border bg-ochre-soft text-ochre-text'
+                : 'border-crimson-border bg-crimson-soft text-crimson-text'
+            "
           >
-            <span class="min-w-0 flex-1 break-words">{{ auth.error }}</span>
+            <div class="flex min-w-0 flex-1 items-start gap-2.5">
+              <WifiOff v-if="auth.isOffline" class="mt-0.5 h-4 w-4 shrink-0" />
+              <AlertCircle v-else class="mt-0.5 h-4 w-4 shrink-0" />
+              <div class="min-w-0 flex-1 space-y-0.5">
+                <p class="break-words font-medium">{{ auth.error }}</p>
+                <p
+                  v-if="auth.isOffline && auth.requestedPRs.length > 0"
+                  class="text-[11px] opacity-85"
+                >
+                  Showing last loaded PRs<template v-if="lastRefreshedAt"> from {{ lastRefreshedAt.toLocaleTimeString() }}</template>.
+                </p>
+              </div>
+            </div>
             <button
               type="button"
-              class="shrink-0 rounded-lg border border-crimson-border bg-canvas px-2.5 py-1 text-[11px] font-semibold text-crimson-text transition-colors hover:bg-canvas-elevated"
-              @click="auth.refreshRequestedPRs()"
+              :disabled="auth.isLoading"
+              class="shrink-0 rounded-lg border bg-canvas px-2.5 py-1 text-[11px] font-semibold transition-colors hover:bg-canvas-elevated disabled:opacity-50"
+              :class="
+                auth.isOffline
+                  ? 'border-ochre-border text-ochre-text'
+                  : 'border-crimson-border text-crimson-text'
+              "
+              @click="handleRefresh(false)"
             >
-              Retry
+              {{ auth.isLoading ? 'Retrying…' : 'Retry' }}
             </button>
+          </div>
+
+          <!-- Saved PAT Unverified Fallback Card (e.g. launched offline) -->
+          <div
+            v-if="!auth.isAuthenticated && auth.pat"
+            class="stroll-card rounded-2xl border border-dashed border-border bg-canvas-subtle/80 p-8 text-center"
+          >
+            <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-ochre-soft text-ochre-text">
+              <WifiOff v-if="auth.isOffline" class="h-6 w-6" />
+              <AlertCircle v-else class="h-6 w-6" />
+            </div>
+            <h3 class="mt-3.5 text-sm font-semibold text-ink">
+              {{ auth.isOffline ? 'You are currently offline' : 'Unable to load your PR inbox' }}
+            </h3>
+            <p class="mx-auto mt-1 max-w-md text-xs text-ink-muted">
+              Your GitHub token is saved. Reconnect to the internet and retry to fetch pull requests,
+              or explore the offline demo tour.
+            </p>
+            <div class="mt-5 flex flex-wrap items-center justify-center gap-3">
+              <button
+                type="button"
+                :disabled="auth.isLoading"
+                class="inline-flex items-center gap-1.5 rounded-xl bg-terra px-4 py-2 text-xs font-semibold text-white shadow-xs transition-all hover:bg-terra-hover active:scale-[0.98] disabled:opacity-50"
+                @click="handleRefresh(false)"
+              >
+                <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': auth.isLoading }" />
+                <span>{{ auth.isLoading ? 'Retrying…' : 'Retry Connection' }}</span>
+              </button>
+              <button
+                type="button"
+                class="inline-flex items-center gap-1.5 rounded-xl border border-ochre-border bg-ochre-soft px-4 py-2 text-xs font-medium text-ochre-text transition-colors hover:bg-canvas-elevated"
+                @click="review.loadMockPR()"
+              >
+                <Sparkles class="h-3.5 w-3.5" />
+                <span>Try Interactive Demo PR</span>
+              </button>
+            </div>
           </div>
 
           <!-- Empty Inbox -->

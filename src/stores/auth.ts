@@ -3,6 +3,13 @@ import { ref, computed } from 'vue'
 import { fetchViewerAndRequestedPRs } from '@/services/github'
 import { diffNewPRs } from '@/services/inbox'
 import { getGhAuthToken, isTauriRuntime, sendDesktopNotification } from '@/services/native'
+import {
+  extractErrorMessage,
+  isAuthError,
+  isBrowserOffline,
+  isNetworkError,
+  OFFLINE_ERROR_MESSAGE,
+} from '@/services/network'
 import { loadGitHubPat, saveGitHubPat } from '@/services/storage'
 import { useSettingsStore } from './settings'
 import type { GitHubUser, PRFilterMode, PRSummary } from '@/types/pr'
@@ -48,6 +55,7 @@ export const useAuthStore = defineStore('auth', () => {
    */
   const isReloadingList = ref(false)
   const error = ref<string | null>(null)
+  const isOffline = ref<boolean>(isBrowserOffline())
   const initStatus = ref<string>('Preparing your review trail…')
   let knownReviewRequestedIds: Set<string> | null = null
   let persistedPat: string | null = null
@@ -109,6 +117,7 @@ export const useAuthStore = defineStore('auth', () => {
       requestedPRs.value = prs
       hasMorePRs.value = hasNextPage
       prEndCursor.value = endCursor
+      isOffline.value = false
       const settings = useSettingsStore()
       void settings.completeOnboarding()
       const trimmedToken = token.trim()
@@ -136,11 +145,21 @@ export const useAuthStore = defineStore('auth', () => {
 
       return true
     } catch (err) {
-      error.value = err instanceof Error ? err.message : 'Failed to authenticate with GitHub'
-      viewer.value = null
-      requestedPRs.value = []
-      hasMorePRs.value = false
-      prEndCursor.value = null
+      const offline = isNetworkError(err)
+      const authFailure = isAuthError(err)
+      isOffline.value = offline
+      error.value = offline
+        ? OFFLINE_ERROR_MESSAGE
+        : extractErrorMessage(err, 'Failed to authenticate with GitHub')
+
+      // Keep the existing session and cached inbox intact on transient/offline errors;
+      // only clear them when we have no prior session or GitHub explicitly rejected the token.
+      if (!viewer.value || authFailure) {
+        viewer.value = null
+        requestedPRs.value = []
+        hasMorePRs.value = false
+        prEndCursor.value = null
+      }
       return false
     } finally {
       isLoading.value = false
@@ -157,6 +176,7 @@ export const useAuthStore = defineStore('auth', () => {
         hasNextPage,
         endCursor,
       } = await fetchViewerAndRequestedPRs(pat.value, prFilter.value, prEndCursor.value)
+      isOffline.value = false
       const seen = new Set(requestedPRs.value.map((p) => p.id))
       const merged = [...requestedPRs.value]
       for (const item of nextPrs) {
@@ -168,7 +188,11 @@ export const useAuthStore = defineStore('auth', () => {
       hasMorePRs.value = hasNextPage
       prEndCursor.value = endCursor
     } catch (err) {
-      error.value = err instanceof Error ? err.message : 'Failed to load more pull requests'
+      const offline = isNetworkError(err)
+      isOffline.value = offline
+      error.value = offline
+        ? OFFLINE_ERROR_MESSAGE
+        : extractErrorMessage(err, 'Failed to load more pull requests')
     } finally {
       isLoadingMore.value = false
     }
@@ -177,12 +201,12 @@ export const useAuthStore = defineStore('auth', () => {
   async function refreshRequestedPRs(options?: {
     notifyOnNew?: boolean
     showLoading?: boolean
-  }): Promise<void> {
-    if (!pat.value) return
+  }): Promise<boolean> {
+    if (!pat.value) return false
     const { showLoading = false, ...rest } = options ?? {}
     if (showLoading) isReloadingList.value = true
     try {
-      await verifyAndLoadProfile(pat.value, { ...rest, persist: false })
+      return await verifyAndLoadProfile(pat.value, { ...rest, persist: false })
     } finally {
       if (showLoading) isReloadingList.value = false
     }
@@ -190,8 +214,21 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function setPrFilter(mode: PRFilterMode): Promise<void> {
     if (prFilter.value === mode) return
+    const previousFilter = prFilter.value
     prFilter.value = mode
-    await refreshRequestedPRs({ showLoading: true })
+    const ok = await refreshRequestedPRs({ showLoading: true })
+    if (!ok && viewer.value !== null) {
+      prFilter.value = previousFilter
+    }
+  }
+
+  function setOffline(offline: boolean): void {
+    isOffline.value = offline
+    if (offline && pat.value && !error.value) {
+      error.value = OFFLINE_ERROR_MESSAGE
+    } else if (!offline && error.value === OFFLINE_ERROR_MESSAGE) {
+      error.value = null
+    }
   }
 
   async function clearPat(): Promise<void> {
@@ -202,6 +239,7 @@ export const useAuthStore = defineStore('auth', () => {
     hasMorePRs.value = false
     prEndCursor.value = null
     error.value = null
+    isOffline.value = isBrowserOffline()
     knownReviewRequestedIds = null
     await saveGitHubPat('')
   }
@@ -216,6 +254,7 @@ export const useAuthStore = defineStore('auth', () => {
     isLoading,
     isReloadingList,
     error,
+    isOffline,
     initStatus,
     isAuthenticated,
     init,
@@ -224,6 +263,7 @@ export const useAuthStore = defineStore('auth', () => {
     refreshRequestedPRs,
     loadMorePRs,
     setPrFilter,
+    setOffline,
     clearPat,
   }
 })

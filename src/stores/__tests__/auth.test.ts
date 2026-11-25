@@ -148,4 +148,114 @@ describe('useAuthStore', () => {
     await pending
     expect(auth.isAuthenticated).toBe(true)
   })
+
+  it('preserves PR inbox and session when refresh fails due to being offline, and recovers when online', async () => {
+    const initialPR = {
+      id: 'pr-1',
+      owner: 'acme',
+      repo: 'stroll',
+      number: 12,
+      title: 'Keep inbox visible offline',
+      url: 'https://github.com/acme/stroll/pull/12',
+      author: { login: 'octocat', avatarUrl: '' },
+      updatedAt: '2026-11-24T12:00:00Z',
+      additions: 5,
+      deletions: 2,
+      changedFiles: 1,
+      isDraft: false,
+      reviewDecision: null,
+      ciState: 'SUCCESS' as const,
+      totalCommentsCount: 0,
+      baseRefName: 'main',
+      headRefName: 'fix/offline',
+      isCrossRepository: false,
+    }
+    mockLoadGitHubPat.mockResolvedValue('ghp_saved_token')
+    mockFetchViewerAndRequestedPRs.mockResolvedValueOnce({
+      viewer: { login: 'octocat', avatarUrl: 'https://example.com/a.png', name: 'Octo' },
+      requestedPRs: [initialPR],
+      hasNextPage: true,
+      endCursor: 'cursor-1',
+    })
+
+    const auth = useAuthStore()
+    await auth.init()
+    expect(auth.isAuthenticated).toBe(true)
+    expect(auth.requestedPRs).toHaveLength(1)
+
+    // Lose internet connection on next refresh
+    mockFetchViewerAndRequestedPRs.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    const ok = await auth.refreshRequestedPRs()
+
+    expect(ok).toBe(false)
+    expect(auth.isAuthenticated).toBe(true)
+    expect(auth.viewer?.login).toBe('octocat')
+    expect(auth.requestedPRs).toEqual([initialPR])
+    expect(auth.hasMorePRs).toBe(true)
+    expect(auth.isOffline).toBe(true)
+    expect(auth.error).toBe('No internet connection — unable to reach GitHub.')
+
+    // Switching filter while offline keeps current PRs and reverts filter
+    mockFetchViewerAndRequestedPRs.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    await auth.setPrFilter('authored')
+    expect(auth.prFilter).toBe('review-requested')
+    expect(auth.requestedPRs).toEqual([initialPR])
+
+    // Recover when connection returns
+    mockFetchViewerAndRequestedPRs.mockResolvedValueOnce({
+      viewer: { login: 'octocat', avatarUrl: 'https://example.com/a.png', name: 'Octo' },
+      requestedPRs: [initialPR],
+      hasNextPage: false,
+      endCursor: null,
+    })
+    const recovered = await auth.refreshRequestedPRs()
+    expect(recovered).toBe(true)
+    expect(auth.isOffline).toBe(false)
+    expect(auth.error).toBeNull()
+  })
+
+  it('clears session and inbox when GitHub rejects credentials with 401', async () => {
+    mockLoadGitHubPat.mockResolvedValue('ghp_saved_token')
+    mockFetchViewerAndRequestedPRs.mockResolvedValueOnce({
+      viewer: { login: 'octocat', avatarUrl: 'https://example.com/a.png', name: 'Octo' },
+      requestedPRs: [
+        {
+          id: 'pr-1',
+          owner: 'acme',
+          repo: 'stroll',
+          number: 12,
+          title: 'Test PR',
+          url: 'https://github.com/acme/stroll/pull/12',
+          author: { login: 'octocat', avatarUrl: '' },
+          updatedAt: '2026-11-24T12:00:00Z',
+          additions: 5,
+          deletions: 2,
+          changedFiles: 1,
+          isDraft: false,
+          reviewDecision: null,
+          ciState: null,
+          totalCommentsCount: 0,
+          baseRefName: 'main',
+          headRefName: 'fix/auth',
+          isCrossRepository: false,
+        },
+      ],
+      hasNextPage: false,
+      endCursor: null,
+    })
+
+    const auth = useAuthStore()
+    await auth.init()
+    expect(auth.isAuthenticated).toBe(true)
+
+    mockFetchViewerAndRequestedPRs.mockRejectedValueOnce(
+      new Error('GitHub GraphQL error (401): {"message":"Bad credentials"}'),
+    )
+    const ok = await auth.refreshRequestedPRs()
+    expect(ok).toBe(false)
+    expect(auth.isAuthenticated).toBe(false)
+    expect(auth.viewer).toBeNull()
+    expect(auth.requestedPRs).toEqual([])
+    expect(auth.isOffline).toBe(false)
+  })
 })
