@@ -270,8 +270,34 @@ function handleWindowBlur() {
   heldScrollDirection = 0
 }
 
+const OVERVIEW_PULSE_INTERVAL_MS = 20_000
+const STEP_PULSE_INTERVAL_MS = 60_000
+const FOCUS_PULSE_THROTTLE_MS = 5_000
+
 let pulseTimerId: ReturnType<typeof setInterval> | null = null
 let updateCheckTimerId: ReturnType<typeof setInterval> | null = null
+let lastFocusPulseAt = 0
+
+function resetPulseTimer() {
+  if (pulseTimerId !== null) {
+    clearInterval(pulseTimerId)
+    pulseTimerId = null
+  }
+  if (review.screen !== 'review') return
+  const intervalMs =
+    review.activeView === 'overview' ? OVERVIEW_PULSE_INTERVAL_MS : STEP_PULSE_INTERVAL_MS
+  pulseTimerId = setInterval(() => {
+    void review.checkForRemotePRUpdates()
+  }, intervalMs)
+}
+
+function handleWindowFocus() {
+  if (review.screen !== 'review') return
+  const now = Date.now()
+  if (now - lastFocusPulseAt < FOCUS_PULSE_THROTTLE_MS) return
+  lastFocusPulseAt = now
+  void review.checkForRemotePRUpdates()
+}
 
 const isSlowStartup = ref(false)
 const startupError = ref<string | null>(null)
@@ -327,13 +353,19 @@ watch(
   },
 )
 
+watch(
+  () => [review.screen, review.activeView] as const,
+  () => {
+    resetPulseTimer()
+  },
+)
+
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('keyup', handleKeyup)
   window.addEventListener('blur', handleWindowBlur)
-  pulseTimerId = setInterval(() => {
-    void review.checkForRemotePRUpdates()
-  }, 60_000)
+  window.addEventListener('focus', handleWindowFocus)
+  resetPulseTimer()
   await executeStartup()
   // Quietly look for a new desktop release so the version indicator can surface it.
   void updates.checkForUpdates({ silent: true })
@@ -349,6 +381,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeydown)
   window.removeEventListener('keyup', handleKeyup)
   window.removeEventListener('blur', handleWindowBlur)
+  window.removeEventListener('focus', handleWindowFocus)
 })
 </script>
 
@@ -379,7 +412,7 @@ onBeforeUnmount(() => {
 
       <!-- Live PR Update Banner -->
       <div
-        v-if="review.prHasRemoteUpdates && !review.zenMode"
+        v-if="review.prHasRemoteUpdates && review.activeView !== 'overview' && !review.zenMode"
         class="flex items-center justify-between gap-3 border-b border-terra-border bg-terra-soft px-4 py-1.5 text-xs text-terra-text"
       >
         <span class="font-medium">

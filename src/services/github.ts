@@ -2548,6 +2548,7 @@ export interface PRHeadPulse {
   updatedAt: string
   commentCount: number
   threadCount: number
+  checkState?: string | null
 }
 
 export async function fetchPRHeadPulse(
@@ -2564,6 +2565,15 @@ export async function fetchPRHeadPulse(
           updatedAt
           comments { totalCount }
           reviewThreads { totalCount }
+          commits(last: 1) {
+            nodes {
+              commit {
+                statusCheckRollup {
+                  state
+                }
+              }
+            }
+          }
         }
       }
     }
@@ -2575,16 +2585,25 @@ export async function fetchPRHeadPulse(
         updatedAt: string
         comments: { totalCount: number }
         reviewThreads: { totalCount: number }
+        commits?: {
+          nodes?: Array<{
+            commit?: {
+              statusCheckRollup?: { state: string | null } | null
+            } | null
+          }>
+        } | null
       } | null
     } | null
   }>(pat, query, { owner, repo, number })
   const pr = resp.repository?.pullRequest
   if (!pr) return null
+  const checkState = pr.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state ?? null
   return {
     headRefOid: pr.headRefOid,
     updatedAt: pr.updatedAt,
     commentCount: pr.comments.totalCount,
     threadCount: pr.reviewThreads.totalCount,
+    checkState,
   }
 }
 

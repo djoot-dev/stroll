@@ -791,8 +791,9 @@ describe('useReviewStore remote update banner', () => {
     expect(store.prHasRemoteUpdates).toBe(false)
   })
 
-  it('shows the banner for new commits', async () => {
+  it('shows the banner for new commits when viewing a diff step', async () => {
     const { store, pr } = await loadLivePR()
+    store.startTour()
     fetchPRHeadPulseMock.mockResolvedValue(pulseFor(pr, { headRefOid: 'newsha' }))
 
     await store.checkForRemotePRUpdates()
@@ -801,8 +802,9 @@ describe('useReviewStore remote update banner', () => {
     expect(store.remoteUpdateSummary).toMatch(/New commits/)
   })
 
-  it('shows the banner when a comment arrives after the first poll', async () => {
+  it('shows the banner when a comment arrives after the first poll on a diff step', async () => {
     const { store, pr } = await loadLivePR()
+    store.startTour()
     const base = pulseFor(pr)
     fetchPRHeadPulseMock.mockResolvedValueOnce(base)
     await store.checkForRemotePRUpdates()
@@ -817,6 +819,7 @@ describe('useReviewStore remote update banner', () => {
 
   it('keeps the banner dismissed until something new happens', async () => {
     const { store, pr } = await loadLivePR()
+    store.startTour()
     const later = new Date(Date.parse(pr.updatedAt) + 60_000).toISOString()
     const changed = pulseFor(pr, { updatedAt: later })
     fetchPRHeadPulseMock.mockResolvedValue(changed)
@@ -831,6 +834,61 @@ describe('useReviewStore remote update banner', () => {
     fetchPRHeadPulseMock.mockResolvedValue({ ...changed, threadCount: changed.threadCount + 1 })
     await store.checkForRemotePRUpdates()
     expect(store.prHasRemoteUpdates).toBe(true)
+  })
+
+  it('auto-refreshes without showing a banner when on the PR overview page', async () => {
+    const { store, pr } = await loadLivePR()
+    const updatedPR = makePR({
+      owner: 'acme',
+      repo: 'stroll',
+      number: 5,
+      headRefOid: 'newsha',
+      title: 'Updated PR Title',
+    })
+    fetchPRHeadPulseMock.mockResolvedValueOnce(pulseFor(pr, { headRefOid: 'newsha' }))
+    fetchPullRequestMock.mockResolvedValueOnce(updatedPR)
+
+    await store.checkForRemotePRUpdates()
+
+    expect(fetchPullRequestMock).toHaveBeenCalledTimes(2)
+    expect(store.pr?.title).toBe('Updated PR Title')
+    expect(store.prHasRemoteUpdates).toBe(false)
+    expect(store.remoteUpdateSummary).toBeNull()
+  })
+
+  it('does not surface refreshError on transient background auto-refresh failure', async () => {
+    const { store, pr } = await loadLivePR()
+    fetchPRHeadPulseMock.mockResolvedValueOnce(pulseFor(pr, { headRefOid: 'newsha' }))
+    fetchPullRequestMock.mockRejectedValueOnce(new Error('Network blip'))
+
+    await store.checkForRemotePRUpdates()
+
+    expect(store.refreshError).toBeNull()
+    expect(store.prHasRemoteUpdates).toBe(false)
+  })
+
+  it('auto-refreshes when opening overview if remote updates were pending', async () => {
+    const { store, pr } = await loadLivePR()
+    store.startTour()
+    fetchPRHeadPulseMock.mockResolvedValueOnce(pulseFor(pr, { headRefOid: 'newsha' }))
+    await store.checkForRemotePRUpdates()
+    expect(store.prHasRemoteUpdates).toBe(true)
+
+    const updatedPR = makePR({
+      owner: 'acme',
+      repo: 'stroll',
+      number: 5,
+      headRefOid: 'newsha',
+      title: 'Fresh Overview Title',
+    })
+    fetchPullRequestMock.mockResolvedValueOnce(updatedPR)
+
+    store.openOverview()
+    await vi.waitFor(() => {
+      expect(store.pr?.title).toBe('Fresh Overview Title')
+    })
+
+    expect(store.prHasRemoteUpdates).toBe(false)
   })
 })
 
