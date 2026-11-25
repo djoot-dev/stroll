@@ -67,7 +67,7 @@ const base = import.meta.env.BASE_URL
           </a>
 
           <a
-            href="https://github.com/totalfreak/stroll"
+            href="https://github.com/djoot-dev/stroll"
             target="_blank"
             rel="noopener noreferrer"
             class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-canvas-subtle px-4 py-3 text-sm font-medium text-ink-secondary transition-colors hover:border-pine-border hover:text-ink sm:w-auto"

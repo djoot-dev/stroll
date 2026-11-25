@@ -1,7 +1,7 @@
 import { httpFetch } from './http'
 
 /** GitHub repository that publishes Stroll desktop releases (matches the updater endpoint). */
-export const RELEASES_REPO = 'totalfreak/stroll'
+export const RELEASES_REPO = 'djoot-dev/stroll'
 export const RELEASES_PAGE_URL = `https://github.com/${RELEASES_REPO}/releases`
 
 export interface ReleaseNote {

@@ -11,13 +11,13 @@ const base = import.meta.env.BASE_URL
         <img :src="`${base}logo.svg`" alt="Stroll logo" class="h-6 w-6 rounded-md" />
         <span>
           <strong class="font-semibold text-ink">Stroll</strong> — Guided Code
-          Review · MIT License © totalfreak
+          Review · MIT License © djoot-dev
         </span>
       </div>
 
       <div class="flex flex-wrap items-center gap-5 font-medium text-ink-secondary">
         <a
-          href="https://github.com/totalfreak/stroll"
+          href="https://github.com/djoot-dev/stroll"
           target="_blank"
           rel="noopener noreferrer"
           class="hover:text-ink"
@@ -25,7 +25,7 @@ const base = import.meta.env.BASE_URL
           GitHub
         </a>
         <a
-          href="https://github.com/totalfreak/stroll/releases"
+          href="https://github.com/djoot-dev/stroll/releases"
           target="_blank"
           rel="noopener noreferrer"
           class="hover:text-ink"
@@ -33,7 +33,7 @@ const base = import.meta.env.BASE_URL
           Releases
         </a>
         <a
-          href="https://github.com/totalfreak/stroll/issues"
+          href="https://github.com/djoot-dev/stroll/issues"
           target="_blank"
           rel="noopener noreferrer"
           class="hover:text-ink"
@@ -41,7 +41,7 @@ const base = import.meta.env.BASE_URL
           Issues
         </a>
         <a
-          href="https://github.com/totalfreak/stroll/blob/main/LICENSE"
+          href="https://github.com/djoot-dev/stroll/blob/main/LICENSE"
           target="_blank"
           rel="noopener noreferrer"
           class="hover:text-ink"

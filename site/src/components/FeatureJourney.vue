@@ -46,14 +46,14 @@ const INBOX_ITEMS: Record<
   ],
   mine: [
     {
-      repo: 'totalfreak/stroll #111',
+      repo: 'djoot-dev/stroll #111',
       title: 'feat: GitHub Pages landing site with shared tokens',
       meta: 'you · 8 tour steps · 14m ago',
       status: '2 checks running',
       statusClass: 'bg-ochre-soft text-ochre-text border-ochre-border',
     },
     {
-      repo: 'totalfreak/stroll #108',
+      repo: 'djoot-dev/stroll #108',
       title: 'refactor: extract Tree-sitter symbol cache',
       meta: 'you · 5 tour steps · 1d ago',
       status: 'Approved',
@@ -69,7 +69,7 @@ const INBOX_ITEMS: Record<
       statusClass: 'bg-terra-soft text-terra-text border-terra-border',
     },
     {
-      repo: 'totalfreak/stroll #111',
+      repo: 'djoot-dev/stroll #111',
       title: 'feat: GitHub Pages landing site with shared tokens',
       meta: 'you · 8 tour steps · 14m ago',
       status: '2 checks running',

@@ -27,8 +27,8 @@ interface GitHubRelease {
   assets: GitHubAsset[]
 }
 
-const RELEASES_PAGE = 'https://github.com/totalfreak/stroll/releases/latest'
-const RELEASES_API = 'https://api.github.com/repos/totalfreak/stroll/releases/latest'
+const RELEASES_PAGE = 'https://github.com/djoot-dev/stroll/releases/latest'
+const RELEASES_API = 'https://api.github.com/repos/djoot-dev/stroll/releases/latest'
 
 function detectPlatform(): PlatformId {
   if (typeof navigator === 'undefined') return 'macos'
