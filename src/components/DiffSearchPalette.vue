@@ -127,9 +127,6 @@ defineExpose({ focusInput })
           <span v-if="query.trim()" class="shrink-0 font-mono text-[10.5px] text-ink-muted">
             {{ matches.length > 0 ? `${activeIndex + 1}/${matches.length}` : '0/0' }}
           </span>
-          <kbd class="rounded border border-border bg-canvas px-1.5 py-0.5 font-mono text-[10px] text-ink-faint">
-            ESC
-          </kbd>
         </div>
 
         <div v-if="query.trim()" ref="listRef" class="max-h-60 overflow-y-auto p-2">
