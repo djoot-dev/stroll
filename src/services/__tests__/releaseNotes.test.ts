@@ -13,7 +13,7 @@ function release(tag: string, body: string, extra: Record<string, unknown> = {})
   return {
     tag_name: tag,
     name: `Stroll ${tag}`,
-    html_url: `https://github.com/totalfreak/stroll/releases/tag/${tag}`,
+    html_url: `https://github.com/djoot-dev/stroll/releases/tag/${tag}`,
     body,
     draft: false,
     prerelease: false,
@@ -89,7 +89,7 @@ describe('fetchReleaseNotes', () => {
       {
         version: '0.3.5',
         name: 'Stroll v0.3.5',
-        url: 'https://github.com/totalfreak/stroll/releases/tag/v0.3.5',
+        url: 'https://github.com/djoot-dev/stroll/releases/tag/v0.3.5',
         body: 'manifest notes',
       },
     ])

@@ -5,7 +5,7 @@
 
 A cross-platform desktop application built with **Tauri v2**, **Vue 3**, **TypeScript**, **Pinia**, **Tailwind CSS v4**, and **CodeMirror 6** for reviewing GitHub Pull Requests as a guided, dependency-aware tour instead of a flat alphabetical file list.
 
-**[Visit the Stroll Website & Download →](https://totalfreak.github.io/stroll/)**
+**[Visit the Stroll Website & Download →](https://djoot-dev.github.io/stroll/)**
 
 ## Screenshots
 
@@ -87,4 +87,4 @@ cargo check --manifest-path src-tauri/Cargo.toml   # Verify Rust backend compile
 
 ## License
 
-[MIT](LICENSE) © totalfreak
+[MIT](LICENSE) © djoot-dev

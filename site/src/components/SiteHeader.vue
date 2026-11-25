@@ -40,7 +40,7 @@ const base = import.meta.env.BASE_URL
         </button>
 
         <a
-          href="https://github.com/totalfreak/stroll"
+          href="https://github.com/djoot-dev/stroll"
           target="_blank"
           rel="noopener noreferrer"
           aria-label="Stroll on GitHub"
