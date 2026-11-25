@@ -36,4 +36,10 @@ describe('detectPulseChange', () => {
     const later = { ...pulse, updatedAt: '2026-11-20T11:00:00Z', commentCount: 80 }
     expect(detectPulseChange(baselineFromPulse(later), later)).toBeNull()
   })
+
+  it('detects CI check state changes', () => {
+    const baseline = baselineFromPR({ ...pr, statusCheckRollup: { state: 'PENDING' } })
+    expect(detectPulseChange(baseline, { ...pulse, checkState: 'PENDING' })).toBeNull()
+    expect(detectPulseChange(baseline, { ...pulse, checkState: 'SUCCESS' })).toBe('checks')
+  })
 })

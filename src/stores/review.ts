@@ -505,16 +505,19 @@ export const useReviewStore = defineStore('review', () => {
     restoreActiveStep(activePath)
   }
 
-  async function refreshCurrentPR(): Promise<boolean> {
+  async function refreshCurrentPR(options?: { silent?: boolean }): Promise<boolean> {
+    const silent = options?.silent ?? false
     if (!pr.value) return false
     if (pr.value.isMock) {
-      refreshError.value = null
+      if (!silent) refreshError.value = null
       return true
     }
 
     const auth = useAuthStore()
     if (!auth.pat) {
-      refreshError.value = 'GitHub PAT is required to refresh Pull Request.'
+      if (!silent) {
+        refreshError.value = 'GitHub PAT is required to refresh Pull Request.'
+      }
       return false
     }
 
@@ -522,7 +525,6 @@ export const useReviewStore = defineStore('review', () => {
 
     const activePath = currentStep.value?.file.path ?? null
     const prevStepIndex = currentStepIndex.value
-    const prevView = activeView.value
     const prevFingerprints = new Map(fileFingerprints)
     const prevReviewed = new Set(reviewedPaths.value)
     const prevHeadRefOid = pr.value.headRefOid
@@ -530,7 +532,7 @@ export const useReviewStore = defineStore('review', () => {
     const localRepoPath = currentRepoPath.value
 
     isRefreshingPR.value = true
-    refreshError.value = null
+    if (!silent) refreshError.value = null
     try {
       const data = await fetchPullRequest(auth.pat, owner, repo, number, localRepoPath)
       const nextFingerprints = new Map(
@@ -561,6 +563,7 @@ export const useReviewStore = defineStore('review', () => {
       }
       prHasRemoteUpdates.value = false
       remoteUpdateSummary.value = null
+      refreshError.value = null
       pulseBaseline = baselineFromPR(data)
       latestPulse = null
       fileFingerprints = nextFingerprints
@@ -580,10 +583,14 @@ export const useReviewStore = defineStore('review', () => {
         currentStepIndex.value = Math.min(prevStepIndex, Math.max(0, tourSteps.value.length - 1))
       }
 
-      activeView.value = prevView
+      if (tourSteps.value.length === 0 && activeView.value === 'step') {
+        activeView.value = 'overview'
+      }
       return true
     } catch (err) {
-      refreshError.value = err instanceof Error ? err.message : 'Failed to refresh Pull Request'
+      if (!silent) {
+        refreshError.value = err instanceof Error ? err.message : 'Failed to refresh Pull Request'
+      }
       return false
     } finally {
       isRefreshingPR.value = false
@@ -618,6 +625,11 @@ export const useReviewStore = defineStore('review', () => {
       latestPulse = pulse
       const change = detectPulseChange(pulseBaseline, pulse)
       pulseBaseline = completeBaseline(pulseBaseline, pulse)
+      if (change && activeView.value === 'overview') {
+        // Keep the PR overview up to date automatically without showing a banner.
+        await refreshCurrentPR({ silent: true })
+        return
+      }
       if (change === 'commits') {
         prHasRemoteUpdates.value = true
         remoteUpdateSummary.value = 'New commits have been pushed to this Pull Request.'
@@ -632,6 +644,13 @@ export const useReviewStore = defineStore('review', () => {
 
   function openOverview(): void {
     activeView.value = 'overview'
+    if (prHasRemoteUpdates.value) {
+      prHasRemoteUpdates.value = false
+      remoteUpdateSummary.value = null
+      void refreshCurrentPR({ silent: true })
+    } else {
+      void checkForRemotePRUpdates()
+    }
   }
 
   function toggleOverview(): void {
@@ -640,7 +659,7 @@ export const useReviewStore = defineStore('review', () => {
         activeView.value = 'step'
       }
     } else {
-      activeView.value = 'overview'
+      openOverview()
     }
   }
 

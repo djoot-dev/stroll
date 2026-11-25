@@ -14,16 +14,22 @@ export interface PulseBaseline {
   updatedAt: string
   commentCount: number | null
   threadCount: number | null
+  checkState?: string | null
 }
 
-export type PulseChange = 'commits' | 'activity' | null
+export type PulseChange = 'commits' | 'activity' | 'checks' | null
 
-export function baselineFromPR(pr: { headRefOid: string; updatedAt: string }): PulseBaseline {
+export function baselineFromPR(pr: {
+  headRefOid: string
+  updatedAt: string
+  statusCheckRollup?: { state: string | null } | null
+}): PulseBaseline {
   return {
     headRefOid: pr.headRefOid,
     updatedAt: pr.updatedAt,
     commentCount: null,
     threadCount: null,
+    checkState: pr.statusCheckRollup?.state ?? null,
   }
 }
 
@@ -33,6 +39,7 @@ export function baselineFromPulse(pulse: PRHeadPulse): PulseBaseline {
     updatedAt: pulse.updatedAt,
     commentCount: pulse.commentCount,
     threadCount: pulse.threadCount,
+    checkState: pulse.checkState ?? null,
   }
 }
 
@@ -45,6 +52,13 @@ export function detectPulseChange(baseline: PulseBaseline, pulse: PRHeadPulse): 
   ) {
     return 'activity'
   }
+  if (
+    pulse.checkState !== undefined &&
+    baseline.checkState !== undefined &&
+    pulse.checkState !== baseline.checkState
+  ) {
+    return 'checks'
+  }
   return null
 }
 
@@ -54,5 +68,6 @@ export function completeBaseline(baseline: PulseBaseline, pulse: PRHeadPulse): P
     ...baseline,
     commentCount: baseline.commentCount ?? pulse.commentCount,
     threadCount: baseline.threadCount ?? pulse.threadCount,
+    checkState: baseline.checkState !== undefined ? baseline.checkState : (pulse.checkState ?? null),
   }
 }
