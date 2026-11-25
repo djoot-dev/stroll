@@ -34,7 +34,7 @@ const emit = defineEmits<{
   (e: 'mouseenter'): void
   (e: 'mouseleave'): void
   (e: 'close'): void
-  (e: 'jumpToFile', path: string): void
+  (e: 'jumpToFile', path: string, line?: number): void
   /** Show up to `maxLines` lines of the declaration snippet. */
   (e: 'expandSnippet', maxLines: number): void
   /** Pointer entered (usage) or left (null) a "Used in" entry. */
@@ -279,7 +279,7 @@ const hasBeforeAfter = computed(
             v-if="!info.isSameFile && info.declaration.source !== 'repo'"
             class="inline-flex items-center gap-0.5 rounded-md border border-terra-border bg-terra-soft px-1.5 py-0.5 text-[10px] font-medium text-terra-text transition-colors hover:bg-terra hover:text-white"
             title="Jump to definition step"
-            @click="emit('jumpToFile', info.declaration.path)"
+            @click="emit('jumpToFile', info.declaration.path, info.declaration.line)"
           >
             <span>Jump</span>
             <ArrowUpRight class="h-3 w-3" />
@@ -403,7 +403,7 @@ const hasBeforeAfter = computed(
             v-for="(u, uIdx) in info.usages"
             :key="`${u.path}:${u.line}:${uIdx}`"
             class="flex w-full items-center justify-between gap-2 rounded-md px-1.5 py-0.5 text-left font-mono text-[10.5px] text-ink-secondary hover:bg-canvas-elevated"
-            @click="emit('jumpToFile', u.path)"
+            @click="emit('jumpToFile', u.path, u.line)"
             @mouseenter="emit('usageHover', u)"
             @mouseleave="emit('usageHover', null)"
           >

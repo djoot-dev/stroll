@@ -1203,9 +1203,13 @@ function handleExpandSnippet(maxLines: number) {
   }
 }
 
-function handleJumpFromPopover(path: string) {
+function handleJumpFromPopover(path: string, line?: number) {
   closePopoverImmediately()
-  review.goToFile(path)
+  if (line != null && line > 0) {
+    review.goToFileLine(path, line)
+  } else {
+    review.goToFile(path)
+  }
 }
 
 function getOriginalLinesForRange(
@@ -1446,6 +1450,7 @@ async function scrollToSourceLine(targetLine: number, side?: DiffSide): Promise<
   ensureLineRendered(line.key)
   await nextTick()
   const row = findLineRow(line.key)
+  console.info('[DEBUG scrollToSourceLine]', { targetLine, key: line.key, hasRow: Boolean(row), hasSurface: Boolean(diffSurfaceRef.value) })
   if (!row) return false
   row.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
   flashLineKey.value = line.key
@@ -1504,6 +1509,7 @@ async function jumpFromHunkToPreview(seg: DiffSegment) {
 
 async function revealFocusedLine() {
   const target = review.focusedLine
+  console.info('[DEBUG revealFocusedLine]', { target, stepPath: props.step.file.path, lines: allDiffLines.value.length })
   if (!target || target.path !== props.step.file.path) return
   if (allDiffLines.value.length === 0) return
 
