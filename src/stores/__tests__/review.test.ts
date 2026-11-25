@@ -1403,7 +1403,7 @@ describe('useReviewStore incremental re-review (since last review)', () => {
 
   it('refreshes the PR inbox immediately on backToInbox when authenticated and idle', () => {
     const auth = useAuthStore()
-    const refreshSpy = vi.spyOn(auth, 'refreshRequestedPRs').mockResolvedValue(undefined)
+    const refreshSpy = vi.spyOn(auth, 'refreshRequestedPRs').mockResolvedValue(true)
     const store = useReviewStore()
 
     // Unauthenticated: does not refresh
