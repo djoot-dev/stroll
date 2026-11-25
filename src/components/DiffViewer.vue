@@ -1682,6 +1682,18 @@ function statusBadgeClass(status: string): string {
       return 'border-terra-border bg-terra-soft text-terra-text'
   }
 }
+
+const splitFilePath = computed(() => {
+  const full = props.step.file.path
+  const idx = full.lastIndexOf('/')
+  if (idx === -1) {
+    return { dir: '', name: full }
+  }
+  return {
+    dir: full.slice(0, idx + 1),
+    name: full.slice(idx + 1),
+  }
+})
 </script>
 
 <template>
@@ -1696,7 +1708,7 @@ function statusBadgeClass(status: string): string {
         <div
           class="stroll-card flex flex-nowrap items-center justify-between gap-3 rounded-xl border border-border bg-canvas-subtle/95 px-3.5 py-1.5 shadow-sm"
         >
-          <div class="flex min-w-0 flex-1 items-center gap-2">
+          <div class="group/path flex min-w-0 flex-1 items-center gap-2">
             <span
               v-if="isGeneratedStep"
               class="shrink-0 rounded-md border border-border bg-canvas-elevated px-1.5 py-0.5 font-mono text-[10px] font-semibold text-ink-muted"
@@ -1716,12 +1728,21 @@ function statusBadgeClass(status: string): string {
             >
               {{ step.file.status }}
             </span>
-            <span class="truncate font-mono text-xs font-semibold text-ink" :title="step.file.path">
-              {{ step.file.path }}
+            <span class="flex min-w-0 items-baseline font-mono text-xs" :title="step.file.path">
+              <span
+                v-if="splitFilePath.dir"
+                class="min-w-0 truncate font-normal text-ink-muted"
+              >{{ splitFilePath.dir }}</span>
+              <span class="shrink-0 font-semibold text-ink">{{ splitFilePath.name }}</span>
             </span>
             <button
               type="button"
-              class="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-canvas px-1.5 py-0.5 text-[10px] text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+              class="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-canvas px-1.5 py-0.5 text-[10px] text-ink-muted transition-all hover:bg-canvas-elevated hover:text-ink"
+              :class="
+                copiedState === 'path'
+                  ? 'opacity-100'
+                  : 'opacity-0 group-hover/path:opacity-100 group-focus-within/path:opacity-100'
+              "
               title="Copy file path"
               @click="copyFilePath"
             >
@@ -1798,31 +1819,46 @@ function statusBadgeClass(status: string): string {
       ref="stepHeaderRef"
       class="stroll-card !mt-0 rounded-2xl border border-border bg-canvas-subtle p-4"
     >
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div class="min-w-0 flex-1 basis-80 space-y-1">
-          <div class="flex flex-wrap items-center gap-2">
+      <!-- Tier 1: File Identity + Hover-Reveal Copy/Permalink + Primary Action -->
+      <div class="flex items-start justify-between gap-3">
+        <div class="group/path flex min-w-0 flex-1 items-center gap-2 pt-0.5">
+          <span
+            v-if="isGeneratedStep"
+            class="shrink-0 rounded-md border border-border bg-canvas-elevated px-1.5 py-0.5 font-mono text-[10px] font-semibold text-ink-muted"
+          >
+            {{ isLockfile(step.file.path) ? 'LOCKFILE' : 'GENERATED' }}
+          </span>
+          <span
+            v-else
+            class="shrink-0 rounded-md border px-1.5 py-0.5 font-mono text-[10px] font-semibold"
+            :class="LAYER_META[step.layer].badgeClass"
+          >
+            {{ LAYER_META[step.layer].shortLabel }}
+          </span>
+          <span
+            class="shrink-0 rounded-md border px-1.5 py-0.5 font-mono text-[10px] uppercase"
+            :class="statusBadgeClass(step.file.status)"
+          >
+            {{ step.file.status }}
+          </span>
+          <h1
+            class="flex min-w-0 items-baseline font-mono text-sm leading-snug"
+            :title="step.file.path"
+          >
             <span
-              v-if="isGeneratedStep"
-              class="rounded-md border border-border bg-canvas-elevated px-1.5 py-0.5 font-mono text-[10px] font-semibold text-ink-muted"
-            >
-              {{ isLockfile(step.file.path) ? 'LOCKFILE' : 'GENERATED' }}
-            </span>
-            <span
-              v-else
-              class="rounded-md border px-1.5 py-0.5 font-mono text-[10px] font-semibold"
-              :class="LAYER_META[step.layer].badgeClass"
-            >
-              {{ LAYER_META[step.layer].shortLabel }}
-            </span>
-            <span
-              class="rounded-md border px-1.5 py-0.5 font-mono text-[10px] uppercase"
-              :class="statusBadgeClass(step.file.status)"
-            >
-              {{ step.file.status }}
-            </span>
-            <h1 class="truncate font-mono text-sm font-semibold text-ink" :title="step.file.path">
-              {{ step.file.path }}
-            </h1>
+              v-if="splitFilePath.dir"
+              class="min-w-0 truncate font-normal text-ink-muted"
+            >{{ splitFilePath.dir }}</span>
+            <span class="shrink-0 font-semibold text-ink">{{ splitFilePath.name }}</span>
+          </h1>
+          <div
+            class="flex shrink-0 items-center gap-1 transition-opacity duration-150"
+            :class="
+              copiedState !== null
+                ? 'opacity-100'
+                : 'opacity-0 group-hover/path:opacity-100 group-focus-within/path:opacity-100'
+            "
+          >
             <button
               type="button"
               class="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-canvas px-1.5 py-0.5 text-[10px] text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
@@ -1849,25 +1885,53 @@ function statusBadgeClass(status: string): string {
               <span v-if="copiedState === 'permalink'" class="text-pine-text">Copied</span>
             </button>
           </div>
-
-          <div
-            v-if="step.file.status === 'renamed' && step.file.previousPath"
-            class="flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-ochre-text"
-          >
-            <span class="font-sans text-ink-muted">Renamed from</span>
-            <span class="rounded bg-ochre-soft px-1.5 py-0.5">{{ step.file.previousPath }}</span>
-            <ArrowRight class="h-3 w-3 shrink-0 text-ink-faint" />
-            <span class="rounded bg-canvas-elevated px-1.5 py-0.5 text-ink">{{ step.file.path }}</span>
-          </div>
-
-          <p class="text-xs text-ink-muted">
-            {{ step.reason }}
-          </p>
-
-          <FileCommitsBar :path="step.file.path" :step-index="step.stepIndex" />
         </div>
 
-        <div class="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          :title="
+            review.isStepReviewed(step.file.path)
+              ? 'Mark as unreviewed (M)'
+              : 'Mark as reviewed (M)'
+          "
+          class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors"
+          :class="
+            review.isStepReviewed(step.file.path)
+              ? 'border-pine-border bg-pine-soft text-pine-text'
+              : 'border-border bg-canvas text-ink-secondary hover:bg-canvas-elevated'
+          "
+          @click="review.toggleReviewed(step.file.path)"
+        >
+          <CheckCircle2 class="h-3.5 w-3.5" />
+          <span>{{ review.isStepReviewed(step.file.path) ? 'Reviewed' : 'Mark Reviewed' }}</span>
+        </button>
+      </div>
+
+      <!-- Context: Rename info & Step Reason -->
+      <div
+        v-if="(step.file.status === 'renamed' && step.file.previousPath) || step.reason"
+        class="mt-1.5 space-y-1"
+      >
+        <div
+          v-if="step.file.status === 'renamed' && step.file.previousPath"
+          class="flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-ochre-text"
+        >
+          <span class="font-sans text-ink-muted">Renamed from</span>
+          <span class="rounded bg-ochre-soft px-1.5 py-0.5">{{ step.file.previousPath }}</span>
+          <ArrowRight class="h-3 w-3 shrink-0 text-ink-faint" />
+          <span class="rounded bg-canvas-elevated px-1.5 py-0.5 text-ink">{{ step.file.path }}</span>
+        </div>
+
+        <p v-if="step.reason" class="text-xs text-ink-muted">
+          {{ step.reason }}
+        </p>
+      </div>
+
+      <!-- Tier 2: Dedicated Action Bar -->
+      <div class="mt-3 border-t border-border/70 pt-2.5">
+        <FileCommitsBar :path="step.file.path" :step-index="step.stepIndex">
+          <template #actions>
+            <div class="ml-auto flex flex-wrap items-center gap-2">
           <div class="font-mono text-xs">
             <span class="text-diff-add-text">+{{ step.file.additions }}</span>
             <span class="mx-1 text-ink-faint">/</span>
@@ -1964,26 +2028,9 @@ function statusBadgeClass(status: string): string {
             <MessageSquarePlus class="h-3 w-3" />
             <span class="hidden sm:inline">File comment</span>
           </button>
-
-          <button
-            type="button"
-            :title="
-              review.isStepReviewed(step.file.path)
-                ? 'Mark as unreviewed (M)'
-                : 'Mark as reviewed (M)'
-            "
-            class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors"
-            :class="
-              review.isStepReviewed(step.file.path)
-                ? 'border-pine-border bg-pine-soft text-pine-text'
-                : 'border-border bg-canvas text-ink-secondary hover:bg-canvas-elevated'
-            "
-            @click="review.toggleReviewed(step.file.path)"
-          >
-            <CheckCircle2 class="h-3.5 w-3.5" />
-            <span>{{ review.isStepReviewed(step.file.path) ? 'Reviewed' : 'Mark Reviewed' }}</span>
-          </button>
-        </div>
+            </div>
+          </template>
+        </FileCommitsBar>
       </div>
     </div>
 
