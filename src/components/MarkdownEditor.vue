@@ -1,6 +1,25 @@
 <script setup lang="ts">
+import {
+  Bold,
+  Code,
+  Italic,
+  Link,
+  List,
+  ListOrdered,
+  ListTodo,
+  Quote,
+  SquareCode,
+  Strikethrough,
+} from '@lucide/vue'
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useCommentAutocomplete } from '@/composables/useCommentAutocomplete'
+import {
+  applyMarkdownFormat,
+  computeTextDiff,
+  formatPastedLink,
+  type MarkdownFormatAction,
+} from '@/services/markdownFormat'
+import { formatShortcut, isModKey } from '@/services/shortcuts'
 import CommentAutocompletePopover from './CommentAutocompletePopover.vue'
 import MarkdownContent from './MarkdownContent.vue'
 
@@ -71,9 +90,90 @@ function onTextareaClick() {
   }
 }
 
+async function applyFormatResult(
+  text: string,
+  selectionStart: number,
+  selectionEnd: number,
+) {
+  const el = textareaRef.value
+  if (el && typeof document !== 'undefined' && typeof document.execCommand === 'function') {
+    const before = el.value
+    if (before !== text) {
+      const { start, end, replacement } = computeTextDiff(before, text)
+      el.focus()
+      el.setSelectionRange(start, end)
+      const ok = replacement
+        ? document.execCommand('insertText', false, replacement)
+        : document.execCommand('delete', false)
+      if (ok && el.value === text) {
+        el.setSelectionRange(selectionStart, selectionEnd)
+        await nextTick()
+        el.setSelectionRange(selectionStart, selectionEnd)
+        if (props.autocomplete) {
+          autocompleteCtrl.onInputOrCursor()
+        }
+        return
+      }
+    }
+  }
+
+  modelValue.value = text
+  emit('input', text)
+  await nextTick()
+  const updatedEl = textareaRef.value
+  if (!updatedEl) return
+  updatedEl.focus()
+  updatedEl.setSelectionRange(selectionStart, selectionEnd)
+  if (props.autocomplete) {
+    autocompleteCtrl.onInputOrCursor()
+  }
+}
+
+function handleFormat(action: MarkdownFormatAction) {
+  const el = textareaRef.value
+  const current = modelValue.value
+  const start = el ? el.selectionStart : current.length
+  const end = el ? el.selectionEnd : current.length
+  const result = applyMarkdownFormat(current, action, start, end)
+  void applyFormatResult(result.text, result.selectionStart, result.selectionEnd)
+}
+
+function onTextareaPaste(e: ClipboardEvent) {
+  const pastedText = e.clipboardData?.getData('text/plain')
+  if (!pastedText) return
+  const el = textareaRef.value
+  if (!el) return
+  const result = formatPastedLink(
+    modelValue.value,
+    pastedText,
+    el.selectionStart,
+    el.selectionEnd,
+  )
+  if (!result) return
+  e.preventDefault()
+  void applyFormatResult(result.text, result.selectionStart, result.selectionEnd)
+}
+
+const FORMAT_SHORTCUTS: Record<string, MarkdownFormatAction> = {
+  b: 'bold',
+  i: 'italic',
+  e: 'code',
+  k: 'link',
+}
+
 function onTextareaKeydown(e: KeyboardEvent) {
   if (props.autocomplete && autocompleteCtrl.handleKeydown(e)) {
     e.stopPropagation()
+    return
+  }
+
+  if (!e.shiftKey && !e.altKey && isModKey(e)) {
+    const action = FORMAT_SHORTCUTS[e.key.toLowerCase()]
+    if (action) {
+      e.preventDefault()
+      e.stopPropagation()
+      handleFormat(action)
+    }
   }
 }
 
@@ -169,6 +269,105 @@ defineExpose({
             Preview
           </button>
         </div>
+        <div
+          v-if="!preview"
+          class="inline-flex flex-wrap items-center gap-0.5 rounded-md border border-border bg-canvas px-1 py-0.5"
+          role="toolbar"
+          aria-label="Formatting toolbar"
+        >
+          <button
+            type="button"
+            class="rounded p-1 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+            :title="`Bold (${formatShortcut('Mod+B')})`"
+            aria-label="Bold"
+            @click="handleFormat('bold')"
+          >
+            <Bold class="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            class="rounded p-1 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+            :title="`Italic (${formatShortcut('Mod+I')})`"
+            aria-label="Italic"
+            @click="handleFormat('italic')"
+          >
+            <Italic class="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            class="rounded p-1 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+            title="Strikethrough"
+            aria-label="Strikethrough"
+            @click="handleFormat('strikethrough')"
+          >
+            <Strikethrough class="h-3 w-3" />
+          </button>
+          <span class="mx-0.5 h-3 w-px bg-border" aria-hidden="true" />
+          <button
+            type="button"
+            class="rounded p-1 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+            :title="`Inline code (${formatShortcut('Mod+E')})`"
+            aria-label="Inline code"
+            @click="handleFormat('code')"
+          >
+            <Code class="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            class="rounded p-1 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+            title="Code block"
+            aria-label="Code block"
+            @click="handleFormat('codeBlock')"
+          >
+            <SquareCode class="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            class="rounded p-1 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+            :title="`Link (${formatShortcut('Mod+K')})`"
+            aria-label="Link"
+            @click="handleFormat('link')"
+          >
+            <Link class="h-3 w-3" />
+          </button>
+          <span class="mx-0.5 h-3 w-px bg-border" aria-hidden="true" />
+          <button
+            type="button"
+            class="rounded p-1 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+            title="Quote"
+            aria-label="Quote"
+            @click="handleFormat('quote')"
+          >
+            <Quote class="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            class="rounded p-1 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+            title="Bulleted list"
+            aria-label="Bulleted list"
+            @click="handleFormat('bulletList')"
+          >
+            <List class="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            class="rounded p-1 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+            title="Numbered list"
+            aria-label="Numbered list"
+            @click="handleFormat('numberedList')"
+          >
+            <ListOrdered class="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            class="rounded p-1 text-ink-muted transition-colors hover:bg-canvas-elevated hover:text-ink"
+            title="Task list"
+            aria-label="Task list"
+            @click="handleFormat('taskList')"
+          >
+            <ListTodo class="h-3 w-3" />
+          </button>
+        </div>
         <slot name="header-actions" />
       </div>
       <slot name="header-right" />
@@ -200,6 +399,7 @@ defineExpose({
       :class="[resolvedMinHeightClass, props.textareaClass]"
       @input="onTextareaInput"
       @click="onTextareaClick"
+      @paste="onTextareaPaste"
       @keydown="onTextareaKeydown"
       @blur="onTextareaBlur"
     />
