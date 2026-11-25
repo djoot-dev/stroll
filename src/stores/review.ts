@@ -407,6 +407,11 @@ export const useReviewStore = defineStore('review', () => {
     zenMode.value = false
     prError.value = null
     screen.value = 'inbox'
+
+    const auth = useAuthStore()
+    if (auth.isAuthenticated && !auth.isLoading) {
+      void auth.refreshRequestedPRs()
+    }
   }
 
   function toggleZenMode(value?: boolean): void {

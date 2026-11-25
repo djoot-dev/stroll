@@ -1342,4 +1342,27 @@ describe('useReviewStore incremental re-review (since last review)', () => {
     await store.loadMockPR()
     expect(store.showTourCompleteBanner).toBe(false)
   })
+
+  it('refreshes the PR inbox immediately on backToInbox when authenticated and idle', () => {
+    const auth = useAuthStore()
+    const refreshSpy = vi.spyOn(auth, 'refreshRequestedPRs').mockResolvedValue(undefined)
+    const store = useReviewStore()
+
+    // Unauthenticated: does not refresh
+    store.backToInbox()
+    expect(store.screen).toBe('inbox')
+    expect(refreshSpy).not.toHaveBeenCalled()
+
+    // Authenticated & already loading: does not trigger a duplicate refresh
+    auth.pat = 'ghp_test_token'
+    auth.viewer = { login: 'octocat', avatarUrl: '' }
+    auth.isLoading = true
+    store.backToInbox()
+    expect(refreshSpy).not.toHaveBeenCalled()
+
+    // Authenticated & idle: triggers an immediate inbox refresh
+    auth.isLoading = false
+    store.backToInbox()
+    expect(refreshSpy).toHaveBeenCalledTimes(1)
+  })
 })

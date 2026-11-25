@@ -2,10 +2,8 @@
 import { AlertTriangle, ArrowLeft, CheckCircle2, ExternalLink, MessageSquare, Pause } from '@lucide/vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { openExternalUrl } from '@/services/native'
-import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 
-const auth = useAuthStore()
 const review = useReviewStore()
 
 const progress = ref(0)
@@ -29,9 +27,6 @@ function clearTimers() {
 function goToInboxNow() {
   clearTimers()
   review.backToInbox()
-  if (auth.isAuthenticated) {
-    void auth.refreshRequestedPRs()
-  }
 }
 
 function pauseRedirect() {
