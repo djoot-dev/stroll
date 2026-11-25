@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { DiffLine } from '../diffParser'
+import type { DiffTokenPart } from '../inlineDiff'
 import {
+  applySearchMatchRanges,
   buildMatchSnippet,
   computeCenteredRevealDelta,
   findDiffMatches,
+  findLineMatchRanges,
   pickStartMatchIndex,
 } from '../diffSearch'
 
@@ -80,5 +83,96 @@ describe('buildMatchSnippet', () => {
     expect(snip.before.startsWith('…')).toBe(true)
     expect(snip.after.endsWith('…')).toBe(true)
     expect(snip.before.length + snip.match.length + snip.after.length).toBeLessThanOrEqual(62)
+  })
+})
+
+describe('findLineMatchRanges', () => {
+  it('finds all non-overlapping case-insensitive occurrences on a line', () => {
+    expect(findLineMatchRanges('  return foo + FOO + foobar', 'foo')).toEqual([
+      { start: 9, end: 12 },
+      { start: 15, end: 18 },
+      { start: 21, end: 24 },
+    ])
+  })
+
+  it('does not produce overlapping matches', () => {
+    expect(findLineMatchRanges('aaaa', 'aa')).toEqual([
+      { start: 0, end: 2 },
+      { start: 2, end: 4 },
+    ])
+  })
+
+  it('returns empty array for blank query', () => {
+    expect(findLineMatchRanges('const foo = 1', '   ')).toEqual([])
+  })
+})
+
+describe('applySearchMatchRanges', () => {
+  function part(text: string, overrides: Partial<DiffTokenPart> = {}): DiffTokenPart {
+    return {
+      text,
+      className: 'syn-var',
+      ident: null,
+      changed: false,
+      changeStart: false,
+      changeEnd: false,
+      ...overrides,
+    }
+  }
+
+  it('splits a single token around multiple matches while preserving ident and change flags', () => {
+    const parts = [
+      part('fooBar_foo', { ident: 'fooBar_foo', changed: true, changeStart: true, changeEnd: true }),
+    ]
+    const ranges = findLineMatchRanges('fooBar_foo', 'foo')
+    const result = applySearchMatchRanges(parts, ranges)
+
+    expect(result).toEqual([
+      {
+        text: 'foo',
+        className: 'syn-var',
+        ident: 'fooBar_foo',
+        changed: true,
+        changeStart: true,
+        changeEnd: false,
+        searchMatch: true,
+        matchStart: true,
+        matchEnd: true,
+      },
+      {
+        text: 'Bar_',
+        className: 'syn-var',
+        ident: 'fooBar_foo',
+        changed: true,
+        changeStart: false,
+        changeEnd: false,
+        searchMatch: false,
+        matchStart: false,
+        matchEnd: false,
+      },
+      {
+        text: 'foo',
+        className: 'syn-var',
+        ident: 'fooBar_foo',
+        changed: true,
+        changeStart: false,
+        changeEnd: true,
+        searchMatch: true,
+        matchStart: true,
+        matchEnd: true,
+      },
+    ])
+  })
+
+  it('spans a single match across multiple syntax tokens with continuous start/end flags', () => {
+    const parts = [part('foo'), part('.'), part('bar')]
+    const ranges = findLineMatchRanges('foo.bar', 'foo.bar')
+    const result = applySearchMatchRanges(parts, ranges)
+
+    expect(result.map((p) => ({ text: p.text, m: p.searchMatch, s: p.matchStart, e: p.matchEnd }))).toEqual([
+      { text: 'foo', m: true, s: true, e: false },
+      { text: '.', m: true, s: false, e: false },
+      { text: 'bar', m: true, s: false, e: true },
+    ])
   })
 })

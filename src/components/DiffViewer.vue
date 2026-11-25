@@ -54,9 +54,13 @@ import {
 } from '@/services/markdownDiff'
 import { formatMovedBadgeLabel, type MovedLineInfo } from '@/services/movedCode'
 import {
+  applySearchMatchRanges,
   computeCenteredRevealDelta,
   findDiffMatches,
+  findLineMatchRanges,
   pickStartMatchIndex,
+  type SearchMatchRange,
+  type SearchTokenPart,
 } from '@/services/diffSearch'
 import {
   fetchFileBlobDataUrl,
@@ -567,6 +571,7 @@ function measureSplitOverflow() {
 // moves the page: the first match is the one nearest the reader's position,
 // and the diff only scrolls when the active match is off-screen.
 const diffSurfaceRef = ref<HTMLElement | null>(null)
+const unifiedScrollRef = ref<HTMLElement | null>(null)
 const searchPaletteRef = ref<InstanceType<typeof DiffSearchPalette> | null>(null)
 const searchOpen = ref(false)
 const searchQuery = ref('')
@@ -683,6 +688,39 @@ async function revealActiveMatch() {
     visibleBottom,
   })
   if (delta !== 0) searchSession.scroller.scrollBy({ top: delta, behavior: 'smooth' })
+
+  if (!settings.wrapLines) {
+    const matchEl = row.querySelector<HTMLElement>('[data-search-match]')
+    if (matchEl) {
+      const matchRect = matchEl.getBoundingClientRect()
+      const pre = row.querySelector<HTMLPreElement>('pre[data-split-side]')
+      if (pre) {
+        const side = pre.dataset.splitSide as 'left' | 'right'
+        const preRect = pre.getBoundingClientRect()
+        const dx = computeCenteredRevealDelta({
+          itemTop: matchRect.left,
+          itemBottom: matchRect.right,
+          visibleTop: preRect.left + 12,
+          visibleBottom: preRect.right - 12,
+        })
+        if (dx !== 0 && pre.scrollWidth > pre.clientWidth) {
+          const nextLeft = Math.max(0, Math.min(pre.scrollWidth - pre.clientWidth, pre.scrollLeft + dx))
+          const track = side === 'left' ? splitLeftTrackRef.value : splitRightTrackRef.value
+          if (track) track.scrollLeft = nextLeft
+          syncSplitSideScroll(side, nextLeft)
+        }
+      } else if (unifiedScrollRef.value) {
+        const scrollerRect = unifiedScrollRef.value.getBoundingClientRect()
+        const dx = computeCenteredRevealDelta({
+          itemTop: matchRect.left,
+          itemBottom: matchRect.right,
+          visibleTop: scrollerRect.left + 16,
+          visibleBottom: scrollerRect.right - 16,
+        })
+        if (dx !== 0) unifiedScrollRef.value.scrollBy({ left: dx, behavior: 'smooth' })
+      }
+    }
+  }
 }
 
 watch(searchMatches, (matches) => {
@@ -912,11 +950,49 @@ const tokenizedByKey = computed(() => {
   return partMap
 })
 
-function inlineChangeClass(pt: DiffTokenPart, lineType: DiffLine['type']): string {
-  if (!pt.changed) return ''
+function inlineChangeClass(
+  pt: DiffTokenPart | SearchTokenPart,
+  lineType: DiffLine['type'],
+): string {
+  if (!pt.changed || ('searchMatch' in pt && pt.searchMatch)) return ''
   const classes = [lineType === 'add' ? 'bg-diff-add-word' : 'bg-diff-del-word']
   if (pt.changeStart) classes.push('rounded-l-[3px]')
   if (pt.changeEnd) classes.push('rounded-r-[3px]')
+  return classes.join(' ')
+}
+
+const searchMatchRangesByKey = computed(() => {
+  const map = new Map<string, SearchMatchRange[]>()
+  const q = searchQuery.value.trim()
+  if (!q || (!searchOpen.value && !lingerMatchKey.value)) return map
+  if (searchOpen.value) {
+    for (const m of searchMatches.value) {
+      const ranges = findLineMatchRanges(m.line.content, q)
+      if (ranges.length > 0) map.set(m.line.key, ranges)
+    }
+  } else if (lingerMatchKey.value) {
+    const line = allDiffLines.value.find((l) => l.key === lingerMatchKey.value)
+    if (line) {
+      const ranges = findLineMatchRanges(line.content, q)
+      if (ranges.length > 0) map.set(line.key, ranges)
+    }
+  }
+  return map
+})
+
+function lineTokenParts(line: DiffLine): readonly (DiffTokenPart | SearchTokenPart)[] {
+  const parts = tokenizedByKey.value.get(line.key) ?? []
+  const ranges = searchMatchRangesByKey.value.get(line.key)
+  if (!ranges || ranges.length === 0) return parts
+  return applySearchMatchRanges(parts, ranges)
+}
+
+function searchMatchClass(pt: DiffTokenPart | SearchTokenPart, lineKey: string): string {
+  if (!('searchMatch' in pt) || !pt.searchMatch) return ''
+  const isActive = activeMatchKey.value === lineKey
+  const classes = [isActive ? 'bg-terra/30 text-ink' : 'bg-ochre-border text-ink']
+  if (pt.matchStart) classes.push('rounded-l-[2px]')
+  if (pt.matchEnd) classes.push('rounded-r-[2px]')
   return classes.join(' ')
 }
 
@@ -2401,6 +2477,7 @@ function statusBadgeClass(status: string): string {
 
         <div
           v-else
+          ref="unifiedScrollRef"
           class="@container font-mono leading-[1.55]"
           :class="[
             settings.wrapLines || settings.diffViewMode === 'split'
@@ -2492,14 +2569,15 @@ function statusBadgeClass(status: string): string {
                               : 'overflow-x-hidden whitespace-pre'
                           "
                         ><template
-                          v-for="(pt, pIdx) in tokenizedByKey.get(cellLine.key)"
+                          v-for="(pt, pIdx) in lineTokenParts(cellLine)"
                           :key="pIdx"
                         ><span
                           v-if="pt.ident"
-                          :class="[pt.className, 'cursor-help hover:underline hover:decoration-terra hover:decoration-dotted']"
+                          :data-search-match="'searchMatch' in pt && pt.searchMatch ? '' : undefined"
+                          :class="[pt.className, searchMatchClass(pt, cellLine.key), 'cursor-help hover:underline hover:decoration-terra hover:decoration-dotted']"
                           @mouseenter="handleIdentMouseEnter($event, pt.ident, seg.lines, 0, cellLine)"
                           @mouseleave="handleIdentMouseLeave"
-                        >{{ pt.text }}</span><span v-else :class="pt.className">{{ pt.text }}</span></template></pre>
+                        >{{ pt.text }}</span><span v-else :data-search-match="'searchMatch' in pt && pt.searchMatch ? '' : undefined" :class="[pt.className, searchMatchClass(pt, cellLine.key)]">{{ pt.text }}</span></template></pre>
                       </template>
                     </div>
                   </div>
@@ -2637,14 +2715,15 @@ function statusBadgeClass(status: string): string {
                     class="flex-1 pr-4 text-ink"
                     :class="settings.wrapLines ? 'min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre'"
                   ><template
-                    v-for="(pt, pIdx) in tokenizedByKey.get(line.key)"
+                    v-for="(pt, pIdx) in lineTokenParts(line)"
                     :key="pIdx"
                   ><span
                     v-if="pt.ident"
-                    :class="[pt.className, 'cursor-help hover:underline hover:decoration-terra hover:decoration-dotted']"
+                    :data-search-match="'searchMatch' in pt && pt.searchMatch ? '' : undefined"
+                    :class="[pt.className, searchMatchClass(pt, line.key), 'cursor-help hover:underline hover:decoration-terra hover:decoration-dotted']"
                     @mouseenter="handleIdentMouseEnter($event, pt.ident, seg.lines, lIdx, line)"
                     @mouseleave="handleIdentMouseLeave"
-                  >{{ pt.text }}</span><span v-else :class="pt.className">{{ pt.text }}</span></template></pre>
+                  >{{ pt.text }}</span><span v-else :data-search-match="'searchMatch' in pt && pt.searchMatch ? '' : undefined" :class="[pt.className, searchMatchClass(pt, line.key)]">{{ pt.text }}</span></template></pre>
                 </div>
 
                 <!-- Existing GitHub Review Threads -->
@@ -2827,13 +2906,15 @@ function statusBadgeClass(status: string): string {
                             : 'overflow-x-hidden whitespace-pre'
                         "
                       ><template
-                        v-for="(pt, pIdx) in tokenizedByKey.get(cellLine.key)"
+                        v-for="(pt, pIdx) in lineTokenParts(cellLine)"
                         :key="pIdx"
                       ><span
                         v-if="pt.ident"
+                        :data-search-match="'searchMatch' in pt && pt.searchMatch ? '' : undefined"
                         :class="[
                           pt.className,
                           inlineChangeClass(pt, cellLine.type),
+                          searchMatchClass(pt, cellLine.key),
                           'cursor-help hover:underline hover:decoration-terra hover:decoration-dotted',
                         ]"
                         @mouseenter="
@@ -2848,7 +2929,12 @@ function statusBadgeClass(status: string): string {
                         @mouseleave="handleIdentMouseLeave"
                       >{{ pt.text }}</span><span
                         v-else
-                        :class="[pt.className, inlineChangeClass(pt, cellLine.type)]"
+                        :data-search-match="'searchMatch' in pt && pt.searchMatch ? '' : undefined"
+                        :class="[
+                          pt.className,
+                          inlineChangeClass(pt, cellLine.type),
+                          searchMatchClass(pt, cellLine.key),
+                        ]"
                       >{{ pt.text }}</span></template></pre>
                       <button
                         v-if="cellLine.moved?.isBlockStart && (cellLine.type === 'add' || cellLine.type === 'del')"
@@ -3009,20 +3095,27 @@ function statusBadgeClass(status: string): string {
                   class="flex-1 pr-4 text-ink"
                   :class="settings.wrapLines ? 'min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre'"
                 ><template
-                  v-for="(pt, pIdx) in tokenizedByKey.get(line.key)"
+                  v-for="(pt, pIdx) in lineTokenParts(line)"
                   :key="pIdx"
                 ><span
                   v-if="pt.ident"
+                  :data-search-match="'searchMatch' in pt && pt.searchMatch ? '' : undefined"
                   :class="[
                     pt.className,
                     inlineChangeClass(pt, line.type),
+                    searchMatchClass(pt, line.key),
                     'cursor-help hover:underline hover:decoration-terra hover:decoration-dotted',
                   ]"
                   @mouseenter="handleIdentMouseEnter($event, pt.ident, seg.lines, lIdx, line)"
                   @mouseleave="handleIdentMouseLeave"
                 >{{ pt.text }}</span><span
                   v-else
-                  :class="[pt.className, inlineChangeClass(pt, line.type)]"
+                  :data-search-match="'searchMatch' in pt && pt.searchMatch ? '' : undefined"
+                  :class="[
+                    pt.className,
+                    inlineChangeClass(pt, line.type),
+                    searchMatchClass(pt, line.key),
+                  ]"
                 >{{ pt.text }}</span></template></pre>
                 <button
                   v-if="line.moved?.isBlockStart && (line.type === 'add' || line.type === 'del')"
