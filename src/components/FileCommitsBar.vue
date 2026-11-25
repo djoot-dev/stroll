@@ -56,51 +56,74 @@ function filterToCommit(oid: string): void {
 </script>
 
 <template>
-  <div v-if="latest" class="pt-1 text-[11px]">
-    <div class="flex items-center gap-2">
-      <button
-        type="button"
-        :aria-expanded="expanded"
-        class="group flex min-w-0 flex-1 items-center gap-1.5 rounded-md text-left text-ink-muted transition-colors hover:text-ink"
-        :title="expanded ? 'Hide commits for this file' : 'Show commits that touched this file'"
-        @click="expanded = !expanded"
-      >
-        <GitCommitHorizontal class="h-3.5 w-3.5 shrink-0 text-ink-faint" />
-        <span class="shrink-0 text-[10.5px] text-ink-faint">File commits:</span>
-        <code class="shrink-0 rounded bg-canvas-elevated px-1 py-px font-mono text-[10.5px] text-terra-text">
-          {{ latest.shortOid }}
-        </code>
-        <span class="truncate font-medium text-ink-secondary group-hover:text-ink">
-          {{ latest.messageHeadline }}
-        </span>
-        <span class="hidden shrink-0 text-ink-faint sm:inline">
-          · {{ latest.authorName }} · {{ formatRelativeTime(latest.committedDate) }}
-        </span>
-        <span
-          v-if="moreCount > 0"
-          class="shrink-0 rounded-full border border-border bg-canvas px-1.5 font-mono text-[10px] text-ink-muted"
-        >
-          +{{ moreCount }}
-        </span>
-        <ChevronDown v-if="expanded" class="h-3 w-3 shrink-0 text-ink-faint" />
-        <ChevronRight v-else class="h-3 w-3 shrink-0 text-ink-faint" />
-      </button>
+  <div class="space-y-2.5">
+    <div class="flex flex-wrap items-center justify-between gap-2.5">
+      <div class="min-w-0 flex-1 text-[11px]">
+        <div v-if="latest" class="flex items-center gap-2">
+          <button
+            type="button"
+            :aria-expanded="expanded"
+            class="group flex min-w-0 flex-1 items-center gap-1.5 rounded-md text-left text-ink-muted transition-colors hover:text-ink"
+            :title="expanded ? 'Hide commits for this file' : 'Show commits that touched this file'"
+            @click="expanded = !expanded"
+          >
+            <GitCommitHorizontal class="h-3.5 w-3.5 shrink-0 text-ink-faint" />
+            <span class="shrink-0 text-[10.5px] text-ink-faint">File commits:</span>
+            <code class="shrink-0 rounded bg-canvas-elevated px-1 py-px font-mono text-[10.5px] text-terra-text">
+              {{ latest.shortOid }}
+            </code>
+            <span class="truncate font-medium text-ink-secondary group-hover:text-ink">
+              {{ latest.messageHeadline }}
+            </span>
+            <span class="hidden shrink-0 text-ink-faint sm:inline">
+              · {{ latest.authorName }} · {{ formatRelativeTime(latest.committedDate) }}
+            </span>
+            <span
+              v-if="moreCount > 0"
+              class="shrink-0 rounded-full border border-border bg-canvas px-1.5 font-mono text-[10px] text-ink-muted"
+            >
+              +{{ moreCount }}
+            </span>
+            <ChevronDown v-if="expanded" class="h-3 w-3 shrink-0 text-ink-faint" />
+            <ChevronRight v-else class="h-3 w-3 shrink-0 text-ink-faint" />
+          </button>
 
-      <button
-        v-if="!expanded && activeCommitInFile"
-        type="button"
-        class="inline-flex shrink-0 items-center gap-1 rounded border border-terra-border bg-terra-soft px-1.5 py-0.5 text-[10px] font-medium text-terra-text hover:bg-terra/15"
-        title="Tour is filtered to this commit. Click to clear."
-        @click="review.setCommitFilter('all')"
-      >
-        <Filter class="h-2.5 w-2.5" />
-        <span>{{ activeCommitInFile.shortOid }} ×</span>
-      </button>
+          <button
+            v-if="!expanded && activeCommitInFile"
+            type="button"
+            class="inline-flex shrink-0 items-center gap-1 rounded border border-terra-border bg-terra-soft px-1.5 py-0.5 text-[10px] font-medium text-terra-text hover:bg-terra/15"
+            title="Tour is filtered to this commit. Click to clear."
+            @click="review.setCommitFilter('all')"
+          >
+            <Filter class="h-2.5 w-2.5" />
+            <span>{{ activeCommitInFile.shortOid }} ×</span>
+          </button>
+        </div>
+        <div v-else-if="isLoading" class="flex items-center gap-1.5 text-[11px] text-ink-faint">
+          <Loader2 class="h-3 w-3 animate-spin" />
+          Loading commits…
+        </div>
+        <div
+          v-else-if="review.fileCommitsError && !commits"
+          class="flex items-center gap-2 text-[11px] text-ink-faint"
+        >
+          <span :title="review.fileCommitsError">Couldn't load commits for this file.</span>
+          <button
+            type="button"
+            class="font-medium text-terra-text hover:underline"
+            @click="review.ensureFileCommitsForStep(stepIndex)"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+
+      <slot name="actions" />
     </div>
 
     <ul
-      v-if="expanded"
-      class="mt-2 divide-y divide-border-muted overflow-hidden rounded-lg border border-border-muted bg-canvas"
+      v-if="latest && expanded"
+      class="divide-y divide-border-muted overflow-hidden rounded-xl border border-border-muted bg-canvas text-[11px]"
     >
       <li v-for="commit in commits" :key="commit.oid" class="space-y-1 px-3 py-2">
         <div class="flex min-w-0 items-center gap-2">
@@ -146,22 +169,5 @@ function filterToCommit(oid: string): void {
         >{{ commit.messageBody.trim() }}</p>
       </li>
     </ul>
-  </div>
-  <div v-else-if="isLoading" class="flex items-center gap-1.5 pt-1 text-[11px] text-ink-faint">
-    <Loader2 class="h-3 w-3 animate-spin" />
-    Loading commits…
-  </div>
-  <div
-    v-else-if="review.fileCommitsError && !commits"
-    class="flex items-center gap-2 pt-1 text-[11px] text-ink-faint"
-  >
-    <span :title="review.fileCommitsError">Couldn't load commits for this file.</span>
-    <button
-      type="button"
-      class="font-medium text-terra-text hover:underline"
-      @click="review.ensureFileCommitsForStep(stepIndex)"
-    >
-      Retry
-    </button>
   </div>
 </template>
