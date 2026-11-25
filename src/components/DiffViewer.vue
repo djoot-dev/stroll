@@ -1203,9 +1203,13 @@ function handleExpandSnippet(maxLines: number) {
   }
 }
 
-function handleJumpFromPopover(path: string) {
+function handleJumpFromPopover(path: string, line?: number) {
   closePopoverImmediately()
-  review.goToFile(path)
+  if (line != null && line > 0) {
+    review.goToFileLine(path, line)
+  } else {
+    review.goToFile(path)
+  }
 }
 
 function getOriginalLinesForRange(
@@ -1505,7 +1509,7 @@ async function jumpFromHunkToPreview(seg: DiffSegment) {
 async function revealFocusedLine() {
   const target = review.focusedLine
   if (!target || target.path !== props.step.file.path) return
-  if (allDiffLines.value.length === 0) return
+  if (allDiffLines.value.length === 0 || !diffSurfaceRef.value) return
 
   const revealed = await scrollToSourceLine(target.line, target.side)
   if (!revealed || review.focusedLine?.path !== target.path) {
@@ -1578,6 +1582,8 @@ onMounted(() => {
     })
     compactHeaderResizeObserver.observe(compactHeaderRef.value)
   }
+
+  void revealFocusedLine()
 })
 
 onBeforeUnmount(() => {
