@@ -341,4 +341,38 @@ describe('PRInboxView toolbar filter and sort dropdowns', () => {
     expect(stopPropagation).toHaveBeenCalled()
     expect(repoBtn.props['aria-expanded']).toBe(false)
   })
+
+  it('shows offline banner while keeping PRs visible and responds to offline/online events', async () => {
+    const { root } = mountInbox()
+    const auth = useAuthStore()
+    await nextTick()
+
+    for (const entry of listeners.get('offline') ?? []) {
+      entry.fn({})
+    }
+    await nextTick()
+
+    expect(auth.isOffline).toBe(true)
+    const alert = findNodes(root, (n) => n.props.role === 'alert')[0]
+    expect(alert).toBeDefined()
+    expect(collectText(alert)).toContain('No internet connection')
+    expect(collectText(alert)).toContain('Showing last loaded PRs')
+    expect(collectText(root)).toContain('Small PR')
+    expect(collectText(root)).toContain('Large PR')
+  })
+
+  it('shows offline recovery card instead of onboarding when PAT is saved but unverified', async () => {
+    const { root } = mountInbox()
+    const auth = useAuthStore()
+    auth.viewer = null
+    auth.requestedPRs = []
+    auth.isOffline = true
+    auth.error = 'No internet connection — unable to reach GitHub.'
+    await nextTick()
+
+    const text = collectText(root)
+    expect(text).toContain('You are currently offline')
+    expect(text).toContain('Retry Connection')
+    expect(text).not.toContain('Connect GitHub to see PRs awaiting your review')
+  })
 })
